@@ -1,0 +1,174 @@
+{
+  "cleaned_set": [],
+  "inprog_set": [],
+  "loaded_set": [
+    57
+  ],
+  "off_set": [],
+  "off_notes": {},
+  "shop_set": [],
+  "shop_notes": {},
+  "shop_spares": {},
+  "shop_prev_status": {},
+  "shop_notice_ts": null,
+  "shop_notice_log": [
+    {
+      "ts": 1770788743.2182806,
+      "msg": "Ran special: #89 needs unload — test",
+      "kind": "shop",
+      "type": "ran_special",
+      "truck": 89
+    }
+  ],
+  "special_set": [],
+  "out_of_service_list": [
+    4
+  ],
+  "sup_notes_global": {},
+  "sup_notes_daily": {},
+  "wearers": {},
+  "batches": {
+    "1": {
+      "trucks": [],
+      "total": 0
+    },
+    "2": {
+      "trucks": [],
+      "total": 0
+    },
+    "3": {
+      "trucks": [],
+      "total": 0
+    },
+    "4": {
+      "trucks": [],
+      "total": 0
+    },
+    "5": {
+      "trucks": [],
+      "total": 0
+    },
+    "6": {
+      "trucks": [],
+      "total": 0
+    }
+  },
+  "pending_batch_truck": null,
+  "pending_batch_wearers": 0,
+  "unload_inprog_truck": null,
+  "unload_inprog_start_time": null,
+  "unload_inprog_wearers": 0,
+  "unload_durations": {},
+  "setup_done": true,
+  "run_date": "2026-02-05",
+  "run_date_key": "2026-02-05",
+  "last_setup_date": "2026-02-11",
+  "ship_dates": [
+    "2026-02-06"
+  ],
+  "active_screen": "SUPERVISOR",
+  "shorts_truck": 57,
+  "selected_truck": 4,
+  "next_up_truck": null,
+  "next_after_truck": null,
+  "next_up_return_screen": null,
+  "last_requested_page": "SUPERVISOR",
+  "nav_seq": 836,
+  "last_screen_for_history": "SUPERVISOR",
+  "last_nav_seen": 836,
+  "sup_manage_pref_action": null,
+  "inprog_start_time": null,
+  "break_start_time": null,
+  "break_duration": 1800,
+  "break_used": true,
+  "load_durations": {
+    "73": 174,
+    "57": 74,
+    "4": 3
+  },
+  "load_start_times": {
+    "73": 1770799615.6855583,
+    "57": 1770800381.6632204,
+    "4": 1770800782.3553152
+  },
+  "load_finish_times": {
+    "73": 1770799790.6079133,
+    "57": 1770800455.763542,
+    "4": 1770800786.2153263
+  },
+  "shorts": {
+    "57": [
+      {
+        "item": "3x5 - Black",
+        "qty": 1,
+        "note": ""
+      },
+      {
+        "item": "4x6 - Brown",
+        "qty": 1,
+        "note": ""
+      }
+    ],
+    "73": [
+      {
+        "item": "None",
+        "qty": null,
+        "note": ""
+      }
+    ]
+  },
+  "shorts_initials": {
+    "57": "nv"
+  },
+  "shorts_initials_ts": {
+    "57": "2026-02-11T04:00:55.761998-05:00"
+  },
+  "shorts_initials_history": {
+    "57": [
+      {
+        "initials": "nv",
+        "ts": "2026-02-11T04:00:55.761998-05:00"
+      }
+    ]
+  },
+  "shorts_button_state": {
+    "57": {
+      "step": "category",
+      "category": null,
+      "bulk_group": null,
+      "item": null,
+      "qty": 1
+    }
+  },
+  "shorts_mode": "Disable (manual input)",
+  "shorts_disabled": true,
+  "batching_disabled": true,
+  "warn_seconds": 900,
+  "timezone_key": "America/New_York",
+  "ui_theme": "Dark",
+  "activity_log": [
+    "2/10 11:52 PM - Start loading Truck 4",
+    "2/11 12:24 AM - Start loading Truck 4",
+    "2/11 12:44 AM - Start loading Truck 4",
+    "2/11 12:45 AM - Truck 89 ran special (needs unload)",
+    "2/11 12:53 AM - Start loading Truck 7",
+    "2/11 12:58 AM - Start loading Truck 4",
+    "2/11 03:46 AM - Start loading Truck 73",
+    "2/11 03:59 AM - Start loading Truck 57",
+    "2/11 04:00 AM - Shorts saved for Truck 57 (2 items)",
+    "2/11 04:06 AM - Start loading Truck 4"
+  ],
+  "extra_fleet": [
+    4
+  ],
+  "removed_fleet": [],
+  "off_schedule": {
+    "1": [],
+    "2": [],
+    "3": [],
+    "4": [],
+    "5": []
+  },
+  "inprog_last_tick": 0.0,
+  "hide_shop_notice": false
+}

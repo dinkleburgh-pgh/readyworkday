@@ -1,0 +1,661 @@
+2026-02-14 16:44:08,179 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 16:44:08,209 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 16:44:08,209 [INFO] save_state() called
+2026-02-14 17:05:35,901 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:35,906 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:35,906 [INFO] save_state() called
+2026-02-14 17:05:44,452 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:44,455 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:44,455 [INFO] save_state() called
+2026-02-14 17:05:44,467 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:44,467 [INFO] save_state() called
+2026-02-14 17:05:44,485 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:44,487 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:05:44,487 [INFO] save_state() called
+2026-02-14 17:10:35,680 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:35,683 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:35,683 [INFO] save_state() called
+2026-02-14 17:10:35,691 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:35,691 [INFO] save_state() called
+2026-02-14 17:10:35,711 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:35,713 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:35,713 [INFO] save_state() called
+2026-02-14 17:10:37,015 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:37,018 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:37,018 [INFO] save_state() called
+2026-02-14 17:10:37,052 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:37,054 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:37,054 [INFO] save_state() called
+2026-02-14 17:10:38,404 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:38,406 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:38,406 [INFO] save_state() called
+2026-02-14 17:10:38,438 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:38,440 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:38,440 [INFO] save_state() called
+2026-02-14 17:10:39,466 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:39,469 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:39,469 [INFO] save_state() called
+2026-02-14 17:10:39,501 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:39,503 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:39,503 [INFO] save_state() called
+2026-02-14 17:10:40,653 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:40,656 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:40,656 [INFO] save_state() called
+2026-02-14 17:10:40,688 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:40,691 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:40,691 [INFO] save_state() called
+2026-02-14 17:10:41,551 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:41,554 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:41,555 [INFO] save_state() called
+2026-02-14 17:10:41,589 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:41,592 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:10:41,592 [INFO] save_state() called
+2026-02-14 17:11:28,700 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:28,706 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:28,707 [INFO] save_state() called
+2026-02-14 17:11:31,555 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:31,558 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:31,558 [INFO] save_state() called
+2026-02-14 17:11:31,591 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:31,593 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:31,593 [INFO] save_state() called
+2026-02-14 17:11:41,888 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:41,894 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:41,894 [INFO] save_state() called
+2026-02-14 17:11:43,263 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:43,265 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:43,265 [INFO] save_state() called
+2026-02-14 17:11:43,298 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:43,302 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:11:43,302 [INFO] save_state() called
+2026-02-14 17:12:30,987 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:30,993 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:30,993 [INFO] save_state() called
+2026-02-14 17:12:32,510 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:32,512 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:32,512 [INFO] save_state() called
+2026-02-14 17:12:32,544 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:32,547 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:32,547 [INFO] save_state() called
+2026-02-14 17:12:53,831 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:53,836 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:53,837 [INFO] save_state() called
+2026-02-14 17:12:55,252 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:55,254 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:55,254 [INFO] save_state() called
+2026-02-14 17:12:55,288 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:55,291 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:12:55,291 [INFO] save_state() called
+2026-02-14 17:13:32,850 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:32,858 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:32,858 [INFO] save_state() called
+2026-02-14 17:13:36,898 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:36,900 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:36,900 [INFO] save_state() called
+2026-02-14 17:13:36,907 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:36,907 [INFO] save_state() called
+2026-02-14 17:13:36,924 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:36,926 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:36,926 [INFO] save_state() called
+2026-02-14 17:13:37,824 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:37,827 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:37,827 [INFO] save_state() called
+2026-02-14 17:13:37,843 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:37,843 [INFO] save_state() called
+2026-02-14 17:13:37,861 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:37,863 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:37,864 [INFO] save_state() called
+2026-02-14 17:13:40,352 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:40,355 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:40,355 [INFO] save_state() called
+2026-02-14 17:13:40,361 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:40,362 [INFO] save_state() called
+2026-02-14 17:13:40,377 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:40,379 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:40,379 [INFO] save_state() called
+2026-02-14 17:13:41,279 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:41,286 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:41,286 [INFO] save_state() called
+2026-02-14 17:13:41,321 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:41,324 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:13:41,324 [INFO] save_state() called
+2026-02-14 17:14:12,748 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:12,754 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:12,754 [INFO] save_state() called
+2026-02-14 17:14:14,669 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:14,671 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:14,671 [INFO] save_state() called
+2026-02-14 17:14:14,703 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:14,705 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:14,705 [INFO] save_state() called
+2026-02-14 17:14:16,881 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:16,883 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:16,883 [INFO] save_state() called
+2026-02-14 17:14:16,916 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:16,919 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:16,919 [INFO] save_state() called
+2026-02-14 17:14:27,317 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:27,321 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:27,321 [INFO] save_state() called
+2026-02-14 17:14:29,037 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:29,039 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:29,039 [INFO] save_state() called
+2026-02-14 17:14:29,066 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:29,069 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:29,069 [INFO] save_state() called
+2026-02-14 17:14:30,117 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:30,119 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:30,119 [INFO] save_state() called
+2026-02-14 17:14:30,149 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:30,151 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:30,151 [INFO] save_state() called
+2026-02-14 17:14:31,868 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:31,870 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:31,870 [INFO] save_state() called
+2026-02-14 17:14:31,898 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:31,900 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:14:31,900 [INFO] save_state() called
+2026-02-14 17:19:36,543 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:36,545 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:36,546 [INFO] save_state() called
+2026-02-14 17:19:36,556 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:36,556 [INFO] save_state() called
+2026-02-14 17:19:36,577 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:36,579 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:36,579 [INFO] save_state() called
+2026-02-14 17:19:41,544 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:41,546 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:41,546 [INFO] save_state() called
+2026-02-14 17:19:41,556 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:41,556 [INFO] save_state() called
+2026-02-14 17:19:41,575 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:41,577 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:41,578 [INFO] save_state() called
+2026-02-14 17:19:44,235 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:44,237 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:44,237 [INFO] save_state() called
+2026-02-14 17:19:44,251 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:44,251 [INFO] save_state() called
+2026-02-14 17:19:44,266 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:44,269 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:44,269 [INFO] save_state() called
+2026-02-14 17:19:45,758 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:45,759 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:45,760 [INFO] save_state() called
+2026-02-14 17:19:45,775 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:45,775 [INFO] save_state() called
+2026-02-14 17:19:45,794 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:45,796 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:45,797 [INFO] save_state() called
+2026-02-14 17:19:46,811 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:46,813 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:46,813 [INFO] save_state() called
+2026-02-14 17:19:46,827 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:46,827 [INFO] save_state() called
+2026-02-14 17:19:46,843 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:46,846 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:46,846 [INFO] save_state() called
+2026-02-14 17:19:47,684 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:47,686 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:47,687 [INFO] save_state() called
+2026-02-14 17:19:47,701 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:47,702 [INFO] save_state() called
+2026-02-14 17:19:47,717 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:47,720 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:47,720 [INFO] save_state() called
+2026-02-14 17:19:48,377 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:48,379 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:48,379 [INFO] save_state() called
+2026-02-14 17:19:48,393 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:48,393 [INFO] save_state() called
+2026-02-14 17:19:48,410 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:48,412 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:48,412 [INFO] save_state() called
+2026-02-14 17:19:49,098 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,100 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,100 [INFO] save_state() called
+2026-02-14 17:19:49,115 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,116 [INFO] save_state() called
+2026-02-14 17:19:49,136 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,138 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,138 [INFO] save_state() called
+2026-02-14 17:19:49,687 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,689 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,689 [INFO] save_state() called
+2026-02-14 17:19:49,702 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,703 [INFO] save_state() called
+2026-02-14 17:19:49,719 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,721 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:49,722 [INFO] save_state() called
+2026-02-14 17:19:50,666 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:50,668 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:50,668 [INFO] save_state() called
+2026-02-14 17:19:50,685 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:50,685 [INFO] save_state() called
+2026-02-14 17:19:50,703 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:50,706 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:50,706 [INFO] save_state() called
+2026-02-14 17:19:51,286 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,288 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,288 [INFO] save_state() called
+2026-02-14 17:19:51,302 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,302 [INFO] save_state() called
+2026-02-14 17:19:51,318 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,320 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,320 [INFO] save_state() called
+2026-02-14 17:19:51,994 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,996 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:51,996 [INFO] save_state() called
+2026-02-14 17:19:52,010 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,010 [INFO] save_state() called
+2026-02-14 17:19:52,030 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,032 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,032 [INFO] save_state() called
+2026-02-14 17:19:52,617 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,618 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,619 [INFO] save_state() called
+2026-02-14 17:19:52,633 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,633 [INFO] save_state() called
+2026-02-14 17:19:52,648 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,650 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:52,650 [INFO] save_state() called
+2026-02-14 17:19:53,308 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,310 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,310 [INFO] save_state() called
+2026-02-14 17:19:53,325 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,325 [INFO] save_state() called
+2026-02-14 17:19:53,341 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,344 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,344 [INFO] save_state() called
+2026-02-14 17:19:53,966 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,968 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,968 [INFO] save_state() called
+2026-02-14 17:19:53,982 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:53,982 [INFO] save_state() called
+2026-02-14 17:19:53,998 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,000 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,000 [INFO] save_state() called
+2026-02-14 17:19:54,788 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,790 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,790 [INFO] save_state() called
+2026-02-14 17:19:54,805 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,805 [INFO] save_state() called
+2026-02-14 17:19:54,823 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,826 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:54,826 [INFO] save_state() called
+2026-02-14 17:19:55,347 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,349 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,349 [INFO] save_state() called
+2026-02-14 17:19:55,363 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,363 [INFO] save_state() called
+2026-02-14 17:19:55,380 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,382 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,382 [INFO] save_state() called
+2026-02-14 17:19:55,977 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,979 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,979 [INFO] save_state() called
+2026-02-14 17:19:55,993 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:55,994 [INFO] save_state() called
+2026-02-14 17:19:56,012 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,015 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,015 [INFO] save_state() called
+2026-02-14 17:19:56,557 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,559 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,559 [INFO] save_state() called
+2026-02-14 17:19:56,573 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,573 [INFO] save_state() called
+2026-02-14 17:19:56,589 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,591 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:19:56,591 [INFO] save_state() called
+2026-02-14 17:20:00,390 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:00,395 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:00,395 [INFO] save_state() called
+2026-02-14 17:20:03,362 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:03,364 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:03,364 [INFO] save_state() called
+2026-02-14 17:20:03,370 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:03,370 [INFO] save_state() called
+2026-02-14 17:20:03,386 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:03,388 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:03,388 [INFO] save_state() called
+2026-02-14 17:20:04,500 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:04,502 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:04,502 [INFO] save_state() called
+2026-02-14 17:20:04,509 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:04,509 [INFO] save_state() called
+2026-02-14 17:20:04,525 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:04,527 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:04,527 [INFO] save_state() called
+2026-02-14 17:20:05,634 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:05,636 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:05,636 [INFO] save_state() called
+2026-02-14 17:20:05,643 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:05,644 [INFO] save_state() called
+2026-02-14 17:20:05,660 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:05,662 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:05,662 [INFO] save_state() called
+2026-02-14 17:20:12,430 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:12,432 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:12,432 [INFO] save_state() called
+2026-02-14 17:20:12,441 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:12,442 [INFO] save_state() called
+2026-02-14 17:20:12,459 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:12,462 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:12,462 [INFO] save_state() called
+2026-02-14 17:20:15,094 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:15,096 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:15,096 [INFO] save_state() called
+2026-02-14 17:20:15,114 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:15,114 [INFO] save_state() called
+2026-02-14 17:20:15,132 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:15,135 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:15,135 [INFO] save_state() called
+2026-02-14 17:20:16,601 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:16,603 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:16,603 [INFO] save_state() called
+2026-02-14 17:20:16,622 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:16,623 [INFO] save_state() called
+2026-02-14 17:20:16,641 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:16,643 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:16,643 [INFO] save_state() called
+2026-02-14 17:20:18,641 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:18,643 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:18,643 [INFO] save_state() called
+2026-02-14 17:20:18,649 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:18,649 [INFO] save_state() called
+2026-02-14 17:20:18,666 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:18,668 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:18,669 [INFO] save_state() called
+2026-02-14 17:20:22,825 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:22,827 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:22,827 [INFO] save_state() called
+2026-02-14 17:20:22,862 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:22,865 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:22,865 [INFO] save_state() called
+2026-02-14 17:20:24,906 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:24,908 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:24,908 [INFO] save_state() called
+2026-02-14 17:20:24,936 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:24,939 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:24,939 [INFO] save_state() called
+2026-02-14 17:20:27,063 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:27,066 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:27,066 [INFO] save_state() called
+2026-02-14 17:20:27,619 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:27,621 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:27,621 [INFO] save_state() called
+2026-02-14 17:20:28,782 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:28,784 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:28,784 [INFO] save_state() called
+2026-02-14 17:20:28,802 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:28,802 [INFO] save_state() called
+2026-02-14 17:20:28,818 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:28,820 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:28,821 [INFO] save_state() called
+2026-02-14 17:20:29,322 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:29,324 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:29,324 [INFO] save_state() called
+2026-02-14 17:20:29,335 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:29,335 [INFO] save_state() called
+2026-02-14 17:20:29,352 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:29,354 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:29,354 [INFO] save_state() called
+2026-02-14 17:20:51,018 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:51,020 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:51,020 [INFO] save_state() called
+2026-02-14 17:20:51,031 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:51,031 [INFO] save_state() called
+2026-02-14 17:20:51,048 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:51,050 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:51,050 [INFO] save_state() called
+2026-02-14 17:20:52,472 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:52,474 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:52,474 [INFO] save_state() called
+2026-02-14 17:20:52,483 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:52,483 [INFO] save_state() called
+2026-02-14 17:20:52,499 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:52,501 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:52,501 [INFO] save_state() called
+2026-02-14 17:20:55,197 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:55,199 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:55,199 [INFO] save_state() called
+2026-02-14 17:20:55,207 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:55,207 [INFO] save_state() called
+2026-02-14 17:20:55,222 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:55,224 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:55,225 [INFO] save_state() called
+2026-02-14 17:20:56,654 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:56,656 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:56,656 [INFO] save_state() called
+2026-02-14 17:20:56,673 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:56,673 [INFO] save_state() called
+2026-02-14 17:20:56,692 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:56,694 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:56,694 [INFO] save_state() called
+2026-02-14 17:20:57,332 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:57,334 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:57,334 [INFO] save_state() called
+2026-02-14 17:20:57,349 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:57,349 [INFO] save_state() called
+2026-02-14 17:20:57,366 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:57,368 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:57,368 [INFO] save_state() called
+2026-02-14 17:20:58,950 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:58,952 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:58,952 [INFO] save_state() called
+2026-02-14 17:20:58,961 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:58,961 [INFO] save_state() called
+2026-02-14 17:20:58,981 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:58,983 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:20:58,983 [INFO] save_state() called
+2026-02-14 17:21:01,097 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:01,099 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:01,099 [INFO] save_state() called
+2026-02-14 17:21:01,119 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:01,119 [INFO] save_state() called
+2026-02-14 17:21:01,139 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:01,141 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:01,142 [INFO] save_state() called
+2026-02-14 17:21:49,816 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,817 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,818 [INFO] save_state() called
+2026-02-14 17:21:49,829 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,829 [INFO] save_state() called
+2026-02-14 17:21:49,847 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,850 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,850 [INFO] save_state() called
+2026-02-14 17:21:49,876 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,876 [INFO] save_state() called
+2026-02-14 17:21:49,891 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,893 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:49,893 [INFO] save_state() called
+2026-02-14 17:21:53,595 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:53,597 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:53,597 [INFO] save_state() called
+2026-02-14 17:21:53,603 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:53,603 [INFO] save_state() called
+2026-02-14 17:21:53,617 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:53,619 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:53,619 [INFO] save_state() called
+2026-02-14 17:21:56,007 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:56,009 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:56,010 [INFO] save_state() called
+2026-02-14 17:21:56,015 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:56,015 [INFO] save_state() called
+2026-02-14 17:21:56,032 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:56,034 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:56,035 [INFO] save_state() called
+2026-02-14 17:21:58,137 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:58,139 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:58,139 [INFO] save_state() called
+2026-02-14 17:21:58,147 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:58,147 [INFO] save_state() called
+2026-02-14 17:21:58,166 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:58,169 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:21:58,169 [INFO] save_state() called
+2026-02-14 17:22:02,051 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:02,053 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:02,054 [INFO] save_state() called
+2026-02-14 17:22:02,060 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:02,060 [INFO] save_state() called
+2026-02-14 17:22:02,077 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:02,079 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:02,079 [INFO] save_state() called
+2026-02-14 17:22:14,828 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:14,830 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:14,830 [INFO] save_state() called
+2026-02-14 17:22:14,852 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:14,852 [INFO] save_state() called
+2026-02-14 17:22:14,868 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:14,870 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:14,870 [INFO] save_state() called
+2026-02-14 17:22:47,994 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:47,996 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:47,996 [INFO] save_state() called
+2026-02-14 17:22:48,004 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,004 [INFO] save_state() called
+2026-02-14 17:22:48,023 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,026 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,026 [INFO] save_state() called
+2026-02-14 17:22:48,229 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,231 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,231 [INFO] save_state() called
+2026-02-14 17:22:48,239 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,240 [INFO] save_state() called
+2026-02-14 17:22:48,258 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,260 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,260 [INFO] save_state() called
+2026-02-14 17:22:48,723 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,725 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,725 [INFO] save_state() called
+2026-02-14 17:22:48,734 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,734 [INFO] save_state() called
+2026-02-14 17:22:48,749 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,750 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,751 [INFO] save_state() called
+2026-02-14 17:22:48,899 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,901 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,901 [INFO] save_state() called
+2026-02-14 17:22:48,909 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,910 [INFO] save_state() called
+2026-02-14 17:22:48,924 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,926 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:48,926 [INFO] save_state() called
+2026-02-14 17:22:51,370 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:51,372 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:51,372 [INFO] save_state() called
+2026-02-14 17:22:51,380 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:51,380 [INFO] save_state() called
+2026-02-14 17:22:51,398 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:51,400 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:51,400 [INFO] save_state() called
+2026-02-14 17:22:56,050 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,052 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,052 [INFO] save_state() called
+2026-02-14 17:22:56,061 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,061 [INFO] save_state() called
+2026-02-14 17:22:56,079 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,081 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,081 [INFO] save_state() called
+2026-02-14 17:22:56,763 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,765 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,765 [INFO] save_state() called
+2026-02-14 17:22:56,774 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,774 [INFO] save_state() called
+2026-02-14 17:22:56,790 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,792 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:56,792 [INFO] save_state() called
+2026-02-14 17:22:57,572 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:57,573 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:57,574 [INFO] save_state() called
+2026-02-14 17:22:57,582 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:57,582 [INFO] save_state() called
+2026-02-14 17:22:57,597 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:57,599 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:22:57,599 [INFO] save_state() called
+2026-02-14 17:23:41,482 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:23:41,487 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:23:41,488 [INFO] save_state() called
+2026-02-14 17:25:55,988 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:25:55,993 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:25:55,993 [INFO] save_state() called
+2026-02-14 17:26:05,250 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:05,253 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:05,253 [INFO] save_state() called
+2026-02-14 17:26:05,259 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:05,259 [INFO] save_state() called
+2026-02-14 17:26:05,277 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:05,279 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:05,279 [INFO] save_state() called
+2026-02-14 17:26:09,268 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:09,270 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:09,271 [INFO] save_state() called
+2026-02-14 17:26:09,279 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:09,279 [INFO] save_state() called
+2026-02-14 17:26:09,297 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:09,299 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:09,299 [INFO] save_state() called
+2026-02-14 17:26:25,747 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:25,752 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:26:25,752 [INFO] save_state() called
+2026-02-14 17:28:17,539 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:28:17,544 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:28:17,544 [INFO] save_state() called
+2026-02-14 17:49:46,824 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:46,829 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:46,829 [INFO] save_state() called
+2026-02-14 17:49:59,458 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:59,460 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:59,461 [INFO] save_state() called
+2026-02-14 17:49:59,467 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:59,467 [INFO] save_state() called
+2026-02-14 17:49:59,483 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:59,484 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:49:59,485 [INFO] save_state() called
+2026-02-14 17:50:00,905 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:00,907 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:00,907 [INFO] save_state() called
+2026-02-14 17:50:00,952 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:00,954 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:00,955 [INFO] save_state() called
+2026-02-14 17:50:03,003 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:03,005 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:03,005 [INFO] save_state() called
+2026-02-14 17:50:03,013 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:03,014 [INFO] save_state() called
+2026-02-14 17:50:03,030 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:03,032 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:03,032 [INFO] save_state() called
+2026-02-14 17:50:05,464 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:05,469 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:05,469 [INFO] save_state() called
+2026-02-14 17:50:14,491 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:14,496 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:14,496 [INFO] save_state() called
+2026-02-14 17:50:59,723 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:59,727 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:50:59,728 [INFO] save_state() called
+2026-02-14 17:51:46,976 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:51:46,981 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:51:46,981 [INFO] save_state() called
+2026-02-14 17:52:18,743 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:52:18,748 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 17:52:18,748 [INFO] save_state() called
+2026-02-14 18:23:15,304 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:23:15,309 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:23:15,309 [INFO] save_state() called
+2026-02-14 18:23:37,852 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:23:37,857 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:23:37,857 [INFO] save_state() called
+2026-02-14 18:24:19,413 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:19,418 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:19,418 [INFO] save_state() called
+2026-02-14 18:24:22,611 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:22,616 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:22,616 [INFO] save_state() called
+2026-02-14 18:24:25,130 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:25,134 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:25,134 [INFO] save_state() called
+2026-02-14 18:24:34,693 [INFO] Loaded state from C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:34,698 [INFO] Saved state to C:\Users\dinkleburgh\TruckApp\.truck_state.json
+2026-02-14 18:24:34,698 [INFO] save_state() called

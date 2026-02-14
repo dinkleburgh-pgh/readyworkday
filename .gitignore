@@ -1,0 +1,44 @@
+﻿# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Local outputs / data (adjust to taste) ---
+*.csv
+*.xlsx
+*.parquet
+*.pdf
+
+# --- Secrets ---
+.env
+*.key
+*.pem
+
+# Keep Streamlit config (optional)
+!.streamlit/
+!.streamlit/config.toml

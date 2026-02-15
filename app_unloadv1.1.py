@@ -2848,17 +2848,6 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             f"      {notes_html}"
             "    </div>"
             "  </div>"
-            "  <div style='display:flex; flex-direction:column; align-items:center; flex:1 1 0; min-width:0;'>"
-            "    <div id='inprog-timer-box' style='width:420px; max-width:90vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28); margin-bottom:24px;'>"
-            "      <div id='inprog-timer-bar' style=\"display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;\">"
-            "        <span style=\"margin:0 auto; font-weight:900;\">ELAPSED TIME</span>"
-            "      </div>"
-            "      <div id='inprog-timer-body' style='padding:20px 24px; font-size:72px; line-height:1.1; text-align:center; font-weight:800; color:{GREEN};'>"
-            "        <span id='truck-elapsed'>{seconds_to_mmss(elapsed)}</span>"
-            "      </div>"
-            "      <div id='truck-elapsed-warn' style='display:none; color:{ORANGE}; font-weight:700; text-align:center;'></div>"
-            "    </div>"
-            "  </div>"
             "</div>"
         ),
         unsafe_allow_html=True,

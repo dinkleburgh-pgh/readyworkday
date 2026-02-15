@@ -2859,61 +2859,8 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         else:
             st.caption("No available trucks to start loading.")
     else:
+        # ...removed redundant timer box near daily notes...
         elapsed = elapsed_seconds()
-        global_note, daily_note, note_text = get_truck_notes(inprog_truck)
-        if note_text:
-            sections = []
-            if global_note:
-                safe_global = html.escape(global_note).replace("\n", "<br>")
-                sections.append(
-                    "<div style='padding-bottom:12px; margin-bottom:12px; border-bottom:2px solid rgba(255,255,255,0.18);'>"
-                    "  <div style='font-size:22px; letter-spacing:0.24em; text-transform:uppercase; opacity:0.7;'>General Notes</div>"
-                    f"  <div style='font-size:28px;'>{safe_global}</div>"
-                    "</div>"
-                )
-            if daily_note:
-                safe_daily = html.escape(daily_note).replace("\n", "<br>")
-                sections.append(
-                    "<div>"
-                    "  <div style='font-size:22px; letter-spacing:0.24em; text-transform:uppercase; opacity:0.7;'>Daily Notes</div>"
-                    f"  <div style='font-size:28px;'>{safe_daily}</div>"
-                    "</div>"
-                )
-            safe_note = "".join(sections)
-            st.markdown(
-                (
-                    "<div style='position:relative; width:100%; margin:4px 0 4px 0;'>"
-                    "  <div id='inprog-notes' style='position:absolute; left:0; top:0; width:560px; max-width:80vw; "
-                    "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
-                    "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
-                    "    <div id='inprog-notes-bar' style='display:flex; align-items:center; justify-content:space-between; "
-                    "        padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; "
-                    "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:pointer; position:relative;'>"
-                    "      <span style='margin:0 auto;'>Notes</span>"
-                    "    </div>"
-                    "    <div id='inprog-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
-                    f"      {safe_note}"
-                    "    </div>"
-                    "  </div>"
-                    "  <div style='text-align:center;'>"
-                    "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
-                    f"    <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
-                    "  </div>"
-                    "</div>"
-                    ""
-                ),
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                (
-                    "<div style='text-align:center; margin:0 0 4px 0;'>"
-                    "  <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
-                    f"  <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
-            )
         # Render elapsed timer into a DOM element that JS will update every second.
         warn_m = int(st.session_state.warn_seconds) // 60 if st.session_state.warn_seconds else None
         warn_visible = 'block' if (st.session_state.warn_seconds and elapsed >= int(st.session_state.warn_seconds)) else 'none'

@@ -8,6 +8,9 @@ from io import BytesIO
 import json
 import html
 import os
+# App metadata (do not edit)
+_APP_VERSION = "1.1.0"
+_APP_DATE = "19930616"  
 
 # Setup logging
 logging.basicConfig(
@@ -25,7 +28,7 @@ except Exception:
 from reportlab.lib.pagesizes import letter # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
 
-st.set_page_config(page_title="Load Management", layout="wide")
+st.set_page_config(page_title="Load Management", layout="centered")
 
 # ==========================================================
 # CONFIG
@@ -46,9 +49,7 @@ DEFAULT_SHORT_ITEMS = [
     "Paper Towels",
     "Soap",
     "Trash Bags",
-    "Gloves",
     "Aprons",
-    "Chemicals",
     "Mats",
     "Other",
 ]
@@ -587,184 +588,48 @@ except Exception as e:
 st.markdown(
     """
     <style>
-            .truck-grid {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                margin-top: 8px;
-            }
-            .truck-bubble {
-        width: 58px;
-        height: 58px;
-        border-radius: 10px; /* nice square bubble */
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 900;
-                font-size: 19px;
-        border: 1px solid rgba(255,255,255,0.14);
-        background: rgba(255,255,255,0.06);
-        user-select: none;
-      }
-            button[kind="primary"] {
-                width: 58px !important;
-                height: 58px !important;
-                min-width: 58px !important;
-                min-height: 58px !important;
-                padding: 0 !important;
+        .truck-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .truck-bubble, button[kind="primary"] {
+            width: 48px;
+            height: 48px;
+            min-width: 44px !important;
+            min-height: 44px !important;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+        @media (max-width: 600px) {
+            .truck-bubble, button[kind="primary"] {
+                width: 38px !important;
+                height: 38px !important;
+                font-size: 15px !important;
                 border-radius: 10px !important;
-                font-weight: 900 !important;
-                font-size: 20px !important;
-                line-height: 1 !important;
-                display: inline-flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                white-space: nowrap !important;
-                background: rgba(255,255,255,0.06) !important;
-                border: 1px solid rgba(255,255,255,0.14) !important;
-                color: inherit !important;
             }
-            .shop-notice {
-                position: fixed;
-                top: 64px;
-                right: 16px;
-                z-index: 99999;
-                width: 520px;
-                max-width: 90vw;
-                padding: 18px 20px;
-                border-radius: 12px;
-                border: 1px solid rgba(220, 38, 38, 0.4);
-                background: rgba(153, 27, 27, 0.92);
-                color: #fef2f2;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-                font-size: 17px;
-                line-height: 1.4;
-                backdrop-filter: blur(4px);
+        }
+        /* Make sidebar and text more readable on mobile */
+        @media (max-width: 600px) {
+            .stSidebar, section[data-testid="stSidebar"] {
+                font-size: 15px !important;
             }
-            .shop-notice .notice-close {
-                position: absolute;
-                top: 6px;
-                right: 10px;
-                font-weight: 800;
-                font-size: 16px;
-                color: #fee2e2;
-                text-decoration: none;
-                padding: 2px 6px;
-                border-radius: 6px;
-                border: 1px solid rgba(255,255,255,0.2);
-                background: rgba(0,0,0,0.15);
+            .stApp, [data-testid="stAppViewContainer"] {
+                font-size: 16px !important;
             }
-            .shop-notice .notice-close:hover {
-                background: rgba(0,0,0,0.25);
-            }
-            .shop-notice .notice-bar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                padding-bottom: 6px;
-                margin-bottom: 6px;
-                border-bottom: 1px solid rgba(255,255,255,0.15);
-                cursor: pointer;
-            }
-            .shop-notice .notice-bar-title {
-                flex: 1;
-                font-weight: 800;
-                letter-spacing: 0.08em;
-                text-transform: uppercase;
-                font-size: 16px;
-                color: #fee2e2;
-                text-align: center;
-            }
-            .shop-notice .notice-bar-toggle {
-                font-weight: 700;
-                font-size: 12px;
-                opacity: 0.9;
-                border: 1px solid rgba(255,255,255,0.2);
-                padding: 2px 6px;
-                border-radius: 6px;
-            }
-            .shop-notice-collapsed {
-                position: fixed;
-                top: 64px;
-                right: 16px;
-                z-index: 99999;
-                padding: 8px 12px;
-                border-radius: 10px;
-                border: 1px solid rgba(220, 38, 38, 0.4);
-                background: rgba(153, 27, 27, 0.92);
-                color: #fef2f2;
-                font-size: 14px;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.2);
-            }
-            .shop-notice {
-                cursor: pointer;
-            }
-            .shop-notice.collapsed {
-                padding: 10px 14px;
-            }
-            .shop-notice.collapsed .notice-item {
-                display: none;
-            }
-            .shop-notice .body {
-                font-weight: 600;
-                text-align: center;
-            }
-            .shop-notice .timestamp {
-                font-size: 14px;
-                opacity: 0.85;
-            }
-            .shop-notice .notice-item {
-                padding: 4px 0;
-                border-top: 1px solid rgba(255,255,255,0.12);
-                display: flex;
-                align-items: baseline;
-                justify-content: center;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .shop-notice .notice-item:first-of-type {
-                border-top: none;
-                padding-top: 0;
-            }
-            .shop-notice.flash {
-                animation: notice-flash 1.4s ease-in-out 0s 2;
-                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 12px 32px rgba(0,0,0,0.28);
-            }
-            .shop-notice.flash-collapsed {
-                animation: notice-flash 1.8s ease-in-out 0s 3;
-                box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25), 0 14px 36px rgba(0,0,0,0.3);
-            }
-            @keyframes notice-flash {
-                0% { transform: scale(1); filter: brightness(1); }
-                30% { transform: scale(1.01); filter: brightness(1.15); }
-                100% { transform: scale(1); filter: brightness(1); }
-            }
-            section[data-testid="stSidebar"] .stButton > button {
-                border-radius: 999px !important;
-                padding: 8px 14px !important;
-                font-weight: 800 !important;
-                letter-spacing: 0.02em !important;
-                background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)) !important;
-                border: 1px solid rgba(255,255,255,0.18) !important;
-                text-align: left !important;
-                box-shadow: 0 6px 16px rgba(0,0,0,0.12) !important;
-            }
-            section[data-testid="stSidebar"] .stButton > button:hover {
-                border-color: rgba(147, 197, 253, 0.55) !important;
-                box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.18), 0 10px 22px rgba(0,0,0,0.16) !important;
-                transform: translateY(-1px) !important;
-            }
-            section[data-testid="stSidebar"] .stButton > button:active {
-                transform: translateY(0) !important;
-            }
-            .stButton > button {
-                font-weight: 900 !important;
-                font-size: 18px !important;
-            }
-            .stHorizontalBlock {
-                gap: 4px !important;
-            }
+        }
+        /* Make touch targets larger */
+        .stButton > button, .stDownloadButton > button {
+            min-height: 44px !important;
+            min-width: 44px !important;
+            font-size: 18px !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1945,9 +1810,25 @@ def render_truck_bubbles(trucks: list[int], from_page: str | None = None):
         return
     
     # Create a grid of bubble buttons that navigate in-place without opening new tabs
-    cols = st.columns(8)
+    import streamlit as stlib
+    import sys
+    # Dynamically set columns for mobile
+    num_cols = 8
+    if hasattr(stlib, 'runtime') or (hasattr(sys, 'platform') and sys.platform in ['emscripten', 'android']):
+        num_cols = 4
+    # Try to detect small screens via window width (fallback to 4 cols)
+    try:
+        import streamlit.components.v1 as components
+        components.html("""
+        <script>
+        window.parent.postMessage({type: 'MOBILE_WIDTH', width: window.innerWidth}, '*');
+        </script>
+        """, height=0)
+    except Exception:
+        pass
+    cols = st.columns(num_cols)
     for idx, t in enumerate(trucks):
-        col = cols[idx % 8]
+        col = cols[idx % num_cols]
         with col:
             if st.button(str(int(t)), key=f"bubble_{from_page}_{t}", use_container_width=False, type="primary"):
                 # Navigate based on the page context
@@ -3037,93 +2918,73 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         warn_m = int(st.session_state.warn_seconds) // 60 if st.session_state.warn_seconds else None
         warn_visible = 'block' if (st.session_state.warn_seconds and elapsed >= int(st.session_state.warn_seconds)) else 'none'
         warn_text = f"Load time exceeded the warning threshold ({warn_m} minutes)." if warn_m else ""
-        # Render the timer entirely inside a component iframe so JS can update it.
         init_elapsed = int(elapsed)
         start_epoch = int(st.session_state.inprog_start_time or time.time())
         warn_threshold = int(st.session_state.warn_seconds or 0)
-        timer_html = """
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;"
-                    <div id="timer-card" style="
-                            display:flex; align-items:center; justify-content:center; gap:16px; margin:8px 0 4px 0;"
-                    <div id="timer-box" style="
-                padding:12px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
-                background:linear-gradient(135deg, rgba(22,163,74,0.18), rgba(245,158,11,0.12));
-                box-shadow:0 6px 18px rgba(0,0,0,0.12);"
-                <div id="truck-elapsed" style="font-size:136px; font-weight:800; line-height:1.1; color:__COLOR_GOOD__;">__INIT_TEXT__</div>
-            </div>
-            <div id="truck-elapsed-warn" style="display:__WARN_DISPLAY__; color:__WARN_COLOR__; font-weight:700;">__WARN_TEXT__</div>
-          </div>
-        </div>
+        timer_html = f"""
+                <div style='position:relative; width:100%; margin:4px 0 24px 0;'>
+                    <div id='inprog-timer-box' style='width:560px; max-width:80vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
+                        <div id='inprog-timer-bar' style='display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>
+                            <span style="margin:0 auto; color:#fff; font-weight:900;">ELAPSED TIME</span>
+                        </div>
+                        <div id='inprog-timer-body' style='padding:20px 24px; font-size:96px; line-height:1.1; text-align:center; font-weight:800; color:{GREEN};'>
+                            <span id='truck-elapsed'>{seconds_to_mmss(elapsed)}</span>
+                        </div>
+                        <div id='truck-elapsed-warn' style='display:{warn_visible}; color:{ORANGE}; font-weight:700; text-align:center;'>{warn_text}</div>
+                    </div>
+                </div>
         <script>
-        (function(){
-            try {
+        (function(){{
+            try {{
                 const pad = n => String(n).padStart(2,'0');
-                const fmt = s => {
+                const fmt = s => {{
                     const m = Math.floor(s/60);
                     const sec = s % 60;
                     return pad(m) + ':' + pad(sec);
-                };
-                const colorFor = (elapsed, warn) => {
-                    if (!warn || warn <= 0) return '__COLOR_GOOD__';
+                }};
+                const colorFor = (elapsed, warn) => {{
+                    if (!warn || warn <= 0) return '{GREEN}';
                     const ratio = elapsed / warn;
-                    if (ratio < 0.7) return '__COLOR_GOOD__';
-                    if (ratio < 1) return '__COLOR_WARN__';
-                    return '__COLOR_ALERT__';
-                };
-                const startEpoch = __START__;
-                let elapsed = __INIT__;
-                const warn = __WARN__;
-                const tick = () => {
+                    if (ratio < 0.7) return '{GREEN}';
+                    if (ratio < 1) return '{ORANGE}';
+                    return '{RED}';
+                }};
+                const startEpoch = {start_epoch};
+                let elapsed = {init_elapsed};
+                const warn = {warn_threshold};
+                const tick = () => {{
                     const now = Math.floor(Date.now() / 1000);
                     elapsed = Math.max(0, now - startEpoch);
                     const el = document.getElementById('truck-elapsed');
                     const warnEl = document.getElementById('truck-elapsed-warn');
-                    const box = document.getElementById('timer-box');
-                    if (el) {
+                    const timerBody = document.getElementById('inprog-timer-body');
+                    if (el) {{
                         el.textContent = fmt(elapsed);
                         el.style.color = colorFor(elapsed, warn);
-                    }
-                    if (warnEl) {
+                    }}
+                    if (warnEl) {{
                         if (warn > 0 && elapsed >= warn) warnEl.style.display = 'block';
                         else warnEl.style.display = 'none';
-                    }
-                    if (box) {
-                        if (warn > 0 && elapsed >= warn) {
-                            box.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.25), 0 10px 22px rgba(0,0,0,0.16)';
-                        } else {
-                            box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
-                        }
-                    }
-                };
-                const sync = () => {
+                    }}
+                    if (timerBody) {{
+                        if (warn > 0 && elapsed >= warn) {{
+                            timerBody.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.25), 0 10px 22px rgba(0,0,0,0.16)';
+                        }} else {{
+                            timerBody.style.boxShadow = 'none';
+                        }}
+                    }}
+                }};
+                const sync = () => {{
                     tick();
                     const msToNext = 1000 - (Date.now() % 1000);
                     setTimeout(sync, msToNext);
-                };
+                }};
                 sync();
-            } catch(e){console.error(e);}
-        })();
+            }} catch(e){{console.error(e);}}
+        }})();
         </script>
         """
-        timer_html = (
-            timer_html
-            .replace("__INIT__", str(init_elapsed))
-            .replace("__START__", str(start_epoch))
-            .replace("__WARN__", str(warn_threshold))
-            .replace("__INIT_TEXT__", seconds_to_mmss(elapsed))
-            .replace("__WARN_DISPLAY__", warn_visible)
-            .replace("__WARN_COLOR__", ORANGE)
-            .replace("__WARN_TEXT__", warn_text)
-            .replace(
-                "display:flex; align-items:center; justify-content:center; gap:16px; margin:8px 0 4px 0;",
-                "display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; margin:8px 0 4px 0;",
-            )
-            .replace("font-weight:700;\">__WARN_TEXT__", "font-weight:700; text-align:center;\">__WARN_TEXT__")
-            .replace("__COLOR_GOOD__", GREEN)
-            .replace("__COLOR_WARN__", ORANGE)
-            .replace("__COLOR_ALERT__", RED)
-        )
-        components.html(timer_html, height=220)
+        components.html(timer_html, height=300)
 
         avg_all = average_load_time_seconds([])
         st.markdown(

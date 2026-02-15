@@ -1,27 +1,26 @@
 {
   "cleaned_set": [
     4,
-    7,
-    11,
     12,
-    13,
-    14,
-    15,
-    16,
-    17,
     54,
     58,
+    65,
     73,
     80,
     82,
     86
   ],
   "inprog_set": [
-    61
+    101
   ],
   "loaded_set": [],
   "off_set": [
-    65
+    7,
+    60,
+    62,
+    83,
+    84,
+    88
   ],
   "off_notes": {},
   "shop_set": [],
@@ -33,7 +32,7 @@
   "special_set": [],
   "sup_notes_global": {},
   "sup_notes_daily": {},
-  "daily_notes": "Turn the lights off.",
+  "daily_notes": "",
   "wearers": {},
   "batches": {
     "1": {
@@ -70,28 +69,28 @@
   "setup_done": true,
   "run_date": "2026-02-17",
   "run_date_key": "2026-02-17",
-  "last_setup_date": "2026-02-14",
+  "last_setup_date": "2026-02-15",
   "ship_dates": [
     "2026-02-18"
   ],
   "active_screen": "IN_PROGRESS",
   "shorts_truck": null,
-  "selected_truck": null,
+  "selected_truck": 101,
   "next_up_truck": null,
   "next_after_truck": null,
   "next_up_return_screen": null,
-  "last_requested_page": "FLEET",
-  "nav_seq": 1301,
-  "last_screen_for_history": "FLEET",
-  "last_nav_seen": 1301,
+  "last_requested_page": "STATUS_CLEANED",
+  "nav_seq": 1314,
+  "last_screen_for_history": "STATUS_CLEANED",
+  "last_nav_seen": 1314,
   "sup_manage_pref_action": null,
-  "inprog_start_time": 1771107734.8494043,
+  "inprog_start_time": 1771137658.0560894,
   "break_start_time": null,
   "break_duration": 1800,
   "break_used": false,
   "load_durations": {},
   "load_start_times": {
-    "61": 1771107734.8494043
+    "101": 1771137658.0560894
   },
   "load_finish_times": {},
   "shorts": {},
@@ -142,7 +141,8 @@
     "2/13 02:06 AM - Start loading Truck 11",
     "2/13 02:22 AM - Shorts saved for Truck 11 (1 items)",
     "2/13 02:22 AM - Start loading Truck 101",
-    "2/14 05:22 PM - Start loading Truck 61"
+    "2/14 05:22 PM - Start loading Truck 61",
+    "2/15 01:40 AM - Start loading Truck 101"
   ],
   "extra_fleet": [
     4,

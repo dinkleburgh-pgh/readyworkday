@@ -1,4 +1,5 @@
 import streamlit as st # type: ignore
+import logging
 import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
 from datetime import date, timedelta, datetime
@@ -7,6 +8,16 @@ from io import BytesIO
 import json
 import html
 import os
+# App metadata (do not edit)
+_APP_VERSION = "1.1.0"
+_APP_DATE = "19930616"  
+
+# Setup logging
+logging.basicConfig(
+    filename="truckapp.log",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
 import streamlit.components.v1 as components
 try:
     from zoneinfo import ZoneInfo
@@ -17,7 +28,7 @@ except Exception:
 from reportlab.lib.pagesizes import letter # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
 
-st.set_page_config(page_title="Load Management", layout="wide")
+st.set_page_config(page_title="Load Management", layout="centered")
 
 # ==========================================================
 # CONFIG
@@ -38,12 +49,47 @@ DEFAULT_SHORT_ITEMS = [
     "Paper Towels",
     "Soap",
     "Trash Bags",
-    "Gloves",
     "Aprons",
-    "Chemicals",
     "Mats",
     "Other",
 ]
+
+SHORTS_MODE_EXCEL = "Excel Sheet (current)"
+SHORTS_MODE_BUTTONS = "Button Selection"
+SHORTS_MODE_DISABLE = "Disable (manual input)"
+SHORTS_MODE_OPTIONS = [SHORTS_MODE_EXCEL, SHORTS_MODE_BUTTONS, SHORTS_MODE_DISABLE]
+
+SHORTS_BUTTON_MAP = {
+    "3x10": ["Black", "Onyx", "Copper", "Indigo", "Blue", "Brown"],
+    "3x5": ["Black", "Onyx", "Copper", "Indigo", "Blue", "Brown"],
+    "4x6": ["Logo", "Black", "Onyx", "Copper", "Indigo", "Blue", "Brown", "2x3"],
+    "Paper": [
+        "C-PULL",
+        "DRC (AIRLAID)",
+        "BROWN HW",
+        "SIG HW",
+        "SIG Z-FOLD",
+        "SIG DUAL TP",
+        "JRT",
+        "B&V TP",
+        "B&V Z-FOLD",
+    ],
+    "Bulk": {
+        "Dust Mops": ["WET MOP", "24\"", "36\"", "46\"", "60\"", "Fender Covers"],
+        "Aprons": ["White", "Black", "Red", "Green", "Blue", "Denim"],
+        "Towels": [
+            "Grid/Terry",
+            "Glass",
+            "Regular",
+            "Premium",
+            "Small Ink",
+            "Large Ink",
+            "Napkins",
+            "Red Shop",
+            "White Shop",
+        ],
+    },
+}
 
 # Badge colors
 GREEN = "#16a34a"
@@ -56,6 +102,7 @@ ORANGE = "#f59e0b"
 STATE_FILE = ".truck_state.json"
 FLEET_FILE = "truck_fleet.json"
 DURATIONS_FILE = "load_durations.json"
+HISTORY_DIR = "state_history"
 
 
 def _fleet_path() -> str:
@@ -90,6 +137,14 @@ def save_fleet_file(fleet: list[int]):
 
 def _state_path() -> str:
     return os.path.join(os.getcwd(), STATE_FILE)
+
+
+def _history_dir_path() -> str:
+    return os.path.join(os.getcwd(), HISTORY_DIR)
+
+
+def _history_state_path(run_date_key: str) -> str:
+    return os.path.join(_history_dir_path(), f"state_{run_date_key}.json")
 
 
 def _durations_path() -> str:
@@ -131,11 +186,14 @@ def append_load_duration(truck: int, seconds: int):
 def load_state() -> dict:
     path = _state_path()
     if not os.path.exists(path):
+        logging.warning(f"State file not found: {path}")
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+        logging.info(f"Loaded state from {path}")
+    except Exception as e:
+        logging.error(f"Failed to load state from {path}: {e}")
         return {}
 
     out = {}
@@ -146,7 +204,7 @@ def load_state() -> dict:
             out[k] = date.fromisoformat(v) if v else None
         elif k == "ship_dates":
             out[k] = [date.fromisoformat(s) for s in v] if v else []
-        elif k in {"wearers", "shop_notes", "off_notes", "sup_notes", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status"}:
+        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
             if isinstance(v, dict):
                 new = {}
                 for kk, vv in v.items():
@@ -158,6 +216,8 @@ def load_state() -> dict:
                 out[k] = new
             else:
                 out[k] = v
+        elif k == "daily_notes":
+            out[k] = v if v is not None else ""
         elif k == "last_setup_date":
             out[k] = date.fromisoformat(v) if v else None
         else:
@@ -165,35 +225,96 @@ def load_state() -> dict:
     return out
 
 
-def save_state():
-    path = _state_path()
+def _run_date_key(d: date | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+def _current_run_date_key() -> str | None:
+    return st.session_state.get("run_date_key") or _run_date_key(st.session_state.get("run_date"))
+
+
+def _serialize_state() -> dict:
+    data = {}
+    keys = list(defaults.keys())
+    for k in keys:
+        v = st.session_state.get(k, defaults.get(k))
+        if k in {"cleaned_set", "inprog_set", "loaded_set", "shop_set", "off_set", "special_set"}:
+            data[k] = sorted(list(v))
+        elif k == "run_date":
+            data[k] = v.isoformat() if v else None
+        elif k == "last_setup_date":
+            data[k] = v.isoformat() if v else None
+        elif k == "ship_dates":
+            data[k] = [d.isoformat() for d in v]
+        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
+            ser = {}
+            for kk, vv in (v or {}).items():
+                ser[str(kk)] = vv
+            data[k] = ser
+        elif k == "daily_notes":
+            data[k] = v if v is not None else ""
+        else:
+            data[k] = v
+    return data
+
+
+def _write_state_file(path: str, data: dict):
     try:
-        data = {}
-        keys = list(defaults.keys())
-        for k in keys:
-            v = st.session_state.get(k, defaults.get(k))
-            if k in {"cleaned_set", "inprog_set", "loaded_set", "shop_set", "off_set", "special_set"}:
-                data[k] = sorted(list(v))
-            elif k == "run_date":
-                data[k] = v.isoformat() if v else None
-            elif k == "last_setup_date":
-                data[k] = v.isoformat() if v else None
-            elif k == "ship_dates":
-                data[k] = [d.isoformat() for d in v]
-            elif k in {"wearers", "shop_notes", "off_notes", "sup_notes", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status"}:
-                ser = {}
-                for kk, vv in (v or {}).items():
-                    ser[str(kk)] = vv
-                data[k] = ser
-            else:
-                data[k] = v
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        logging.info(f"Saved state to {path}")
+    except Exception as e:
+        logging.error(f"Failed to save state to {path}: {e}")
+
+
+def save_state():
+    path = _state_path()
+    _write_state_file(path, _serialize_state())
+    logging.info("save_state() called")
+
+
+def archive_current_state(run_date_key: str | None):
+    if not run_date_key:
+        return
+    path = _history_state_path(run_date_key)
+    _write_state_file(path, _serialize_state())
+
+
+def apply_run_config(run_date: date, ship_dates: list[date]):
+    new_key = _run_date_key(run_date)
+    old_key = _current_run_date_key()
+    if old_key and new_key and old_key != new_key:
+        archive_current_state(old_key)
+    st.session_state.run_date = run_date
+    st.session_state.ship_dates = ship_dates
+    st.session_state.setup_done = True
+    st.session_state.last_setup_date = date.today()
+    st.session_state.run_date_key = new_key
+    if old_key != new_key:
+        day_num = ship_day_number(ship_dates[0]) if ship_dates else None
+        reset_status_for_new_day(day_num)
+    _mark_and_save()
 
 
 loaded = load_state()
+if "sup_notes_global" not in loaded and "sup_notes" in loaded:
+    raw_notes = loaded.get("sup_notes") or {}
+    normalized = {}
+    if isinstance(raw_notes, dict):
+        for kk, vv in raw_notes.items():
+            try:
+                ik = int(kk)
+            except Exception:
+                ik = kk
+            normalized[ik] = vv
+    loaded["sup_notes_global"] = normalized
+if "sup_notes_daily" not in loaded:
+    loaded["sup_notes_daily"] = {}
+if "shorts_button_state" not in loaded:
+    loaded["shorts_button_state"] = {}
+if "shorts_mode" not in loaded:
+    loaded["shorts_mode"] = SHORTS_MODE_DISABLE if loaded.get("shorts_disabled") else SHORTS_MODE_EXCEL
 
 defaults = {
     # work states
@@ -206,13 +327,18 @@ defaults = {
     "off_notes": {},                 # {truck: text}
     "shop_set": set(),
     "shop_notes": {},                # {truck: text}
+    "shop_spares": {},               # {truck: text}
     "shop_prev_status": {},          # {truck: status}
     "shop_notice_ts": None,
     "shop_notice_log": [],
     "special_set": set(),
 
     # management per-truck notes
-    "sup_notes": {},                 # {truck: text}
+    "sup_notes_global": {},          # {truck: text}
+    "sup_notes_daily": {},           # {truck: text}
+
+    # global daily notes
+    "daily_notes": "",
 
     # batching
     "wearers": {},                   # {truck:int}
@@ -229,6 +355,7 @@ defaults = {
     # setup / workday
     "setup_done": False,
     "run_date": None,
+    "run_date_key": None,
     "last_setup_date": None,
     "ship_dates": [],
 
@@ -239,6 +366,7 @@ defaults = {
     "selected_truck": None,
     # queued next-up truck (Unloaded)
     "next_up_truck": None,
+    "next_after_truck": None,
     "next_up_return_screen": None,
     # track last requested page from URL to avoid stale query param lock-in
     "last_requested_page": None,
@@ -246,6 +374,7 @@ defaults = {
     "nav_seq": 0,
     "last_screen_for_history": None,
     "last_nav_seen": None,
+    "sup_manage_pref_action": None,
 
     # timing
     "inprog_start_time": None,       # epoch seconds
@@ -261,7 +390,10 @@ defaults = {
     "shorts_initials": {},           # {truck: "AB"}
     "shorts_initials_ts": {},        # {truck: iso_timestamp}
     "shorts_initials_history": {},   # {truck: [ {initials, ts}, ... ]}
+    "shorts_button_state": {},       # {truck: {step, category, bulk_group, item, qty}}
+    "shorts_mode": SHORTS_MODE_EXCEL,
     "shorts_disabled": False,
+    "batching_disabled": False,
 
     # warning threshold
     "warn_seconds": DEFAULT_WARN_MIN * 60,
@@ -296,6 +428,13 @@ for k, v in defaults.items():
             st.session_state[k] = loaded[k]
         else:
             st.session_state[k] = v
+
+# Auto-mark trucks as off for current load day
+try:
+    off_today = off_trucks_for_today()
+    st.session_state.off_set.update(off_today)
+except Exception:
+    pass
 
 # Force app theme to dark regardless of device preferences.
 st.session_state.ui_theme = "Dark"
@@ -440,8 +579,8 @@ try:
         FLEET = sorted((base | set(extra_ints)) - set(removed_ints))
         # Persist initial fleet file for future runs
         save_fleet_file(FLEET)
-except Exception:
-    pass
+except Exception as e:
+    logging.error(f"Exception during fleet initialization: {e}")
 
 # ==========================================================
 # CSS (bubbled truck lists on status pages)
@@ -449,184 +588,48 @@ except Exception:
 st.markdown(
     """
     <style>
-            .truck-grid {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                margin-top: 8px;
-            }
-            .truck-bubble {
-        width: 58px;
-        height: 58px;
-        border-radius: 10px; /* nice square bubble */
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 900;
-                font-size: 19px;
-        border: 1px solid rgba(255,255,255,0.14);
-        background: rgba(255,255,255,0.06);
-        user-select: none;
-      }
-            button[kind="primary"] {
-                width: 58px !important;
-                height: 58px !important;
-                min-width: 58px !important;
-                min-height: 58px !important;
-                padding: 0 !important;
+        .truck-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .truck-bubble, button[kind="primary"] {
+            width: 48px;
+            height: 48px;
+            min-width: 44px !important;
+            min-height: 44px !important;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+        @media (max-width: 600px) {
+            .truck-bubble, button[kind="primary"] {
+                width: 38px !important;
+                height: 38px !important;
+                font-size: 15px !important;
                 border-radius: 10px !important;
-                font-weight: 900 !important;
-                font-size: 20px !important;
-                line-height: 1 !important;
-                display: inline-flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                white-space: nowrap !important;
-                background: rgba(255,255,255,0.06) !important;
-                border: 1px solid rgba(255,255,255,0.14) !important;
-                color: inherit !important;
             }
-            .shop-notice {
-                position: fixed;
-                top: 64px;
-                right: 16px;
-                z-index: 99999;
-                width: 520px;
-                max-width: 90vw;
-                padding: 18px 20px;
-                border-radius: 12px;
-                border: 1px solid rgba(220, 38, 38, 0.4);
-                background: rgba(153, 27, 27, 0.92);
-                color: #fef2f2;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-                font-size: 17px;
-                line-height: 1.4;
-                backdrop-filter: blur(4px);
+        }
+        /* Make sidebar and text more readable on mobile */
+        @media (max-width: 600px) {
+            .stSidebar, section[data-testid="stSidebar"] {
+                font-size: 15px !important;
             }
-            .shop-notice .notice-close {
-                position: absolute;
-                top: 6px;
-                right: 10px;
-                font-weight: 800;
-                font-size: 16px;
-                color: #fee2e2;
-                text-decoration: none;
-                padding: 2px 6px;
-                border-radius: 6px;
-                border: 1px solid rgba(255,255,255,0.2);
-                background: rgba(0,0,0,0.15);
+            .stApp, [data-testid="stAppViewContainer"] {
+                font-size: 16px !important;
             }
-            .shop-notice .notice-close:hover {
-                background: rgba(0,0,0,0.25);
-            }
-            .shop-notice .notice-bar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                padding-bottom: 6px;
-                margin-bottom: 6px;
-                border-bottom: 1px solid rgba(255,255,255,0.15);
-                cursor: pointer;
-            }
-            .shop-notice .notice-bar-title {
-                flex: 1;
-                font-weight: 800;
-                letter-spacing: 0.08em;
-                text-transform: uppercase;
-                font-size: 16px;
-                color: #fee2e2;
-                text-align: center;
-            }
-            .shop-notice .notice-bar-toggle {
-                font-weight: 700;
-                font-size: 12px;
-                opacity: 0.9;
-                border: 1px solid rgba(255,255,255,0.2);
-                padding: 2px 6px;
-                border-radius: 6px;
-            }
-            .shop-notice-collapsed {
-                position: fixed;
-                top: 64px;
-                right: 16px;
-                z-index: 99999;
-                padding: 8px 12px;
-                border-radius: 10px;
-                border: 1px solid rgba(220, 38, 38, 0.4);
-                background: rgba(153, 27, 27, 0.92);
-                color: #fef2f2;
-                font-size: 14px;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.2);
-            }
-            .shop-notice {
-                cursor: pointer;
-            }
-            .shop-notice.collapsed {
-                padding: 10px 14px;
-            }
-            .shop-notice.collapsed .notice-item {
-                display: none;
-            }
-            .shop-notice .body {
-                font-weight: 600;
-                text-align: center;
-            }
-            .shop-notice .timestamp {
-                font-size: 14px;
-                opacity: 0.85;
-            }
-            .shop-notice .notice-item {
-                padding: 4px 0;
-                border-top: 1px solid rgba(255,255,255,0.12);
-                display: flex;
-                align-items: baseline;
-                justify-content: center;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .shop-notice .notice-item:first-of-type {
-                border-top: none;
-                padding-top: 0;
-            }
-            .shop-notice.flash {
-                animation: notice-flash 1.4s ease-in-out 0s 2;
-                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 12px 32px rgba(0,0,0,0.28);
-            }
-            .shop-notice.flash-collapsed {
-                animation: notice-flash 1.8s ease-in-out 0s 3;
-                box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25), 0 14px 36px rgba(0,0,0,0.3);
-            }
-            @keyframes notice-flash {
-                0% { transform: scale(1); filter: brightness(1); }
-                30% { transform: scale(1.01); filter: brightness(1.15); }
-                100% { transform: scale(1); filter: brightness(1); }
-            }
-            section[data-testid="stSidebar"] .stButton > button {
-                border-radius: 999px !important;
-                padding: 8px 14px !important;
-                font-weight: 800 !important;
-                letter-spacing: 0.02em !important;
-                background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)) !important;
-                border: 1px solid rgba(255,255,255,0.18) !important;
-                text-align: left !important;
-                box-shadow: 0 6px 16px rgba(0,0,0,0.12) !important;
-            }
-            section[data-testid="stSidebar"] .stButton > button:hover {
-                border-color: rgba(147, 197, 253, 0.55) !important;
-                box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.18), 0 10px 22px rgba(0,0,0,0.16) !important;
-                transform: translateY(-1px) !important;
-            }
-            section[data-testid="stSidebar"] .stButton > button:active {
-                transform: translateY(0) !important;
-            }
-            .stButton > button {
-                font-weight: 900 !important;
-                font-size: 18px !important;
-            }
-            .stHorizontalBlock {
-                gap: 4px !important;
-            }
+        }
+        /* Make touch targets larger */
+        .stButton > button, .stDownloadButton > button {
+            min-height: 44px !important;
+            min-width: 44px !important;
+            font-size: 18px !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -723,6 +726,19 @@ def log_action(message: str):
     log = list(st.session_state.get("activity_log") or [])
     log.append(entry)
     st.session_state.activity_log = log[-50:]
+
+
+def get_truck_notes(truck: int) -> tuple[str, str, str]:
+    t = int(truck)
+    global_note = (st.session_state.sup_notes_global.get(t) or "").strip()
+    daily_note = (st.session_state.sup_notes_daily.get(t) or "").strip()
+    if global_note and daily_note:
+        combined = f"Global: {global_note}\nDaily: {daily_note}"
+    elif global_note:
+        combined = global_note
+    else:
+        combined = daily_note
+    return global_note, daily_note, combined
 
 def _now_local():
     try:
@@ -928,7 +944,12 @@ def render_fleet_management():
             with col:
                 if st.button(str(int(t)), key=f"sup_manage_pick_{t}", use_container_width=False, type="primary"):
                     st.session_state.sup_manage_truck = int(t)
-                    st.session_state.sup_manage_action = None
+                    pref_action = st.session_state.get("sup_manage_pref_action")
+                    if pref_action:
+                        st.session_state.sup_manage_action = pref_action
+                        st.session_state.sup_manage_pref_action = None
+                    else:
+                        st.session_state.sup_manage_action = None
                     st.rerun()
         st.caption("Select a truck to manage.")
         return
@@ -945,9 +966,10 @@ def render_fleet_management():
     )
     c_back = st.columns(3)[1]
     with c_back:
-        if st.button("Select Different Truck", use_container_width=True, key="sup_manage_back"):
+        if st.button("Back to Step 1", use_container_width=True, key="sup_manage_back"):
             st.session_state.sup_manage_truck = None
             st.session_state.sup_manage_action = None
+            st.session_state.sup_manage_pref_action = None
             st.rerun()
 
     action = st.session_state.get("sup_manage_action")
@@ -963,7 +985,13 @@ def render_fleet_management():
                     st.rerun()
         return
 
-    st.markdown(f"<div style='text-align:center; font-weight:800; font-size:22px;'>Step 2 - {action}</div>", unsafe_allow_html=True)
+    c_back_action = st.columns(3)[1]
+    with c_back_action:
+        if st.button("Back to Step 2", use_container_width=True, key="sup_manage_back_action"):
+            st.session_state.sup_manage_action = None
+            st.session_state.sup_manage_pref_action = None
+            st.rerun()
+    st.markdown(f"<div style='text-align:center; font-weight:800; font-size:22px;'>Step 3 - {action}</div>", unsafe_allow_html=True)
 
     last_dur = st.session_state.load_durations.get(sel)
     inprog_now = (sel in st.session_state.inprog_set)
@@ -982,22 +1010,35 @@ def render_fleet_management():
     st.divider()
     if action == "Notes":
         st.write("### Notes")
-        note_val = st.text_area(
-            "Notes (shown on In Progress + printed on PDF)",
-            value=st.session_state.sup_notes.get(int(sel), ""),
-            height=120,
-            key="sup_manage_note_text",
+        global_note, daily_note, _ = get_truck_notes(sel)
+        note_val_global = st.text_area(
+            "General notes (persist across days)",
+            value=global_note,
+            height=110,
+            key="sup_manage_note_global_text",
         )
-        c1, c2 = st.columns([1, 1])
+        note_val_daily = st.text_area(
+            "Daily notes (reset each run day)",
+            value=daily_note,
+            height=110,
+            key="sup_manage_note_daily_text",
+        )
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            if st.button("Save note", use_container_width=True, key="sup_manage_save_note"):
-                st.session_state.sup_notes[int(sel)] = (note_val or "").strip()
-                st.success("Note saved.")
+            if st.button("Clear daily", use_container_width=True, key="sup_manage_clear_note_daily"):
+                st.session_state.sup_notes_daily.pop(int(sel), None)
+                st.success("Daily note cleared.")
                 save_state()
         with c2:
-            if st.button("Clear note", use_container_width=True, key="sup_manage_clear_note"):
-                st.session_state.sup_notes.pop(int(sel), None)
-                st.success("Note cleared.")
+            if st.button("Save notes", use_container_width=True, key="sup_manage_save_note"):
+                st.session_state.sup_notes_global[int(sel)] = (note_val_global or "").strip()
+                st.session_state.sup_notes_daily[int(sel)] = (note_val_daily or "").strip()
+                st.success("Notes saved.")
+                save_state()
+        with c3:
+            if st.button("Clear global", use_container_width=True, key="sup_manage_clear_note_global"):
+                st.session_state.sup_notes_global.pop(int(sel), None)
+                st.success("General note cleared.")
                 save_state()
 
     elif action == "Status":
@@ -1013,14 +1054,20 @@ def render_fleet_management():
         else:
             cur_status = "Dirty"
 
-        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop"]
-        status_sel = st.selectbox("Status", status_options, index=status_options.index(cur_status), key="sup_manage_status_sel")
+        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop", "Out Of Service"]
+        status_sel = st.selectbox("Status", status_options, index=status_options.index(cur_status) if cur_status in status_options else 0, key="sup_manage_status_sel")
+        shop_load_on = ""
+        if status_sel == "Shop":
+            shop_load_on = st.text_input("Load On? (optional)", key="sup_manage_status_load_on")
         if st.button("Apply status change", key="sup_manage_apply_status"):
-            st.session_state.sup_pending_status = {"truck": sel, "status": status_sel}
+            st.session_state.sup_pending_status = {"truck": sel, "status": status_sel, "load_on": shop_load_on}
 
         pending = st.session_state.get("sup_pending_status")
         if pending and pending.get("truck") == sel:
-            st.warning(f"Confirm change Truck {sel} -> {pending.get('status')}")
+            if cur_status == "Shop" and pending.get("status") != "Shop":
+                st.warning(f"Has Truck {sel} returned from shop? Confirm change to {pending.get('status')}.")
+            else:
+                st.warning(f"Confirm change Truck {sel} -> {pending.get('status')}")
             c1, c2 = st.columns([1, 1])
             with c1:
                 if st.button("Confirm status change", key="sup_manage_confirm_status"):
@@ -1031,6 +1078,7 @@ def render_fleet_management():
                     st.session_state.inprog_set.discard(sel)
                     st.session_state.shop_set.discard(sel)
                     st.session_state.off_set.discard(sel)
+                    rerun_needed = False
                     if pending.get("status") == "Dirty":
                         pass
                     elif pending.get("status") == "Unloaded":
@@ -1042,13 +1090,25 @@ def render_fleet_management():
                         st.session_state.load_finish_times[sel] = time.time()
                     elif pending.get("status") == "Shop":
                         st.session_state.shop_set.add(sel)
+                        load_on = (pending.get("load_on") or "").strip()
+                        if load_on:
+                            st.session_state.shop_spares[int(sel)] = load_on
+                            push_shop_notice(f"Sent to shop: #{sel} (Load on: {load_on})", kind="shop", notice_type="shop_send", truck=sel)
+                        else:
+                            st.session_state.shop_spares.pop(int(sel), None)
+                            push_shop_notice(f"Sent to shop: #{sel}", kind="shop", notice_type="shop_send", truck=sel)
                         if not was_shop:
                             st.session_state.shop_prev_status[int(sel)] = prev_status
+                    elif pending.get("status") == "Out Of Service":
+                        st.session_state.off_set.add(sel)
+                        rerun_needed = True
                     if was_shop and pending.get("status") != "Shop":
                         push_shop_notice(f"Returned from shop: #{sel} — {pending.get('status')}", kind="return")
                     _mark_and_save()
                     st.success(f"Truck {sel} status updated to {pending.get('status')}.")
                     st.session_state.sup_pending_status = None
+                    if rerun_needed:
+                        st.rerun()
             with c2:
                 if st.button("Cancel", key="sup_manage_cancel_status"):
                     st.session_state.sup_pending_status = None
@@ -1103,13 +1163,21 @@ def render_fleet_management():
             unsafe_allow_html=True,
         )
         shop_reason = st.text_input("Shop reason (optional)", key="sup_manage_shop_reason")
+        shop_spare = st.text_input("Load On? (optional)", key="sup_manage_shop_spare")
 
-        def _send_to_shop(reason: str):
+        def _send_to_shop(reason: str, spare: str):
             if sel not in st.session_state.shop_set:
                 st.session_state.shop_prev_status[int(sel)] = current_status_label(sel)
             st.session_state.shop_set.add(sel)
             st.session_state.shop_notes[sel] = (reason or "").strip()
+            spare_val = (spare or "").strip()
+            if spare_val:
+                st.session_state.shop_spares[sel] = spare_val
+            else:
+                st.session_state.shop_spares.pop(sel, None)
             msg = f"Sent to shop: #{sel}" + (f" — {reason}" if reason else "")
+            if spare_val:
+                msg += f" (Load on: {spare_val})"
             push_shop_notice(msg, kind="shop", notice_type="shop_send", truck=sel)
             log_action(f"Truck {sel} sent to Shop")
             if st.session_state.get("next_up_truck") == sel:
@@ -1125,10 +1193,10 @@ def render_fleet_management():
 
         if st.button("Send to Shop", use_container_width=True, key="sup_manage_send_shop"):
             if is_duplicate_notice(sel, "shop_send"):
-                st.session_state.shop_send_confirm = {"truck": sel, "reason": shop_reason}
+                st.session_state.shop_send_confirm = {"truck": sel, "reason": shop_reason, "spare": shop_spare}
             else:
                 st.session_state.shop_send_confirm = None
-                _send_to_shop(shop_reason)
+                _send_to_shop(shop_reason, shop_spare)
 
         confirm_send = st.session_state.get("shop_send_confirm")
         if confirm_send and confirm_send.get("truck") == sel:
@@ -1137,7 +1205,7 @@ def render_fleet_management():
             with c1:
                 if st.button("Confirm send", use_container_width=True, key="sup_manage_send_shop_confirm"):
                     st.session_state.shop_send_confirm = None
-                    _send_to_shop(confirm_send.get("reason", ""))
+                    _send_to_shop(confirm_send.get("reason", ""), confirm_send.get("spare", ""))
             with c2:
                 if st.button("Cancel", use_container_width=True, key="sup_manage_send_shop_cancel"):
                     st.session_state.shop_send_confirm = None
@@ -1145,6 +1213,7 @@ def render_fleet_management():
             if sel in st.session_state.shop_set:
                 st.session_state.shop_set.discard(sel)
                 st.session_state.shop_notes.pop(sel, None)
+                st.session_state.shop_spares.pop(sel, None)
                 prev = st.session_state.shop_prev_status.pop(int(sel), None)
                 if prev == "Loaded":
                     st.session_state.loaded_set.add(sel)
@@ -1226,7 +1295,6 @@ def render_fleet_management():
                         pass
                     removed.append(t)
                     st.session_state["removed_fleet"] = sorted(set(removed))
-                    remove_truck_entirely(t)
                     try:
                         FLEET[:] = sorted(set(FLEET) - {t})
                     except Exception:
@@ -1287,18 +1355,15 @@ def normalize_states():
     st.session_state.inprog_set -= st.session_state.shop_set
     st.session_state.loaded_set -= st.session_state.shop_set
 
-    # Move any Off trucks to Unloaded (no separate Off status)
-    if st.session_state.off_set:
-        st.session_state.cleaned_set |= st.session_state.off_set
-        st.session_state.off_set = set()
-        st.session_state.off_notes = {}
+    # Off trucks persist in off_set until explicitly changed
+    # Do NOT auto-move Off trucks to Unloaded or any other status
 
     # Clear next-up if it is no longer Unloaded
     next_up = st.session_state.get("next_up_truck")
     if next_up is not None:
         try:
             n = int(next_up)
-            if n not in st.session_state.cleaned_set or n in off_trucks_for_today():
+            if n not in st.session_state.cleaned_set:
                 st.session_state.next_up_truck = None
         except Exception:
             st.session_state.next_up_truck = None
@@ -1339,15 +1404,33 @@ def start_loading_truck(truck: int):
     st.session_state.load_start_times[t] = st.session_state.inprog_start_time
     st.session_state.load_finish_times.pop(t, None)
     if st.session_state.get("next_up_truck") == t:
-        st.session_state.next_up_truck = None
+        st.session_state.next_up_truck = st.session_state.get("next_after_truck")
+        st.session_state.next_after_truck = None
+    if st.session_state.get("next_after_truck") == t:
+        st.session_state.next_after_truck = None
     log_action(f"Start loading Truck {t}")
 
+def mark_return_from_shop(truck: int, new_status_label: str):
+    t = int(truck)
+    if t not in st.session_state.shop_set:
+        return
+    st.session_state.shop_set.discard(t)
+    st.session_state.shop_notes.pop(t, None)
+    st.session_state.shop_spares.pop(t, None)
+    st.session_state.shop_prev_status.pop(t, None)
+    push_shop_notice(f"Returned from shop: #{t} — {new_status_label}", kind="return")
+    log_action(f"Truck {t} returned from Shop")
+
 def render_next_up_controls(context_key: str):
-    unloaded = sorted(st.session_state.cleaned_set - off_trucks_for_today())
+    unloaded = sorted(st.session_state.cleaned_set)
     current = st.session_state.get("next_up_truck")
+    next_after = st.session_state.get("next_after_truck")
+    off_today = off_trucks_for_today()
     st.write("### Next up queue")
     if current:
         st.info(f"Current next up: Truck {int(current)}")
+        if next_after:
+            st.caption(f"Current in-progress unload: Truck {int(next_after)}")
     else:
         st.caption("No next-up truck set.")
     if not unloaded:
@@ -1357,13 +1440,16 @@ def render_next_up_controls(context_key: str):
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("Set Next Up", key=f"next_up_set_{context_key}", use_container_width=True):
-            st.session_state.next_up_truck = int(pick)
-            _mark_and_save()
-            st.success(f"Next up set to Truck {int(pick)}.")
-            if st.session_state.get("next_up_return_screen"):
-                st.session_state.active_screen = st.session_state.next_up_return_screen
-                st.session_state.next_up_return_screen = None
-            st.rerun()
+            if int(pick) in off_today:
+                st.session_state.next_up_pending = int(pick)
+            else:
+                st.session_state.next_up_truck = int(pick)
+                _mark_and_save()
+                st.success(f"Next up set to Truck {int(pick)}.")
+                if st.session_state.get("next_up_return_screen"):
+                    st.session_state.active_screen = st.session_state.next_up_return_screen
+                    st.session_state.next_up_return_screen = None
+                st.rerun()
     with c2:
         if st.button("Clear Next Up", key=f"next_up_clear_{context_key}", use_container_width=True):
             st.session_state.next_up_truck = None
@@ -1374,12 +1460,43 @@ def render_next_up_controls(context_key: str):
                 st.session_state.next_up_return_screen = None
             st.rerun()
 
+    pending_next = st.session_state.get("next_up_pending")
+    if pending_next is not None:
+        st.warning(f"Truck #{int(pending_next)} is off Day {_current_ship_day_num() or '?'} — set as Next Up anyway?")
+        c3, c4 = st.columns([1, 1])
+        with c3:
+            if st.button("Confirm Next Up", key=f"next_up_confirm_{context_key}", use_container_width=True):
+                st.session_state.next_up_truck = int(pending_next)
+                st.session_state.next_up_pending = None
+                _mark_and_save()
+                st.success(f"Next up set to Truck {int(pending_next)}.")
+                if st.session_state.get("next_up_return_screen"):
+                    st.session_state.active_screen = st.session_state.next_up_return_screen
+                    st.session_state.next_up_return_screen = None
+                st.rerun()
+        with c4:
+            if st.button("Cancel", key=f"next_up_cancel_{context_key}", use_container_width=True):
+                st.session_state.next_up_pending = None
+                st.rerun()
+
+    if current:
+        off_today = off_trucks_for_today()
+        off_day_num = _current_ship_day_num()
+        off_day_label = str(int(off_day_num)) if off_day_num else "?"
+        if off_today:
+            c_off = st.columns([1, 1, 1])[1]
+            off_list_text = ", ".join(str(int(t)) for t in sorted(off_today))
+            off_button_label = "Show Off"
+            with c_off:
+                if st.button(off_button_label, key=f"next_after_show_off_{context_key}", use_container_width=True):
+                    st.info(f"Off Day {off_day_label}: {off_list_text}")
+
 def remove_truck_from_batches(truck: int):
     t = int(truck)
     for i in range(1, BATCH_COUNT + 1):
         if t in st.session_state.batches[i]["trucks"]:
             st.session_state.batches[i]["trucks"].remove(t)
-            st.session_state.batches[i]["total"] -= int(st.session_state.wearers.get(t, 0))
+            st.session_state.batches[i]["total"] -= int(st.session_state.wearers.get(t, 0) or 0)
 
 def apply_off_schedule(day_num: int | None):
     scheduled = sorted(off_trucks_for_day(day_num))
@@ -1393,6 +1510,9 @@ def apply_off_schedule(day_num: int | None):
 
 
 def reset_status_for_new_day(day_num: int | None):
+    shorts_disabled = bool(st.session_state.get("shorts_disabled"))
+    batching_disabled = bool(st.session_state.get("batching_disabled"))
+    shorts_mode = st.session_state.get("shorts_mode") or SHORTS_MODE_EXCEL
     # Reset all trucks to dirty, preserving shop status, then apply off schedule.
     st.session_state.cleaned_set = set()
     st.session_state.loaded_set = set()
@@ -1409,6 +1529,7 @@ def reset_status_for_new_day(day_num: int | None):
     st.session_state.break_used = False
 
     st.session_state.next_up_truck = None
+    st.session_state.next_after_truck = None
     st.session_state.next_up_return_screen = None
     st.session_state.pending_start_truck = None
     st.session_state.start_blocked = False
@@ -1419,7 +1540,12 @@ def reset_status_for_new_day(day_num: int | None):
     st.session_state.unload_inprog_start_time = None
     st.session_state.unload_inprog_wearers = 0
 
-    st.session_state.shorts_disabled = False
+    st.session_state.shorts_disabled = shorts_disabled
+    st.session_state.batching_disabled = batching_disabled
+    st.session_state.shorts_mode = shorts_mode
+    st.session_state.sup_notes_daily = {}
+    st.session_state.shop_spares = {}
+    st.session_state.shorts_button_state = {}
 
     st.session_state.wearers = {}
     st.session_state.batches = {i: {"trucks": [], "total": 0} for i in range(1, BATCH_COUNT + 1)}
@@ -1444,9 +1570,11 @@ def remove_truck_entirely(truck: int):
     # Remove wearers and notes
     st.session_state.wearers.pop(t, None)
     st.session_state.shop_notes.pop(t, None)
+    st.session_state.shop_spares.pop(t, None)
     st.session_state.shop_prev_status.pop(t, None)
     st.session_state.off_notes.pop(t, None)
-    st.session_state.sup_notes.pop(t, None)
+    st.session_state.sup_notes_global.pop(t, None)
+    st.session_state.sup_notes_daily.pop(t, None)
 
     # Remove timing data
     st.session_state.load_durations.pop(t, None)
@@ -1458,6 +1586,7 @@ def remove_truck_entirely(truck: int):
     st.session_state.shorts_initials.pop(t, None)
     st.session_state.shorts_initials_ts.pop(t, None)
     st.session_state.shorts_initials_history.pop(t, None)
+    st.session_state.shorts_button_state.pop(t, None)
 
     if st.session_state.get("next_up_truck") == t:
         st.session_state.next_up_truck = None
@@ -1495,6 +1624,151 @@ def ensure_shorts_model(truck: int):
     if item == "Towels" and (qty == 1 or qty == "1") and not note and not has_initials:
         st.session_state.shorts[t] = [{"item": "None", "qty": None, "note": ""}]
 
+def _default_shorts_button_state() -> dict:
+    return {
+        "step": "category",
+        "category": None,
+        "bulk_group": None,
+        "item": None,
+        "qty": 1,
+    }
+
+def _get_shorts_button_state(truck: int) -> dict:
+    t = int(truck)
+    state = st.session_state.get("shorts_button_state") or {}
+    return state.get(t, _default_shorts_button_state())
+
+def _set_shorts_button_state(truck: int, new_state: dict):
+    t = int(truck)
+    state = st.session_state.get("shorts_button_state") or {}
+    state[t] = new_state
+    st.session_state.shorts_button_state = state
+
+def _reset_shorts_button_state(truck: int):
+    _set_shorts_button_state(truck, _default_shorts_button_state())
+
+def _shorts_button_add_item(truck: int, label: str, qty: int):
+    t = int(truck)
+    ensure_shorts_model(t)
+    rows = list(st.session_state.shorts.get(t, []))
+    rows = [r for r in rows if (r.get("item") or "").strip() and r.get("item") != "None"]
+    rows.append({"item": label, "qty": int(qty), "note": ""})
+    st.session_state.shorts[t] = rows
+
+def render_shorts_button_flow(truck: int):
+    t = int(truck)
+    state = _get_shorts_button_state(t)
+    step = state.get("step") or "category"
+    category = state.get("category")
+    bulk_group = state.get("bulk_group")
+    item = state.get("item")
+
+    st.write("### Button Selection")
+    if step == "category":
+        st.caption("Select a category")
+        cols = st.columns(5)
+        for idx, cat in enumerate(SHORTS_BUTTON_MAP.keys()):
+            with cols[idx % 5]:
+                if st.button(cat, use_container_width=True, key=f"shorts_cat_{t}_{cat}"):
+                    next_step = "bulk_group" if cat == "Bulk" else "item"
+                    _set_shorts_button_state(t, {"step": next_step, "category": cat, "bulk_group": None, "item": None, "qty": 1})
+                    st.rerun()
+        return
+
+    if step == "bulk_group":
+        st.caption("Bulk group")
+        groups = list(SHORTS_BUTTON_MAP.get("Bulk", {}).keys())
+        cols = st.columns(3)
+        for idx, group in enumerate(groups):
+            with cols[idx % 3]:
+                if st.button(group, use_container_width=True, key=f"shorts_bulk_{t}_{group}"):
+                    _set_shorts_button_state(t, {"step": "item", "category": "Bulk", "bulk_group": group, "item": None, "qty": 1})
+                    st.rerun()
+        if st.button("Back to categories", use_container_width=True, key=f"shorts_bulk_back_{t}"):
+            _reset_shorts_button_state(t)
+            st.rerun()
+        return
+
+    if step == "item":
+        if category == "Bulk":
+            items = list(SHORTS_BUTTON_MAP.get("Bulk", {}).get(bulk_group or "", []))
+            title = f"Bulk — {bulk_group}" if bulk_group else "Bulk"
+        else:
+            items = list(SHORTS_BUTTON_MAP.get(category or "", []))
+            title = category or "Items"
+        st.caption(f"Select item — {title}")
+        cols = st.columns(3)
+        for idx, it in enumerate(items):
+            with cols[idx % 3]:
+                if st.button(it, use_container_width=True, key=f"shorts_item_{t}_{it}"):
+                    state = {"step": "qty", "category": category, "bulk_group": bulk_group, "item": it, "qty": 1}
+                    _set_shorts_button_state(t, state)
+                    st.rerun()
+        if st.button("Back", use_container_width=True, key=f"shorts_item_back_{t}"):
+            prev_step = "bulk_group" if category == "Bulk" else "category"
+            _set_shorts_button_state(t, {"step": prev_step, "category": category if prev_step != "category" else None, "bulk_group": bulk_group if prev_step == "bulk_group" else None, "item": None, "qty": 1})
+            st.rerun()
+        return
+
+    if step == "qty":
+        label = item or ""
+        st.caption(f"Amount — {label}")
+        qty = st.number_input("Amount", min_value=0, step=1, value=int(state.get("qty") or 1), key=f"shorts_qty_{t}")
+        components.html(
+            """
+            <script>
+            (function(){
+                const root = window.parent.document;
+                const el = root.querySelector('input[aria-label="Amount"]');
+                if (!el) return;
+                el.setAttribute('inputmode', 'numeric');
+                el.setAttribute('pattern', '[0-9]*');
+                el.focus();
+                el.select();
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Add item", use_container_width=True, key=f"shorts_add_{t}"):
+                if int(qty) <= 0:
+                    st.warning("Amount must be 1 or more.")
+                else:
+                    if category == "Bulk":
+                        full_label = f"Bulk - {bulk_group} - {label}" if bulk_group else f"Bulk - {label}"
+                    else:
+                        full_label = f"{category} - {label}"
+                    _shorts_button_add_item(t, full_label, int(qty))
+                    _set_shorts_button_state(t, {"step": "more", "category": None, "bulk_group": None, "item": None, "qty": 1})
+                    st.rerun()
+        with c2:
+            if st.button("Back", use_container_width=True, key=f"shorts_qty_back_{t}"):
+                _set_shorts_button_state(t, {"step": "item", "category": category, "bulk_group": bulk_group, "item": None, "qty": 1})
+                st.rerun()
+        return
+
+    if step == "more":
+        st.info("Add another shortage?")
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Add more", use_container_width=True, key=f"shorts_more_{t}"):
+                _reset_shorts_button_state(t)
+                st.rerun()
+        with c2:
+            if st.button("Finish shorts", use_container_width=True, key=f"shorts_finish_{t}"):
+                _set_shorts_button_state(t, {"step": "done", "category": None, "bulk_group": None, "item": None, "qty": 1})
+                st.rerun()
+        return
+
+    if step == "done":
+        st.success("Shorts ready. Use Save & Done below to finish.")
+        if st.button("Add more", use_container_width=True, key=f"shorts_done_more_{t}"):
+            _reset_shorts_button_state(t)
+            st.rerun()
+
 def go(screen: str):
     st.session_state.active_screen = screen
     _push_nav_history(force=True)
@@ -1513,6 +1787,7 @@ def badge_label(label: str) -> str:
         "In Progress": "🟠",
         "Unloaded": "🟢",
         "Loaded": "🟢",
+        "Out Of Service": "⚫",  # Black circle for OOS
     }
     icon = icon_map.get(label, "")
     return f"{icon} {label}" if icon else label
@@ -1521,26 +1796,12 @@ def badge_label(label: str) -> str:
 def sidebar_badge_link(label: str, value: str | int, color: str, target_page: str):
     # Try to use the local badge component (no full reload) and fall back to
     # a simple button if components aren't available.
-    try:
-        comp = declare_component("badge_component", path="components/badge_component/frontend")
-        # Call the component; it should return a dict like {target:..., clicked: True}
-        res = comp(label=badge_label(label), value=str(value), color=color, target=target_page, key=f"badge_{target_page}")
-        if isinstance(res, dict) and res.get("clicked"):
-            st.session_state.active_screen = res.get("target") or target_page
+    # Always use fallback UI (sidebar button) since custom component is unavailable
+    with st.sidebar.container():
+        if st.button(f"{badge_label(label)}  •  {value}", key=f"sidebar_badge_{target_page}", use_container_width=True):
+            st.session_state.active_screen = target_page
             _mark_and_save()
             st.rerun()
-    except Exception:
-        container = st.sidebar.container()
-        sval = str(value)
-        safe_color = color or "#cccccc"
-        c0, c1 = container.columns([1, 6])
-        with c0:
-            st.markdown(f"<div style='width:28px; height:28px; border-radius:50%; background:{safe_color};'></div>", unsafe_allow_html=True)
-        with c1:
-            if st.button(f"{badge_label(label)}  •  {value}", key=f"sidebar_badge_{target_page}", use_container_width=True):
-                st.session_state.active_screen = target_page
-                _mark_and_save()
-                st.rerun()
 
 def render_truck_bubbles(trucks: list[int], from_page: str | None = None):
     # This is what you asked for: bubbled lists INSIDE each status link page
@@ -1549,9 +1810,25 @@ def render_truck_bubbles(trucks: list[int], from_page: str | None = None):
         return
     
     # Create a grid of bubble buttons that navigate in-place without opening new tabs
-    cols = st.columns(8)
+    import streamlit as stlib
+    import sys
+    # Dynamically set columns for mobile
+    num_cols = 8
+    if hasattr(stlib, 'runtime') or (hasattr(sys, 'platform') and sys.platform in ['emscripten', 'android']):
+        num_cols = 4
+    # Try to detect small screens via window width (fallback to 4 cols)
+    try:
+        import streamlit.components.v1 as components
+        components.html("""
+        <script>
+        window.parent.postMessage({type: 'MOBILE_WIDTH', width: window.innerWidth}, '*');
+        </script>
+        """, height=0)
+    except Exception:
+        pass
+    cols = st.columns(num_cols)
     for idx, t in enumerate(trucks):
-        col = cols[idx % 8]
+        col = cols[idx % num_cols]
         with col:
             if st.button(str(int(t)), key=f"bubble_{from_page}_{t}", use_container_width=False, type="primary"):
                 # Navigate based on the page context
@@ -1670,7 +1947,6 @@ def generate_pdf_bytes() -> bytes:
                 max_width = w - (margin * 2)
                 item_w = 140
                 col_w = max(32, int((max_width - item_w) / max(1, len(trucks_chunk))))
-                table_w = item_w + col_w * len(trucks_chunk)
                 header_h = 18
                 row_h = 16
                 needed = header_h + row_h * len(items) + 8
@@ -1979,6 +2255,19 @@ def save_shorts_stop_timer(truck: int, initials: str, edited_rows: list[dict]) -
 # ==========================================================
 # Setup-first enforcement
 # ==========================================================
+
+# Auto-advance workday if last_setup_date is not today
+if st.session_state.get("last_setup_date") != date.today():
+    # Only auto-advance if run_date is not today
+    today = date.today()
+    # If run_date is not today, set run_date to today and ship_dates to [today+1]
+    st.session_state.run_date = today
+    st.session_state.ship_dates = [today + timedelta(days=1)]
+    st.session_state.run_date_key = today.isoformat()
+    st.session_state.setup_done = True
+    st.session_state.last_setup_date = today
+    save_state()
+
 # Only prompt to configure/start once per calendar day. If the app hasn't
 # been setup yet, or the last setup date doesn't match today, force SETUP.
 if (not st.session_state.setup_done) or (st.session_state.get("last_setup_date") != date.today()):
@@ -2095,9 +2384,14 @@ if raw_start and requested == "IN_PROGRESS" and raw_truck:
         sv = int(raw_truck[0] if isinstance(raw_truck, list) else raw_truck)
         # Only start if nothing else is in progress
         if not st.session_state.inprog_set:
-            start_loading_truck(sv)
-            _mark_and_save()
-            st.session_state.selected_truck = sv
+            if sv in st.session_state.shop_set:
+                st.session_state.pending_start_truck = sv
+                st.session_state.active_screen = "STATUS_CLEANED"
+                _mark_and_save()
+            else:
+                start_loading_truck(sv)
+                _mark_and_save()
+                st.session_state.selected_truck = sv
         else:
             # record that a start was attempted but blocked by an existing in-progress truck
             st.session_state.start_blocked = True
@@ -2140,6 +2434,7 @@ if st.session_state.active_screen == "BATCH" and st.session_state.get("unload_tr
         st.session_state.unload_inprog_truck = p
         st.session_state.unload_inprog_start_time = None
         st.session_state.unload_inprog_wearers = 0
+        st.session_state.next_up_truck = p
     except Exception:
         pass
 
@@ -2258,18 +2553,12 @@ if st.sidebar.button("Unload", use_container_width=True):
     st.rerun()
 
 if st.sidebar.button("Load", use_container_width=True):
-
-    st.session_state.active_screen = "STATUS_CLEANED"
+    st.session_state.active_screen = "LOAD"
     _mark_and_save()
     st.rerun()
 
-# Always render the main workflow/pages after the Load Management header
-
 if st.session_state.active_screen == "LOAD":
-    # No-op: LOAD page is now redirected to STATUS_CLEANED
-    pass
-
-# Continue rendering the rest of the app regardless of the active screen
+    st.markdown("<h2 style='text-align:center; margin:0 0 8px 0;'>Load Management</h2>", unsafe_allow_html=True)
 
 if st.sidebar.button("Fleet", use_container_width=True):
     st.session_state.active_screen = "FLEET"
@@ -2277,7 +2566,7 @@ if st.sidebar.button("Fleet", use_container_width=True):
     st.rerun()
 
 break_start = st.session_state.get("break_start_time")
-if break_start and st.session_state.get("break_duration"):
+if break_start:
     break_remaining = (st.session_state.break_duration or 0) - (time.time() - break_start)
     if break_remaining > 0:
         if st.sidebar.button("On Break", use_container_width=True):
@@ -2288,11 +2577,21 @@ if break_start and st.session_state.get("break_duration"):
 # ---- REVERTED STATUS BAR LOOK (single card) ----
 st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 st.sidebar.markdown("<div style='text-align:center; font-weight:800; font-size:1.2rem; margin:0 0 4px 0;'>Live status</div>", unsafe_allow_html=True)
-sidebar_badge_link("Dirty", len(dirty_trucks), RED, "UNLOAD")
-sidebar_badge_link("Shop", len(shop_list), RED, "STATUS_SHOP")
-sidebar_badge_link("In Progress", str(inprog_truck) if inprog_truck is not None else "None", ORANGE, "IN_PROGRESS")
-sidebar_badge_link("Unloaded", len(cleaned_list), GREEN, "STATUS_CLEANED")
-sidebar_badge_link("Loaded", len(loaded_list), GREEN, "STATUS_LOADED")
+shop_list_no_oos = [t for t in shop_list if t not in st.session_state.off_set]
+dirty_trucks_no_oos = [t for t in dirty_trucks if t not in st.session_state.off_set]
+cleaned_list_no_oos = [t for t in cleaned_list if t not in st.session_state.off_set]
+loaded_list_no_oos = [t for t in loaded_list if t not in st.session_state.off_set]
+inprog_truck_no_oos = inprog_truck if inprog_truck not in st.session_state.off_set else None
+
+sidebar_badge_link("Dirty", len(dirty_trucks_no_oos), RED, "UNLOAD")
+sidebar_badge_link("Shop", len(shop_list_no_oos), RED, "STATUS_SHOP")
+sidebar_badge_link("In Progress", str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None", ORANGE, "IN_PROGRESS")
+sidebar_badge_link("Unloaded", len(cleaned_list_no_oos), GREEN, "STATUS_CLEANED")
+sidebar_badge_link("Loaded", len(loaded_list_no_oos), GREEN, "STATUS_LOADED")
+
+# Out Of Service badge (grey), always show
+GREY = "#6b7280"  # Tailwind Gray-500
+sidebar_badge_link("Out Of Service", len(getattr(st.session_state, 'off_set', set())), GREY, "STATUS_OOS")
 
 if st.session_state.setup_done:
     st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
@@ -2332,17 +2631,28 @@ if st.session_state.active_screen.startswith("STATUS_"):
         title = "Unloaded"
     st.subheader(title)
 
+
     mapping = {
         "STATUS_DIRTY": dirty_trucks,
         "STATUS_CLEANED": cleaned_list,
         "STATUS_LOADED": loaded_list,
         "STATUS_SHOP": shop_list,
+        "STATUS_OOS": sorted(list(getattr(st.session_state, 'off_set', set()))),
     }
     trucks = mapping.get(st.session_state.active_screen, [])
 
     # Always show the truck bubbles list
     st.write("### Trucks")
     render_truck_bubbles(trucks, st.session_state.active_screen)
+
+    if st.session_state.active_screen == "STATUS_SHOP" and trucks:
+        spare_lines = []
+        for t in trucks:
+            spare = (st.session_state.shop_spares.get(int(t)) or "").strip()
+            if spare:
+                spare_lines.append(f"Truck #{int(t)} needs Loaded On #{spare}")
+        if spare_lines:
+            st.info(" • ".join(spare_lines))
 
     # If we're on the Loaded status and a specific truck was selected, show an overview below
     if st.session_state.active_screen == "STATUS_LOADED" and st.session_state.selected_truck:
@@ -2375,6 +2685,44 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 st.write(f"Started: {_format_ts(start_ts)}")
             if finish_ts:
                 st.write(f"Finished: {_format_ts(finish_ts)}")
+            next_up = st.session_state.get("next_up_truck")
+            if next_up is not None and not st.session_state.inprog_set:
+                st.markdown(
+                    (
+                        "<div style='text-align:center; margin:8px 0 6px 0;'>"
+                        "  <div style='font-size:12px; letter-spacing:0.16em; text-transform:uppercase; opacity:0.75;'>Next Up</div>"
+                        f"  <div style='font-size:46px; font-weight:900; line-height:1.0; color:#3b82f6;'>#{int(next_up)}</div>"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.warning(f"Next up: Truck {int(next_up)}. Start loading now?")
+                c1, c2, c3, c4 = st.columns([1, 2, 2, 1])
+                with c2:
+                    if st.button("Yes, start next up", use_container_width=True, key="start_next_up_status_loaded"):
+                        if int(next_up) in st.session_state.shop_set:
+                            st.session_state.pending_start_truck = int(next_up)
+                            st.session_state.active_screen = "STATUS_CLEANED"
+                            _mark_and_save()
+                            st.rerun()
+                        start_loading_truck(int(next_up))
+                        _mark_and_save()
+                        st.session_state.active_screen = "IN_PROGRESS"
+                        st.rerun()
+                with c3:
+                    if st.button("Change Next Up", use_container_width=True, key="change_next_up_status_loaded"):
+                        st.session_state.active_screen = "LOAD"
+                        _mark_and_save()
+                        st.rerun()
+                c5, c6, c7 = st.columns([1, 2, 1])
+                with c6:
+                    if not st.session_state.get("break_used"):
+                        if st.button("Start Break", use_container_width=True, key="start_break_status_loaded"):
+                            st.session_state.break_start_time = time.time()
+                            st.session_state.break_used = True
+                            st.session_state.active_screen = "BREAK"
+                            _mark_and_save()
+                            st.rerun()
             st.divider()
             if st.button("Open short sheet", use_container_width=True):
                 st.session_state.shorts_truck = t
@@ -2387,33 +2735,30 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 _mark_and_save()
                 st.rerun()
 
-            next_up = st.session_state.get("next_up_truck")
-            if next_up is not None and not st.session_state.inprog_set:
-                st.warning(f"Next up: Truck {int(next_up)}. Start loading now?")
-                c1, c2, c3 = st.columns([1, 1, 1])
-                with c1:
-                    if st.button("Yes, start next up", use_container_width=True, key="start_next_up_status_loaded"):
-                        start_loading_truck(int(next_up))
-                        _mark_and_save()
-                        st.session_state.active_screen = "IN_PROGRESS"
-                        st.rerun()
-                with c2:
-                    if st.button("Change Next Up", use_container_width=True, key="change_next_up_status_loaded"):
-                        st.session_state.active_screen = "LOAD"
-                        _mark_and_save()
-                        st.rerun()
-                with c3:
-                    if not st.session_state.get("break_used"):
-                        if st.button("Start Break", use_container_width=True, key="start_break_status_loaded"):
-                            st.session_state.break_start_time = time.time()
-                            st.session_state.break_used = True
-                            st.session_state.active_screen = "BREAK"
-                            _mark_and_save()
-                            st.rerun()
-
     if st.session_state.active_screen == "STATUS_CLEANED" and st.session_state.get("pending_start_truck"):
         pending_t = int(st.session_state.get("pending_start_truck"))
-        if pending_t in off_trucks_for_today():
+        if pending_t in st.session_state.shop_set:
+            st.warning(f"Truck {pending_t} is marked Shop. Has it returned? Confirm to start loading.")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("Confirm and start", use_container_width=True, key="confirm_shop_return_start"):
+                    mark_return_from_shop(pending_t, "In Progress")
+                    if not st.session_state.inprog_set:
+                        start_loading_truck(pending_t)
+                        st.session_state.active_screen = "IN_PROGRESS"
+                    else:
+                        st.session_state.start_blocked = True
+                        st.session_state.start_blocking_truck = next(iter(st.session_state.inprog_set))
+                        st.session_state.start_attempt_truck = pending_t
+                    st.session_state.pending_start_truck = None
+                    _mark_and_save()
+                    st.rerun()
+            with c2:
+                if st.button("No, cancel", use_container_width=True, key="cancel_shop_return_start"):
+                    st.session_state.pending_start_truck = None
+                    _mark_and_save()
+                    st.rerun()
+        elif pending_t in off_trucks_for_today():
             st.warning(f"Truck {pending_t} is scheduled Off for the load day. Override and load anyway?")
             c1, c2 = st.columns([1, 1])
             with c1:
@@ -2480,6 +2825,30 @@ if st.session_state.active_screen.startswith("STATUS_"):
 elif st.session_state.active_screen == "IN_PROGRESS":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
 
+
+    reminder = st.session_state.get("daily_notes", "")
+    import html
+    safe_reminder = html.escape(reminder).replace("\n", "<br>")
+    st.markdown(
+        (
+            "<div style='position:relative; width:100%; margin:4px 0 24px 0;'>"
+            "  <div id='daily-notes-box' style='width:560px; max-width:80vw; "
+            "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
+            "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
+            "    <div id='daily-notes-bar' style='display:flex; align-items:center; justify-content:center; "
+            "        padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; "
+            "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>"
+            "      <span style='margin:0 auto;'>Daily Notes</span>"
+            "    </div>"
+            "    <div id='daily-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
+            f"      {safe_reminder if safe_reminder else '<span style=\'opacity:0.5;\'>No notes set.</span>'}"
+            "    </div>"
+            "  </div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
     if not inprog_truck:
         st.info("No truck currently in progress.")
         if true_available:
@@ -2491,27 +2860,44 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             st.caption("No available trucks to start loading.")
     else:
         elapsed = elapsed_seconds()
-        note_text = (st.session_state.sup_notes.get(inprog_truck) or "").strip()
+        global_note, daily_note, note_text = get_truck_notes(inprog_truck)
         if note_text:
-            safe_note = html.escape(note_text).replace("\n", "<br>")
+            sections = []
+            if global_note:
+                safe_global = html.escape(global_note).replace("\n", "<br>")
+                sections.append(
+                    "<div style='padding-bottom:12px; margin-bottom:12px; border-bottom:2px solid rgba(255,255,255,0.18);'>"
+                    "  <div style='font-size:22px; letter-spacing:0.24em; text-transform:uppercase; opacity:0.7;'>General Notes</div>"
+                    f"  <div style='font-size:28px;'>{safe_global}</div>"
+                    "</div>"
+                )
+            if daily_note:
+                safe_daily = html.escape(daily_note).replace("\n", "<br>")
+                sections.append(
+                    "<div>"
+                    "  <div style='font-size:22px; letter-spacing:0.24em; text-transform:uppercase; opacity:0.7;'>Daily Notes</div>"
+                    f"  <div style='font-size:28px;'>{safe_daily}</div>"
+                    "</div>"
+                )
+            safe_note = "".join(sections)
             st.markdown(
                 (
-                    "<div style='position:relative; width:100%; margin:2px 0 2px 0;'>"
-                    "  <div id='inprog-notes' style='position:absolute; left:0; top:0; width:280px; max-width:40vw; "
-                    "      border-radius:12px; overflow:hidden; border:1px solid rgba(34,197,94,0.35); "
-                    "      background:rgba(15,23,42,0.55); box-shadow:0 10px 24px rgba(0,0,0,0.18);'>"
+                    "<div style='position:relative; width:100%; margin:4px 0 4px 0;'>"
+                    "  <div id='inprog-notes' style='position:absolute; left:0; top:0; width:560px; max-width:80vw; "
+                    "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
+                    "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
                     "    <div id='inprog-notes-bar' style='display:flex; align-items:center; justify-content:space-between; "
-                    "        padding:8px 10px; font-weight:900; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; "
-                    "        background:linear-gradient(90deg, rgba(34,197,94,0.18), rgba(59,130,246,0.16)); cursor:pointer; position:relative;'>"
+                    "        padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; "
+                    "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:pointer; position:relative;'>"
                     "      <span style='margin:0 auto;'>Notes</span>"
                     "    </div>"
-                    "    <div id='inprog-notes-body' style='padding:10px 12px; font-size:14px; line-height:1.25;'>"
+                    "    <div id='inprog-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
                     f"      {safe_note}"
                     "    </div>"
                     "  </div>"
                     "  <div style='text-align:center;'>"
-                    "    <div style='font-size:16px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
-                    f"    <div style='font-size:56px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
+                    "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
+                    f"    <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                     "  </div>"
                     "</div>"
                     ""
@@ -2521,9 +2907,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         else:
             st.markdown(
                 (
-                    "<div style='text-align:center; margin:0 0 2px 0;'>"
-                    "  <div style='font-size:16px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
-                    f"  <div style='font-size:56px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
+                    "<div style='text-align:center; margin:0 0 4px 0;'>"
+                    "  <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
+                    f"  <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                     "</div>"
                 ),
                 unsafe_allow_html=True,
@@ -2532,98 +2918,78 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         warn_m = int(st.session_state.warn_seconds) // 60 if st.session_state.warn_seconds else None
         warn_visible = 'block' if (st.session_state.warn_seconds and elapsed >= int(st.session_state.warn_seconds)) else 'none'
         warn_text = f"Load time exceeded the warning threshold ({warn_m} minutes)." if warn_m else ""
-        # Render the timer entirely inside a component iframe so JS can update it.
         init_elapsed = int(elapsed)
         start_epoch = int(st.session_state.inprog_start_time or time.time())
         warn_threshold = int(st.session_state.warn_seconds or 0)
-        timer_html = """
-        <div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;\">
-                    <div id=\"timer-card\" style=\"
-                            display:flex; align-items:center; justify-content:center; gap:16px; margin:8px 0 4px 0;\">
-            <div id=\"timer-box\" style=\"
-                padding:12px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
-                background:linear-gradient(135deg, rgba(22,163,74,0.18), rgba(245,158,11,0.12));
-                box-shadow:0 6px 18px rgba(0,0,0,0.12);\">
-              <div id=\"truck-elapsed\" style=\"font-size:34px; font-weight:800; line-height:1.1; color:__COLOR_GOOD__;\">__INIT_TEXT__</div>
-            </div>
-            <div id=\"truck-elapsed-warn\" style=\"display:__WARN_DISPLAY__; color:__WARN_COLOR__; font-weight:700;\">__WARN_TEXT__</div>
-          </div>
-        </div>
+        timer_html = f"""
+                <div style='position:relative; width:100%; margin:4px 0 24px 0;'>
+                    <div id='inprog-timer-box' style='width:560px; max-width:80vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
+                        <div id='inprog-timer-bar' style='display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>
+                            <span style="margin:0 auto; color:#fff; font-weight:900;">ELAPSED TIME</span>
+                        </div>
+                        <div id='inprog-timer-body' style='padding:20px 24px; font-size:96px; line-height:1.1; text-align:center; font-weight:800; color:{GREEN};'>
+                            <span id='truck-elapsed'>{seconds_to_mmss(elapsed)}</span>
+                        </div>
+                        <div id='truck-elapsed-warn' style='display:{warn_visible}; color:{ORANGE}; font-weight:700; text-align:center;'>{warn_text}</div>
+                    </div>
+                </div>
         <script>
-        (function(){
-            try {
+        (function(){{
+            try {{
                 const pad = n => String(n).padStart(2,'0');
-                const fmt = s => {
+                const fmt = s => {{
                     const m = Math.floor(s/60);
                     const sec = s % 60;
                     return pad(m) + ':' + pad(sec);
-                };
-                const colorFor = (elapsed, warn) => {
-                    if (!warn || warn <= 0) return '__COLOR_GOOD__';
+                }};
+                const colorFor = (elapsed, warn) => {{
+                    if (!warn || warn <= 0) return '{GREEN}';
                     const ratio = elapsed / warn;
-                    if (ratio < 0.7) return '__COLOR_GOOD__';
-                    if (ratio < 1) return '__COLOR_WARN__';
-                    return '__COLOR_ALERT__';
-                };
-                const startEpoch = __START__;
-                let elapsed = __INIT__;
-                const warn = __WARN__;
-                const tick = () => {
+                    if (ratio < 0.7) return '{GREEN}';
+                    if (ratio < 1) return '{ORANGE}';
+                    return '{RED}';
+                }};
+                const startEpoch = {start_epoch};
+                let elapsed = {init_elapsed};
+                const warn = {warn_threshold};
+                const tick = () => {{
                     const now = Math.floor(Date.now() / 1000);
                     elapsed = Math.max(0, now - startEpoch);
                     const el = document.getElementById('truck-elapsed');
                     const warnEl = document.getElementById('truck-elapsed-warn');
-                    const box = document.getElementById('timer-box');
-                    if (el) {
+                    const timerBody = document.getElementById('inprog-timer-body');
+                    if (el) {{
                         el.textContent = fmt(elapsed);
                         el.style.color = colorFor(elapsed, warn);
-                    }
-                    if (warnEl) {
+                    }}
+                    if (warnEl) {{
                         if (warn > 0 && elapsed >= warn) warnEl.style.display = 'block';
                         else warnEl.style.display = 'none';
-                    }
-                    if (box) {
-                        if (warn > 0 && elapsed >= warn) {
-                            box.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.25), 0 10px 22px rgba(0,0,0,0.16)';
-                        } else {
-                            box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
-                        }
-                    }
-                };
-                const sync = () => {
+                    }}
+                    if (timerBody) {{
+                        if (warn > 0 && elapsed >= warn) {{
+                            timerBody.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.25), 0 10px 22px rgba(0,0,0,0.16)';
+                        }} else {{
+                            timerBody.style.boxShadow = 'none';
+                        }}
+                    }}
+                }};
+                const sync = () => {{
                     tick();
                     const msToNext = 1000 - (Date.now() % 1000);
                     setTimeout(sync, msToNext);
-                };
+                }};
                 sync();
-            } catch(e){console.error(e);}
-        })();
+            }} catch(e){{console.error(e);}}
+        }})();
         </script>
         """
-        timer_html = (
-            timer_html
-            .replace("__INIT__", str(init_elapsed))
-            .replace("__START__", str(start_epoch))
-            .replace("__WARN__", str(warn_threshold))
-            .replace("__INIT_TEXT__", seconds_to_mmss(elapsed))
-            .replace("__WARN_DISPLAY__", warn_visible)
-            .replace("__WARN_COLOR__", ORANGE)
-            .replace("__WARN_TEXT__", warn_text)
-            .replace(
-                "display:flex; align-items:center; justify-content:center; gap:16px; margin:8px 0 4px 0;",
-                "display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; margin:8px 0 4px 0;",
-            )
-            .replace("font-weight:700;\">__WARN_TEXT__", "font-weight:700; text-align:center;\">__WARN_TEXT__")
-            .replace("__COLOR_GOOD__", GREEN)
-            .replace("__COLOR_WARN__", ORANGE)
-            .replace("__COLOR_ALERT__", RED)
-        )
-        components.html(timer_html, height=110)
+        components.html(timer_html, height=300)
 
         avg_all = average_load_time_seconds([])
         st.markdown(
             (
-                "<div style='text-align:center; margin-top:-18px; margin-bottom:12px; font-size:14px; opacity:0.75;'>"
+                "<div style='text-align:center; margin-top:-36px; margin-bottom:24px; font-size:28px; opacity:0.75;'>"
                 f"Average load time: {seconds_to_mmss(avg_all) if avg_all is not None else 'N/A'}"
                 "</div>"
             ),
@@ -2634,9 +3000,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         if next_up is not None:
             st.markdown(
                 (
-                    "<div style='text-align:center; margin:16px 0 2px 0;'>"
-                    "  <div style='font-size:12px; letter-spacing:0.14em; text-transform:uppercase; opacity:0.7;'>Next Up</div>"
-                    f"  <div style='font-size:56px; font-weight:900; line-height:1.0; color:#3b82f6;'>#{int(next_up)}</div>"
+                    "<div style='text-align:center; margin:32px 0 4px 0;'>"
+                    "  <div style='font-size:24px; letter-spacing:0.28em; text-transform:uppercase; opacity:0.7;'>Next Up</div>"
+                    f"  <div style='font-size:112px; font-weight:900; line-height:1.0; color:#3b82f6;'>#{int(next_up)}</div>"
                     "</div>"
                 ),
                 unsafe_allow_html=True,
@@ -2644,7 +3010,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             avg_next = average_load_time_seconds([int(next_up)])
             st.markdown(
                 (
-                    "<div style='text-align:center; margin-top:2px; font-size:14px; opacity:0.75;'>"
+                    "<div style='text-align:center; margin-top:4px; font-size:28px; opacity:0.75;'>"
                     f"Avg for next up: {seconds_to_mmss(avg_next) if avg_next is not None else 'N/A'}"
                     "</div>"
                 ),
@@ -2652,12 +3018,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             )
         else:
             st.markdown(
-                "<div style='text-align:center; font-size:13px; margin-top:4px; opacity:0.6;'>Next up: None</div>",
+                "<div style='text-align:center; font-size:26px; margin-top:8px; opacity:0.6;'>Next up: None</div>",
                 unsafe_allow_html=True,
             )
-
-        st.divider()
-        render_next_up_controls("inprog")
 
         st.divider()
         st.subheader("Finish Loading")
@@ -2712,6 +3075,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                         st.session_state.inprog_skip_confirm = False
                         st.rerun()
 
+        st.divider()
+        render_next_up_controls("inprog")
+
         # Timer runs in the component iframe above.
 
 
@@ -2733,16 +3099,17 @@ elif st.session_state.active_screen == "BREAK":
     next_up = st.session_state.get("next_up_truck")
     can_auto_start = bool(next_up is not None and not st.session_state.inprog_set)
     break_html = """
-    <div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;\">
-            <div style=\"display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; margin:8px 0 4px 0;\">
-        <div id=\"break-box\" style=\"
-            padding:14px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
-            background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.12));
-            box-shadow:0 6px 18px rgba(0,0,0,0.12);\">
-          <div id=\"break-remaining\" style=\"font-size:56px; font-weight:900; line-height:1.0; color:#22c55e;\">__INIT_TEXT__</div>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;"
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; margin:8px 0 4px 0;"
+            <div id="break-box" style="
+                padding:14px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
+                background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.12));
+                box-shadow:0 6px 18px rgba(0,0,0,0.12);"
+                <div id="break-remaining" style="font-size:168px; font-weight:900; line-height:1.0; color:#22c55e;">__INIT_TEXT__</div>
+            </div>
+            <div id="break-done" style="display:none; color:#f59e0b; font-weight:700; font-size:48px;">Break complete</div>
+            <div id="break-done-time" style="display:none; color:#2563eb; font-weight:700; font-size:48px; margin:0;">Break complete</div>
         </div>
-        <div id=\"break-done\" style=\"display:none; color:#f59e0b; font-weight:700;\">Break complete</div>
-      </div>
     </div>
     <script>
     (function(){
@@ -2753,6 +3120,16 @@ elif st.session_state.active_screen == "BREAK":
                 const sec = s % 60;
                 return pad(m) + ':' + pad(sec);
             };
+            const fmt12hr = () => {
+                const now = new Date();
+                let h = now.getHours();
+                let m = now.getMinutes();
+                let s = now.getSeconds();
+                let ampm = h >= 12 ? 'PM' : 'AM';
+                h = h % 12;
+                h = h ? h : 12;
+                return h + ':' + pad(m) + ':' + pad(s) + ' ' + ampm;
+            };
             const startEpoch = __START__;
             const duration = __DUR__;
             const autoStart = __AUTO__;
@@ -2762,8 +3139,15 @@ elif st.session_state.active_screen == "BREAK":
                 const remaining = Math.max(0, duration - elapsed);
                 const el = document.getElementById('break-remaining');
                 const done = document.getElementById('break-done');
+                const doneTime = document.getElementById('break-done-time');
                 if (el) el.textContent = fmt(remaining);
                 if (done) done.style.display = remaining <= 0 ? 'block' : 'none';
+                if (doneTime) {
+                    doneTime.style.display = remaining <= 0 ? 'block' : 'none';
+                    if (remaining <= 0) {
+                        doneTime.textContent = 'Time: ' + fmt12hr();
+                    }
+                }
                 if (autoStart && remaining <= 0 && !window.__breakAutoReloaded) {
                     window.__breakAutoReloaded = true;
                     window.parent.location.reload();
@@ -2780,19 +3164,106 @@ elif st.session_state.active_screen == "BREAK":
     </script>
     """
     if (time.time() - start_epoch) >= duration and can_auto_start:
+        if int(next_up) in st.session_state.shop_set:
+            st.session_state.pending_start_truck = int(next_up)
+            st.session_state.break_start_time = None
+            st.session_state.active_screen = "STATUS_CLEANED"
+            _mark_and_save()
+            st.rerun()
         start_loading_truck(int(next_up))
         st.session_state.break_start_time = None
         st.session_state.active_screen = "IN_PROGRESS"
         _mark_and_save()
         st.rerun()
+    # Calculate the return time from break in 12hr format
+    return_time_epoch = start_epoch + duration
+    return_time_struct = time.localtime(return_time_epoch)
+    return_hour = return_time_struct.tm_hour
+    return_min = return_time_struct.tm_min
+    return_sec = return_time_struct.tm_sec
+    ampm = "AM" if return_hour < 12 else "PM"
+    hour12 = return_hour % 12
+    hour12 = hour12 if hour12 else 12
+    return_time_str = f"{hour12}:{return_min:02d}:{return_sec:02d} {ampm}"
+
+    break_html = """
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;"
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; margin:0;"
+            <div id="break-box" style="
+                padding:4px 8px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
+                background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.12));
+                box-shadow:0 6px 18px rgba(0,0,0,0.12);"
+                <div id="break-remaining" style="font-size:168px; font-weight:900; line-height:1.0; color:#22c55e; margin:0;">__INIT_TEXT__</div>
+                <div style="text-align:center; margin:0;"
+                    <div style="font-size:22px; letter-spacing:0.14em; text-transform:uppercase; opacity:0.7; margin:0;">Return from break at</div>
+                    <div style="font-size:48px; font-weight:900; line-height:1.0; color:#2563eb; margin:0;">__RETURN_TIME__</div>
+                </div>
+            </div>
+            <div id="break-done" style="display:none; color:#f59e0b; font-weight:700; font-size:48px; margin:0;">Break complete</div>
+            <div id="break-done-time" style="display:none; color:#2563eb; font-weight:700; font-size:48px; margin:0;">Break complete</div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        try {
+            const pad = n => String(n).padStart(2,'0');
+            const fmt = s => {
+                const m = Math.floor(s/60);
+                const sec = s % 60;
+                return pad(m) + ':' + pad(sec);
+            };
+            const fmt12hr = () => {
+                const now = new Date();
+                let h = now.getHours();
+                let m = now.getMinutes();
+                let s = now.getSeconds();
+                let ampm = h >= 12 ? 'PM' : 'AM';
+                h = h % 12;
+                h = h ? h : 12;
+                return h + ':' + pad(m) + ':' + pad(s) + ' ' + ampm;
+            };
+            const startEpoch = __START__;
+            const duration = __DUR__;
+            const autoStart = __AUTO__;
+            const tick = () => {
+                const now = Math.floor(Date.now() / 1000);
+                const elapsed = Math.max(0, now - startEpoch);
+                const remaining = Math.max(0, duration - elapsed);
+                const el = document.getElementById('break-remaining');
+                const done = document.getElementById('break-done');
+                const doneTime = document.getElementById('break-done-time');
+                if (el) el.textContent = fmt(remaining);
+                if (done) done.style.display = remaining <= 0 ? 'block' : 'none';
+                if (doneTime) {
+                    doneTime.style.display = remaining <= 0 ? 'block' : 'none';
+                    if (remaining <= 0) {
+                        doneTime.textContent = 'Time: ' + fmt12hr();
+                    }
+                }
+                if (autoStart && remaining <= 0 && !window.__breakAutoReloaded) {
+                    window.__breakAutoReloaded = true;
+                    window.parent.location.reload();
+                }
+            };
+            const sync = () => {
+                tick();
+                const msToNext = 1000 - (Date.now() % 1000);
+                setTimeout(sync, msToNext);
+            };
+            sync();
+        } catch(e){console.error(e);}
+    })();
+    </script>
+    """
     break_html = (
         break_html
         .replace("__START__", str(start_epoch))
         .replace("__DUR__", str(duration))
         .replace("__AUTO__", str(can_auto_start).lower())
         .replace("__INIT_TEXT__", seconds_to_mmss(init_remaining))
+        .replace("__RETURN_TIME__", return_time_str)
     )
-    components.html(break_html, height=120)
+    components.html(break_html, height=340)
 
     if next_up is not None:
         st.markdown(
@@ -2863,17 +3334,41 @@ elif st.session_state.active_screen == "SETUP":
         key="warn_minutes",
     )
     st.session_state.warn_seconds = int(warn_min) * 60
+    current_shorts_mode = st.session_state.get("shorts_mode")
+    if not current_shorts_mode:
+        current_shorts_mode = SHORTS_MODE_DISABLE if st.session_state.get("shorts_disabled") else SHORTS_MODE_EXCEL
+    mode_index = SHORTS_MODE_OPTIONS.index(current_shorts_mode) if current_shorts_mode in SHORTS_MODE_OPTIONS else 0
+    st.session_state.shorts_mode = st.selectbox(
+        "Shortages entry method",
+        options=SHORTS_MODE_OPTIONS,
+        index=mode_index,
+        key="setup_shorts_mode",
+    )
+    st.session_state.shorts_disabled = st.session_state.shorts_mode == SHORTS_MODE_DISABLE
+    st.session_state.batching_disabled = st.checkbox(
+        "Disable batching for today (handled manually)",
+        value=bool(st.session_state.get("batching_disabled")),
+        key="setup_disable_batching",
+    )
+    daily_notes_prompt = st.checkbox(
+        "Do you have any daily specific fleet notes?",
+        value=False,
+        key="setup_daily_notes_prompt",
+    )
+    if daily_notes_prompt:
+        if st.button("Open Fleet Notes", use_container_width=True, key="setup_open_fleet_notes"):
+            st.session_state.sup_manage_pref_action = "Notes"
+            st.session_state.sup_manage_truck = None
+            st.session_state.sup_manage_action = None
+            st.session_state.active_screen = "FLEET"
+            _mark_and_save()
+            st.rerun()
 
     st.divider()
-    if st.session_state.get("last_setup_date") != date.today():
-        st.session_state.run_date = run_date
-        st.session_state.ship_dates = ship_dates
-        st.session_state.setup_done = True
-        st.session_state.last_setup_date = date.today()
-        day_num = ship_day_number(ship_dates[0]) if ship_dates else None
-        reset_status_for_new_day(day_num)
+    if (st.session_state.get("last_setup_date") != date.today()) or (st.session_state.get("run_date_key") != _run_date_key(run_date)):
+        apply_run_config(run_date, ship_dates)
         st.session_state.active_screen = "UNLOAD"
-        _mark_and_save()
+        save_state()
         st.rerun()
 
 # --------------------------
@@ -2886,7 +3381,6 @@ elif st.session_state.active_screen == "FLEET":
 
 # --------------------------
 # Management page
-# --------------------------
 elif st.session_state.active_screen == "SUPERVISOR":
     st.subheader("Management - Admin & Statistics")
 
@@ -2915,21 +3409,70 @@ elif st.session_state.active_screen == "SUPERVISOR":
             days = st.number_input("How many ship-days?", min_value=1, max_value=7, value=2, step=1, key="sup_ship_days")
             ship_dates = [start + timedelta(days=i) for i in range(int(days))]
 
+        # Global Reminder note editor
+        st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+        st.write("#### Daily Notes (visible all day)")
+        reminder = st.session_state.get("daily_notes", "")
+        new_reminder = st.text_area(
+            "Edit daily notes",
+            value=reminder,
+            height=110,
+            key="sup_global_reminder_text",
+        )
+        if new_reminder != reminder:
+            st.session_state["daily_notes"] = new_reminder
+            save_state()
+            logging.info("Daily notes updated from Management tab.")
+            st.success("Daily notes updated.")
+
         warn_min = st.number_input("Auto-warning threshold (minutes)", min_value=1, max_value=240, value=max(1, int(st.session_state.warn_seconds // 60)), step=1, key="sup_warn_minutes")
+        current_shorts_mode = st.session_state.get("shorts_mode")
+        if not current_shorts_mode:
+            current_shorts_mode = SHORTS_MODE_DISABLE if st.session_state.get("shorts_disabled") else SHORTS_MODE_EXCEL
+        mode_index = SHORTS_MODE_OPTIONS.index(current_shorts_mode) if current_shorts_mode in SHORTS_MODE_OPTIONS else 0
+        shorts_mode = st.selectbox(
+            "Shortages entry method",
+            options=SHORTS_MODE_OPTIONS,
+            index=mode_index,
+            key="sup_shorts_mode",
+        )
+        disable_batching = st.checkbox(
+            "Disable batching for today (handled manually)",
+            value=bool(st.session_state.get("batching_disabled")),
+            key="sup_disable_batching",
+        )
+        daily_notes_prompt = st.checkbox(
+            "Do you have any daily specific fleet notes?",
+            value=False,
+            key="sup_daily_notes_prompt",
+        )
+        if daily_notes_prompt:
+            if st.button("Open Fleet Notes", use_container_width=True, key="sup_open_fleet_notes"):
+                st.session_state.sup_manage_pref_action = "Notes"
+                st.session_state.sup_manage_truck = None
+                st.session_state.sup_manage_action = None
+                st.session_state.active_screen = "FLEET"
+                _mark_and_save()
+                st.rerun()
 
         if st.session_state.get("sup_run_date_last") != run_date:
             st.session_state["sup_run_date_last"] = run_date
-            st.session_state.run_date = run_date
-            st.session_state.ship_dates = ship_dates
             st.session_state.warn_seconds = int(warn_min) * 60
-            st.session_state.setup_done = True
-            st.session_state.last_setup_date = date.today()
-            day_num = ship_day_number(ship_dates[0]) if ship_dates else None
-            reset_status_for_new_day(day_num)
-            _mark_and_save()
+            st.session_state.shorts_mode = shorts_mode
+            st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
+            st.session_state.batching_disabled = bool(disable_batching)
+            apply_run_config(run_date, ship_dates)
             st.rerun()
 
         with st.expander("Off schedule (Day 1-5)", expanded=False):
+            st.markdown("""
+            **Day Mapping:**  
+            - Day 1 = Monday  
+            - Day 2 = Tuesday  
+            - Day 3 = Wednesday  
+            - Day 4 = Thursday  
+            - Day 5 = Friday
+            """)
             sched_day = st.selectbox("Schedule day", options=[1, 2, 3, 4, 5], key="sup_sched_day")
             current_sched = st.session_state.off_schedule.get(int(sched_day), []) if st.session_state.off_schedule else []
             if st.session_state.get("sup_sched_day_last") != sched_day:
@@ -2946,14 +3489,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 sd = int(st.session_state.get("sup_sched_day"))
                 pick = st.session_state.get("sup_sched_pick") or []
                 st.session_state.off_schedule[sd] = sorted({int(x) for x in pick})
-            st.session_state.run_date = run_date
-            st.session_state.ship_dates = ship_dates
             st.session_state.warn_seconds = int(warn_min) * 60
-            st.session_state.setup_done = True
-            st.session_state.last_setup_date = date.today()
-            day_num = ship_day_number(ship_dates[0]) if ship_dates else None
-            reset_status_for_new_day(day_num)
-            _mark_and_save()
+            st.session_state.shorts_mode = shorts_mode
+            st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
+            st.session_state.batching_disabled = bool(disable_batching)
+            apply_run_config(run_date, ship_dates)
             st.success("Management settings saved.")
 
     with st.expander("App Settings", expanded=False):
@@ -2978,15 +3518,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
             disabled=True,
         )
         st.caption("Theme is forced to Dark for all devices.")
-        disable_shorts = st.checkbox(
-            "Disable shortages for today (handled manually)",
-            value=bool(st.session_state.get("shorts_disabled")),
-            key="mgmt_disable_shorts",
-        )
         if st.button("Apply app settings", use_container_width=True, key="mgmt_app_settings_apply"):
             st.session_state.timezone_key = tz_pick
             st.session_state.ui_theme = "Dark"
-            st.session_state.shorts_disabled = bool(disable_shorts)
             save_state()
             st.success("App settings saved.")
             st.rerun()
@@ -3128,7 +3662,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state.shorts_initials_ts = {}
                     st.session_state.shorts_initials_history = {}
                     save_state()
-                    st.success("Shortages data cleared.")
+                    st.success("Shorts data cleared.")
                     st.session_state.reset_shorts_step = None
             with c2:
                 if st.button("Cancel", key="sup_reset_shorts_cancel"):
@@ -3180,11 +3714,51 @@ elif st.session_state.active_screen == "UNLOAD":
             col = cols[idx % 8]
             with col:
                 if st.button(str(int(t)), key=f"dirty_truck_{t}", use_container_width=False, type="primary"):
-                    st.session_state["unload_truck_select"] = int(t)
-                    st.session_state.active_screen = "BATCH"
-                    _mark_and_save()
-                    st.rerun()
+                    if st.session_state.get("batching_disabled"):
+                        st.session_state.pending_unload_truck = int(t)
+                        st.rerun()
+                    else:
+                        st.session_state["unload_truck_select"] = int(t)
+                        st.session_state.active_screen = "BATCH"
+                        _mark_and_save()
+                        st.rerun()
     render_unload_bubbles(dirty_trucks, sel_truck)
+    if st.session_state.get("batching_disabled") and st.session_state.get("pending_unload_truck") is not None:
+        pending_t = int(st.session_state.get("pending_unload_truck"))
+        if st.session_state.get("next_up_truck") and st.session_state.get("next_after_truck") is None:
+            st.info(f"Set the current in-progress unload. Use Truck {pending_t}?")
+            use_current = st.checkbox("Use this truck as current in-progress unload", value=True, key="next_after_unload_use_current")
+            if use_current:
+                if st.button(f"Set current in-progress unload to Truck {pending_t}", use_container_width=True, key="next_after_unload_set_current"):
+                    st.session_state.next_after_truck = int(pending_t)
+                    _mark_and_save()
+                    st.success(f"Current in-progress unload set to Truck {pending_t}.")
+            else:
+                options = [int(t) for t in FLEET if int(t) != int(st.session_state.get("next_up_truck"))]
+                if options:
+                    pick_after = st.selectbox("Select current in-progress unload", options=options, key="next_after_unload_pick")
+                    off_next = off_trucks_for_next_day()
+                    if int(pick_after) in off_next:
+                        st.warning(f"Truck {int(pick_after)} is scheduled Off next load day.")
+                    if int(pick_after) in st.session_state.shop_set:
+                        st.warning(f"Truck {int(pick_after)} is marked Shop.")
+                    if st.button("Set current in-progress unload", use_container_width=True, key="next_after_unload_set_pick"):
+                        st.session_state.next_after_truck = int(pick_after)
+                        _mark_and_save()
+                        st.success(f"Current in-progress unload set to Truck {int(pick_after)}.")
+        st.warning(f"Send Truck {pending_t} to Unloaded?")
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Yes, mark Unloaded", use_container_width=True, key="confirm_unload_manual"):
+                st.session_state.cleaned_set.add(pending_t)
+                st.session_state.pending_unload_truck = None
+                _mark_and_save()
+                st.success(f"Truck {pending_t} marked Unloaded (batching disabled).")
+                st.rerun()
+        with c2:
+            if st.button("Cancel", use_container_width=True, key="cancel_unload_manual"):
+                st.session_state.pending_unload_truck = None
+                st.rerun()
     st.info("Select a truck to begin unloading.")
 
     # Restore visually awesome batch cards at the bottom
@@ -3288,7 +3862,8 @@ elif st.session_state.active_screen == "TRUCK":
 
         st.divider()
         st.write("**Management note**")
-        note = st.text_area("Note", value=st.session_state.sup_notes.get(t, ""), key="truck_note_text", height=120, disabled=True)
+        _, _, note_text = get_truck_notes(t)
+        note = st.text_area("Note", value=note_text, key="truck_note_text", height=120, disabled=True)
 
         # Quick status adjustments: mark cleaned/dirty
         # Dirty -> offer batch assignment and mark cleaned
@@ -3322,8 +3897,10 @@ elif st.session_state.active_screen == "TRUCK":
         c1, c2 = st.columns([1,1])
         with c1:
             if st.button("Open in Management for editing", use_container_width=True):
-                st.session_state.sup_edit_truck = t
-                st.session_state.active_screen = "SUPERVISOR"
+                st.session_state.sup_manage_truck = t
+                st.session_state.sup_manage_action = None
+                st.session_state.sup_manage_pref_action = None
+                st.session_state.active_screen = "FLEET"
                 _mark_and_save()
                 st.rerun()
         with c2:
@@ -3350,10 +3927,53 @@ elif st.session_state.active_screen == "BATCH":
     if t is None:
         st.warning("No truck selected for batching.")
     else:
+        if st.session_state.get("batching_disabled"):
+            st.warning("Batching is disabled for today. Mark this truck Unloaded manually.")
+            if st.button("Mark Unloaded (batching disabled)", use_container_width=True):
+                st.session_state.cleaned_set.add(int(t))
+                st.session_state.unload_inprog_truck = None
+                st.session_state.unload_inprog_start_time = None
+                st.session_state.unload_inprog_wearers = 0
+                try:
+                    st.session_state["unload_truck_select"] = None
+                except Exception:
+                    pass
+                st.session_state.active_screen = "UNLOAD"
+                _mark_and_save()
+                st.success(f"Truck {int(t)} marked Unloaded (batching disabled).")
+                st.rerun()
+            st.stop()
         st.write(f"Batching — Truck {t}")
         st.markdown("<div id='batch-wearers'></div>", unsafe_allow_html=True)
         components.html("<script>const el=document.getElementById('batch-wearers'); if(el) el.scrollIntoView({behavior:'smooth'});</script>", height=0)
-        w = st.number_input("Wearers", min_value=0, step=1, value=int(st.session_state.get('unload_inprog_wearers',0)), key=f"batch_wearers_{t}")
+        wearers_raw = st.text_input(
+            "Wearers",
+            value=str(int(st.session_state.get("unload_inprog_wearers", 0) or 0)),
+            key=f"batch_wearers_{t}",
+        )
+        components.html(
+            """
+            <script>
+            (function(){
+                const root = window.parent.document;
+                const inputs = root.querySelectorAll('input[aria-label="Wearers"]');
+                inputs.forEach((el) => {
+                    el.setAttribute('inputmode', 'numeric');
+                    el.setAttribute('pattern', '[0-9]*');
+                });
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+        if str(wearers_raw).strip().isdigit():
+            w = int(wearers_raw)
+        elif str(wearers_raw).strip() == "":
+            w = 0
+        else:
+            w = 0
+            st.warning("Wearers must be a whole number.")
         st.session_state.unload_inprog_wearers = int(w)
         if st.button("Skip batching", use_container_width=True):
             st.session_state.cleaned_set.add(int(t))
@@ -3426,13 +4046,33 @@ elif st.session_state.active_screen == "LOAD":
 
     st.write("### Start loading")
     if (len(true_available) == 0) or (inprog_truck is not None):
-        st.caption("No available trucks to start.")
+        if inprog_truck is not None:
+            st.caption(f"Truck {int(inprog_truck)} is already in progress.")
+        elif cleaned_list:
+            off_list = sorted(off_today)
+            if off_list:
+                st.caption("No available trucks to start. Unloaded trucks are scheduled Off today.")
+                st.info(f"Off today: {', '.join(str(int(t)) for t in off_list)}")
+            else:
+                st.caption("No available trucks to start.")
+        else:
+            st.caption("No available trucks to start.")
+        if cleaned_list:
+            if st.button("Go to Unloaded trucks", use_container_width=True, key="load_go_unloaded"):
+                st.session_state.active_screen = "STATUS_CLEANED"
+                _mark_and_save()
+                st.rerun()
     else:
         cols = st.columns(8)
         for idx, t in enumerate(true_available):
             col = cols[idx % 8]
             with col:
                 if st.button(str(int(t)), key=f"load_start_{t}", use_container_width=False, type="primary"):
+                    if int(t) in st.session_state.shop_set:
+                        st.session_state.pending_start_truck = int(t)
+                        st.session_state.active_screen = "STATUS_CLEANED"
+                        _mark_and_save()
+                        st.rerun()
                     start_loading_truck(int(t))
                     _mark_and_save()
                     st.session_state.active_screen = "IN_PROGRESS"
@@ -3443,6 +4083,11 @@ elif st.session_state.active_screen == "LOAD":
     if next_up is not None and not st.session_state.inprog_set:
         st.info(f"Next up: Truck {int(next_up)}")
         if st.button(f"Start Next Up (Truck {int(next_up)})", use_container_width=True, key="start_next_up_load"):
+            if int(next_up) in st.session_state.shop_set:
+                st.session_state.pending_start_truck = int(next_up)
+                st.session_state.active_screen = "STATUS_CLEANED"
+                _mark_and_save()
+                st.rerun()
             start_loading_truck(int(next_up))
             _mark_and_save()
             st.session_state.active_screen = "IN_PROGRESS"
@@ -3450,7 +4095,7 @@ elif st.session_state.active_screen == "LOAD":
 
     render_next_up_controls("load")
 
-# --------------------------r
+# --------------------------
 # Shorts
 # --------------------------
 elif st.session_state.active_screen == "SHORTS":
@@ -3496,7 +4141,7 @@ elif st.session_state.active_screen == "SHORTS":
         if dur is not None:
             st.write(f"Duration: {seconds_to_mmss(dur)}")
         st.write(f"Shorts: {shorts_count} • Initials: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
-        note_text = (st.session_state.sup_notes.get(t) or "").strip()
+        _, _, note_text = get_truck_notes(t)
         if note_text:
             st.divider()
             st.subheader("Notes")
@@ -3527,22 +4172,37 @@ elif st.session_state.active_screen == "SHORTS":
             if initials_list:
                 st.caption(f"All initials: {initials_list}")
 
-        edited = st.data_editor(
-            st.session_state.shorts.get(t, [{"item": "None", "qty": None, "note": ""}]),
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "item": st.column_config.SelectboxColumn("Item", options=DEFAULT_SHORT_ITEMS, required=False),
-                "qty": st.column_config.NumberColumn("Qty", min_value=0, step=1, required=False),
-                "note": st.column_config.TextColumn("Note (optional)"),
-            },
-            key="shorts_editor",
-        )
+        shorts_mode = st.session_state.get("shorts_mode") or SHORTS_MODE_EXCEL
+        if st.session_state.get("shorts_disabled"):
+            st.info("Shortages are disabled for today (manual input).")
+
+        edited = None
+        if shorts_mode == SHORTS_MODE_BUTTONS:
+            render_shorts_button_flow(t)
+            rows = st.session_state.shorts.get(t, [])
+            view_rows = [r for r in rows if (r.get("item") or "").strip() and r.get("item") != "None"]
+            if view_rows:
+                st.table(view_rows)
+            else:
+                st.caption("No shortages recorded yet.")
+        else:
+            edited = st.data_editor(
+                st.session_state.shorts.get(t, [{"item": "None", "qty": None, "note": ""}]),
+                num_rows="dynamic",
+                use_container_width=True,
+                column_config={
+                    "item": st.column_config.SelectboxColumn("Item", options=DEFAULT_SHORT_ITEMS, required=False),
+                    "qty": st.column_config.NumberColumn("Qty", min_value=0, step=1, required=False),
+                    "note": st.column_config.TextColumn("Note (optional)"),
+                },
+                key="shorts_editor",
+            )
 
         c1, c2 = st.columns([1, 3])
         with c1:
             if st.button("Save & Done", use_container_width=True):
-                if save_shorts_stop_timer(t, initials, edited):
+                rows_to_save = edited if edited is not None else st.session_state.shorts.get(t, [{"item": "None", "qty": None, "note": ""}])
+                if save_shorts_stop_timer(t, initials, rows_to_save):
                     next_up = st.session_state.get("next_up_truck")
                     if next_up is not None and not st.session_state.inprog_set:
                         st.session_state.selected_truck = int(t)

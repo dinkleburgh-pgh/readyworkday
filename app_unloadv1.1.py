@@ -263,7 +263,7 @@ def _write_state_file(path: str, data: dict):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        logging.info(f"Saved state to {path}")
+        logging.debug(f"Saved state to {path}")
     except Exception as e:
         logging.error(f"Failed to save state to {path}: {e}")
 
@@ -271,7 +271,7 @@ def _write_state_file(path: str, data: dict):
 def save_state():
     path = _state_path()
     _write_state_file(path, _serialize_state())
-    logging.info("save_state() called")
+    logging.debug("save_state() called")
 
 
 def archive_current_state(run_date_key: str | None):
@@ -2829,10 +2829,14 @@ elif st.session_state.active_screen == "IN_PROGRESS":
     reminder = st.session_state.get("daily_notes", "")
     import html
     safe_reminder = html.escape(reminder).replace("\n", "<br>")
+    elapsed = elapsed_seconds() if 'elapsed_seconds' in globals() else 0
+    inprog_truck_display = f"#{inprog_truck}" if 'inprog_truck' in locals() and inprog_truck else ""
+    no_notes = "<span style=\"opacity:0.5;\">No notes set.</span>"
+    notes_html = safe_reminder if safe_reminder else no_notes
     st.markdown(
         (
-            "<div style='position:relative; width:100%; margin:4px 0 24px 0;'>"
-            "  <div id='daily-notes-box' style='width:560px; max-width:80vw; "
+            "<div style='width:100%; display:flex; flex-direction:row; align-items:flex-start; justify-content:flex-start; gap:32px; margin:4px 0 24px 0;'>"
+            "  <div id='daily-notes-box' style='min-width:340px; max-width:420px; flex:0 0 340px; "
             "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
             "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
             "    <div id='daily-notes-bar' style='display:flex; align-items:center; justify-content:center; "
@@ -2840,8 +2844,19 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>"
             "      <span style='margin:0 auto;'>Daily Notes</span>"
             "    </div>"
-            "    <div id='daily-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
-            f"      {safe_reminder if safe_reminder else '<span style=\'opacity:0.5;\'>No notes set.</span>'}"
+            "    <div id='daily-notes-body' style='padding:20px 24px; font-size:22px; line-height:1.25;'>"
+            f"      {notes_html}"
+            "    </div>"
+            "  </div>"
+            "  <div style='display:flex; flex-direction:column; align-items:center; flex:1 1 0; min-width:0;'>"
+            "    <div id='inprog-timer-box' style='width:420px; max-width:90vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28); margin-bottom:24px;'>"
+            "      <div id='inprog-timer-bar' style=\"display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;\">"
+            "        <span style=\"margin:0 auto; font-weight:900;\">ELAPSED TIME</span>"
+            "      </div>"
+            "      <div id='inprog-timer-body' style='padding:20px 24px; font-size:72px; line-height:1.1; text-align:center; font-weight:800; color:{GREEN};'>"
+            "        <span id='truck-elapsed'>{seconds_to_mmss(elapsed)}</span>"
+            "      </div>"
+            "      <div id='truck-elapsed-warn' style='display:none; color:{ORANGE}; font-weight:700; text-align:center;'></div>"
             "    </div>"
             "  </div>"
             "</div>"
@@ -2882,25 +2897,20 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             safe_note = "".join(sections)
             st.markdown(
                 (
-                    "<div style='position:relative; width:100%; margin:4px 0 4px 0;'>"
-                    "  <div id='inprog-notes' style='position:absolute; left:0; top:0; width:560px; max-width:80vw; "
-                    "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
-                    "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
-                    "    <div id='inprog-notes-bar' style='display:flex; align-items:center; justify-content:space-between; "
-                    "        padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; "
-                    "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:pointer; position:relative;'>"
+                    "<div style='width:100%; display:flex; flex-direction:row; align-items:flex-start; justify-content:center; margin:4px 0 4px 0;'>"
+                    "  <div id='inprog-notes' style='width:360px; max-width:40vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28); margin-right:32px;'>"
+                    "    <div id='inprog-notes-bar' style='display:flex; align-items:center; justify-content:space-between; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:pointer; position:relative;'>"
                     "      <span style='margin:0 auto;'>Notes</span>"
                     "    </div>"
                     "    <div id='inprog-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
                     f"      {safe_note}"
                     "    </div>"
                     "  </div>"
-                    "  <div style='text-align:center;'>"
-                    "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
+                    "  <div style='display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
+                    "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900; margin-bottom:8px;'>Current Truck</div>"
                     f"    <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                     "  </div>"
                     "</div>"
-                    ""
                 ),
                 unsafe_allow_html=True,
             )
@@ -2924,8 +2934,8 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         timer_html = f"""
                 <div style='position:relative; width:100%; margin:4px 0 24px 0;'>
                     <div id='inprog-timer-box' style='width:560px; max-width:80vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
-                        <div id='inprog-timer-bar' style='display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>
-                            <span style="margin:0 auto; color:#fff; font-weight:900;">ELAPSED TIME</span>
+                        <div id='inprog-timer-bar' style="display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;">
+                            <span style="margin:0 auto; font-weight:900;">ELAPSED TIME</span>
                         </div>
                         <div id='inprog-timer-body' style='padding:20px 24px; font-size:96px; line-height:1.1; text-align:center; font-weight:800; color:{GREEN};'>
                             <span id='truck-elapsed'>{seconds_to_mmss(elapsed)}</span>

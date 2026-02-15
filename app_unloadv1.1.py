@@ -430,11 +430,8 @@ for k, v in defaults.items():
             st.session_state[k] = v
 
 # Auto-mark trucks as off for current load day
-try:
-    off_today = off_trucks_for_today()
-    st.session_state.off_set.update(off_today)
-except Exception:
-    pass
+
+# Do not auto-update off_set with off_today. Off trucks should not be automatically sent to Out Of Service.
 
 # Force app theme to dark regardless of device preferences.
 st.session_state.ui_theme = "Dark"

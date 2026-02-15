@@ -23,7 +23,7 @@
   "special_set": [],
   "sup_notes_global": {},
   "sup_notes_daily": {},
-  "daily_notes": "Turn the lights off.",
+  "daily_notes": "",
   "wearers": {},
   "batches": {
     "1": {
@@ -60,20 +60,20 @@
   "setup_done": true,
   "run_date": "2026-02-16",
   "run_date_key": "2026-02-16",
-  "last_setup_date": "2026-02-14",
+  "last_setup_date": "2026-02-15",
   "ship_dates": [
     "2026-02-17"
   ],
   "active_screen": "SUPERVISOR",
   "shorts_truck": null,
-  "selected_truck": null,
+  "selected_truck": 88,
   "next_up_truck": null,
   "next_after_truck": null,
   "next_up_return_screen": null,
   "last_requested_page": "SUPERVISOR",
-  "nav_seq": 1251,
+  "nav_seq": 1333,
   "last_screen_for_history": "SUPERVISOR",
-  "last_nav_seen": 1251,
+  "last_nav_seen": 1333,
   "sup_manage_pref_action": null,
   "inprog_start_time": null,
   "break_start_time": null,
@@ -129,7 +129,9 @@
     "2/13 01:51 AM - Start loading Truck 7",
     "2/13 02:06 AM - Start loading Truck 11",
     "2/13 02:22 AM - Shorts saved for Truck 11 (1 items)",
-    "2/13 02:22 AM - Start loading Truck 101"
+    "2/13 02:22 AM - Start loading Truck 101",
+    "2/14 05:22 PM - Start loading Truck 61",
+    "2/15 01:40 AM - Start loading Truck 101"
   ],
   "extra_fleet": [
     4,

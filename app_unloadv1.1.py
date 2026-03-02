@@ -9,7 +9,6 @@ import html
 import os
 # App metadata (do not edit)
 _APP_VERSION = "1.1.0"
-_APP_DATE = "19930616"  
 
 # Setup logging
 logging.basicConfig(
@@ -25,6 +24,7 @@ except Exception:
 # PDF (ReportLab)
 from reportlab.lib.pagesizes import letter # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
+from collections import defaultdict
 
 st.set_page_config(page_title="Load Management", layout="centered")
 
@@ -100,7 +100,7 @@ ORANGE = "#f59e0b"
 STATE_FILE = ".truck_state.json"
 FLEET_FILE = "truck_fleet.json"
 DURATIONS_FILE = "load_durations.json"
-HISTORY_DIR = "state_history"
+HISTORY_DIR = ".data/state_history"
 
 
 def _fleet_path() -> str:
@@ -137,12 +137,8 @@ def _state_path() -> str:
     return os.path.join(os.getcwd(), STATE_FILE)
 
 
-def _history_dir_path() -> str:
-    return os.path.join(os.getcwd(), HISTORY_DIR)
-
-
 def _history_state_path(run_date_key: str) -> str:
-    return os.path.join(os.getcwd(), ".data/state_history", f"state_{run_date_key}.json")
+    return os.path.join(os.getcwd(), HISTORY_DIR, f"state_{run_date_key}.json")
 
 
 def _durations_path() -> str:
@@ -348,7 +344,6 @@ defaults = {
     "unload_inprog_truck": None,
     "unload_inprog_start_time": None,
     "unload_inprog_wearers": 0,
-    "unload_durations": {},
 
     # setup / workday
     "setup_done": False,
@@ -415,9 +410,6 @@ defaults = {
 
     # in-progress tick (for timer refresh)
     "inprog_last_tick": 0.0,
-
-    # shop notice UI state
-    "hide_shop_notice": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -909,7 +901,6 @@ def push_shop_notice(message: str, kind: str = "shop", notice_type: str | None =
         record["truck"] = int(truck)
     log.append(record)
     st.session_state.shop_notice_log = log[-50:]
-    st.session_state.hide_shop_notice = False
 
 def render_shop_notice():
     shop_trucks = sorted(st.session_state.shop_set)
@@ -1305,8 +1296,6 @@ def render_fleet_management():
                     start_loading_truck(sel)
                 elif prev == "Special":
                     st.session_state.special_set.add(sel)
-                else:
-                    pass
                 prev_label = "Dirty" if prev in ("Unloaded", "Off") else prev
                 push_shop_notice(
                     f"Returned from shop: #{sel}" + (f" — {prev_label}" if prev_label else ""),
@@ -1888,28 +1877,11 @@ def sidebar_badge_link(label: str, value: str | int, color: str, target_page: st
             st.rerun()
 
 def render_truck_bubbles(trucks: list[int], from_page: str | None = None):
-    # This is what you asked for: bubbled lists INSIDE each status link page
     if not trucks:
         st.write("None")
         return
-    
-    # Create a grid of bubble buttons that navigate in-place without opening new tabs
-    import streamlit as stlib
-    import sys
-    # Dynamically set columns for mobile
+
     num_cols = 8
-    if hasattr(stlib, 'runtime') or (hasattr(sys, 'platform') and sys.platform in ['emscripten', 'android']):
-        num_cols = 4
-    # Try to detect small screens via window width (fallback to 4 cols)
-    try:
-        import streamlit.components.v1 as components
-        components.html("""
-        <script>
-        window.parent.postMessage({type: 'MOBILE_WIDTH', width: window.innerWidth}, '*');
-        </script>
-        """, height=0)
-    except Exception:
-        pass
     cols = st.columns(num_cols)
     for idx, t in enumerate(trucks):
         col = cols[idx % num_cols]
@@ -2026,7 +1998,6 @@ def generate_pdf_bytes() -> bytes:
                 qty_map.setdefault(t, {})[name] = qty_map.setdefault(t, {}).get(name, 0) + qty
 
         # Group items by category/group
-        from collections import defaultdict
         cat_items = defaultdict(list)
         for item in item_set:
             # Try to parse category/group from item name
@@ -3054,7 +3025,6 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
 
     reminder = st.session_state.get("daily_notes", "")
-    import html
     safe_reminder = html.escape(reminder).replace("\n", "<br>")
     elapsed = elapsed_seconds() if 'elapsed_seconds' in globals() else 0
     inprog_truck_display = f"#{inprog_truck}" if 'inprog_truck' in locals() and inprog_truck else ""
@@ -3324,71 +3294,6 @@ elif st.session_state.active_screen == "BREAK":
     init_remaining = max(0, duration - int(time.time() - start_epoch))
     next_up = st.session_state.get("next_up_truck")
     can_auto_start = bool(next_up is not None and not st.session_state.inprog_set)
-    break_html = """
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;"
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; margin:8px 0 4px 0;"
-            <div id="break-box" style="
-                padding:14px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.12);
-                background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.12));
-                box-shadow:0 6px 18px rgba(0,0,0,0.12);"
-                <div id="break-remaining" style="font-size:168px; font-weight:900; line-height:1.0; color:#22c55e;">__INIT_TEXT__</div>
-            </div>
-            <div id="break-done" style="display:none; color:#f59e0b; font-weight:700; font-size:48px;">Break complete</div>
-            <div id="break-done-time" style="display:none; color:#2563eb; font-weight:700; font-size:48px; margin:0;">Break complete</div>
-        </div>
-    </div>
-    <script>
-    (function(){
-        try {
-            const pad = n => String(n).padStart(2,'0');
-            const fmt = s => {
-                const m = Math.floor(s/60);
-                const sec = s % 60;
-                return pad(m) + ':' + pad(sec);
-            };
-            const fmt12hr = () => {
-                const now = new Date();
-                let h = now.getHours();
-                let m = now.getMinutes();
-                let s = now.getSeconds();
-                let ampm = h >= 12 ? 'PM' : 'AM';
-                h = h % 12;
-                h = h ? h : 12;
-                return h + ':' + pad(m) + ':' + pad(s) + ' ' + ampm;
-            };
-            const startEpoch = __START__;
-            const duration = __DUR__;
-            const autoStart = __AUTO__;
-            const tick = () => {
-                const now = Math.floor(Date.now() / 1000);
-                const elapsed = Math.max(0, now - startEpoch);
-                const remaining = Math.max(0, duration - elapsed);
-                const el = document.getElementById('break-remaining');
-                const done = document.getElementById('break-done');
-                const doneTime = document.getElementById('break-done-time');
-                if (el) el.textContent = fmt(remaining);
-                if (done) done.style.display = remaining <= 0 ? 'block' : 'none';
-                if (doneTime) {
-                    doneTime.style.display = remaining <= 0 ? 'block' : 'none';
-                    if (remaining <= 0) {
-                        doneTime.textContent = 'Time: ' + fmt12hr();
-                    }
-                }
-                if (autoStart && remaining <= 0 && !window.__breakAutoReloaded) {
-                    window.__breakAutoReloaded = true;
-                    window.parent.location.reload();
-                }
-            };
-            const sync = () => {
-                tick();
-                const msToNext = 1000 - (Date.now() % 1000);
-                setTimeout(sync, msToNext);
-            };
-            sync();
-        } catch(e){console.error(e);}
-    })();
-    </script>
-    """
     if (time.time() - start_epoch) >= duration and can_auto_start:
         if int(next_up) in st.session_state.shop_set:
             st.session_state.pending_start_truck = int(next_up)
@@ -3598,7 +3503,7 @@ elif st.session_state.active_screen == "SETUP":
         st.rerun()
 
 # --------------------------
-# Management page
+# Fleet Management page
 # --------------------------
 elif st.session_state.active_screen == "FLEET":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
@@ -3606,7 +3511,8 @@ elif st.session_state.active_screen == "FLEET":
     render_fleet_management()
 
 # --------------------------
-# Management page
+# Supervisor / Admin page
+# --------------------------
 elif st.session_state.active_screen == "SUPERVISOR":
     st.subheader("Management - Admin & Statistics")
 
@@ -4071,18 +3977,6 @@ elif st.session_state.active_screen == "TRUCK":
         st.write(f"Shorts: {shorts_count} • Initials: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
 
         st.write("**Status membership**")
-        # determine current status
-        if t in st.session_state.shop_set:
-            cur_status = "Shop"
-        elif t in st.session_state.inprog_set:
-            cur_status = "In Progress"
-        elif t in st.session_state.loaded_set:
-            cur_status = "Loaded"
-        elif t in st.session_state.cleaned_set:
-            cur_status = "Unloaded"
-        else:
-            cur_status = "Dirty"
-
         # Editing of truck membership/status is restricted to the Management panel.
         st.info("Truck editing is restricted to the Management page. Open Management to make changes.")
 

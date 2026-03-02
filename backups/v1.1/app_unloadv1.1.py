@@ -14,7 +14,7 @@ _APP_DATE = "19930616"
 
 # Setup logging
 logging.basicConfig(
-    filename="truckapp.log",
+    filename=".data/truckapp.log",
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -99,10 +99,10 @@ ORANGE = "#f59e0b"
 # ==========================================================
 # STATE
 # ==========================================================
-STATE_FILE = ".truck_state.json"
-FLEET_FILE = "truck_fleet.json"
-DURATIONS_FILE = "load_durations.json"
-HISTORY_DIR = "state_history"
+STATE_FILE = ".data/.truck_state.json"
+FLEET_FILE = ".data/truck_fleet.json"
+DURATIONS_FILE = ".data/load_durations.json"
+HISTORY_DIR = ".data/state_history"
 
 
 def _fleet_path() -> str:

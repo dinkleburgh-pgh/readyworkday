@@ -1,7 +1,6 @@
 import streamlit as st # type: ignore
 import logging
 import streamlit.components.v1 as components
-from streamlit.components.v1 import declare_component
 from datetime import date, timedelta, datetime
 import time
 from io import BytesIO
@@ -18,7 +17,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-import streamlit.components.v1 as components
 try:
     from zoneinfo import ZoneInfo
 except Exception:
@@ -144,7 +142,7 @@ def _history_dir_path() -> str:
 
 
 def _history_state_path(run_date_key: str) -> str:
-    return os.path.join(_history_dir_path(), f"state_{run_date_key}.json")
+    return os.path.join(os.getcwd(), ".data/state_history", f"state_{run_date_key}.json")
 
 
 def _durations_path() -> str:
@@ -428,6 +426,95 @@ for k, v in defaults.items():
             st.session_state[k] = loaded[k]
         else:
             st.session_state[k] = v
+            
+def _auth_settings() -> dict:
+    try:
+        auth_cfg = st.secrets.get("auth", {})
+    except Exception:
+        auth_cfg = {}
+    if not isinstance(auth_cfg, dict):
+        return {"enabled": False, "pins": {}, "session_timeout_min": 480}
+
+    pins = {
+        "viewer": str(auth_cfg.get("viewer_pin", "")).strip(),
+        "operator": str(auth_cfg.get("operator_pin", "")).strip(),
+        "manager": str(auth_cfg.get("manager_pin", "")).strip(),
+    }
+    enabled = any(bool(v) for v in pins.values())
+    timeout_min = int(auth_cfg.get("session_timeout_min", 480) or 480)
+    return {"enabled": enabled, "pins": pins, "session_timeout_min": max(5, timeout_min)}
+
+
+def _auth_enabled() -> bool:
+    return bool(_auth_settings().get("enabled"))
+
+
+def _is_authenticated() -> bool:
+    if not _auth_enabled():
+        return True
+    role = st.session_state.get("auth_role")
+    exp = st.session_state.get("auth_expires_at")
+    if not role or not exp:
+        return False
+    return time.time() < float(exp)
+
+
+def _refresh_auth_expiry():
+    cfg = _auth_settings()
+    st.session_state.auth_expires_at = time.time() + int(cfg["session_timeout_min"]) * 60
+
+
+def _logout():
+    st.session_state.auth_role = None
+    st.session_state.auth_expires_at = None
+    st.session_state.auth_last_error = None
+
+
+def _require_roles(allowed_roles: set[str], redirect_screen: str = "UNLOAD") -> bool:
+    if not _auth_enabled():
+        return True
+    if not _is_authenticated():
+        st.warning("Please log in to continue.")
+        return False
+    role = st.session_state.get("auth_role")
+    if role in allowed_roles:
+        return True
+    st.error("You do not have permission to access this page.")
+    st.session_state.active_screen = redirect_screen
+    return False
+
+
+def render_auth_sidebar():
+    if not _auth_enabled():
+        return
+
+    st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+    st.sidebar.subheader("Access")
+
+    if _is_authenticated():
+        role = st.session_state.get("auth_role", "unknown")
+        expires_at = st.session_state.get("auth_expires_at")
+        remaining = max(0, int((float(expires_at) - time.time()) // 60)) if expires_at else 0
+        st.sidebar.caption(f"Signed in as **{role.title()}** ({remaining} min left)")
+        if st.sidebar.button("Refresh session", use_container_width=True, key="auth_refresh"):
+            _refresh_auth_expiry()
+            st.rerun()
+        if st.sidebar.button("Log out", use_container_width=True, key="auth_logout"):
+            _logout()
+            st.session_state.active_screen = "UNLOAD"
+            st.rerun()
+        return
+
+    role_choice = st.sidebar.selectbox("Role", ["viewer", "operator", "manager"], key="auth_role_pick")
+    pin = st.sidebar.text_input("PIN", type="password", key="auth_pin")
+    if st.sidebar.button("Log in", use_container_width=True, key="auth_login"):
+        expected_pin = _auth_settings()["pins"].get(role_choice, "")
+        if expected_pin and pin == expected_pin:
+            st.session_state.auth_role = role_choice
+            _refresh_auth_expiry()
+            st.session_state.auth_pin = ""
+            st.rerun()
+        st.sidebar.error("Invalid role or PIN.")
 
 # Auto-mark trucks as off for current load day
 
@@ -1904,21 +1991,59 @@ def generate_pdf_bytes() -> bytes:
     else:
         draw(", ".join(str(t) for t in loaded_trucks))
 
-        # Build shortages matrix: items on rows, trucks on columns
+        # Build shortages matrix: items on rows, trucks on columns, grouped by upper category
         item_set = set()
         qty_map = {}
+        # Build item-to-category/group mapping for PDF grouping
+        item_to_category = {}
+        for cat, items in SHORTS_BUTTON_MAP.items():
+            if isinstance(items, dict):
+                for group, group_items in items.items():
+                    for it in group_items:
+                        item_to_category[f"Bulk - {group} - {it}"] = f"Bulk - {group}"
+            else:
+                for it in items:
+                    item_to_category[f"{cat} - {it}"] = cat
+
+        # Also map simple names for legacy/manual entries
+        for cat, items in SHORTS_BUTTON_MAP.items():
+            if isinstance(items, dict):
+                for group, group_items in items.items():
+                    for it in group_items:
+                        item_to_category[it] = f"Bulk - {group}"
+            else:
+                for it in items:
+                    item_to_category[it] = cat
+
         for t in loaded_trucks:
             items = st.session_state.shorts.get(t, [])
             for it in items:
                 name = (it.get("item") or "").strip()
-                if not name:
+                if not name or name == "None":
                     continue
                 item_set.add(name)
                 qty = int(it.get("qty") or 0)
                 qty_map.setdefault(t, {})[name] = qty_map.setdefault(t, {}).get(name, 0) + qty
 
-        items = sorted(item_set)
-        if not items:
+        # Group items by category/group
+        from collections import defaultdict
+        cat_items = defaultdict(list)
+        for item in item_set:
+            # Try to parse category/group from item name
+            cat = item_to_category.get(item)
+            if not cat:
+                # Try to parse from prefix (e.g., 'Bulk - Group - Item' or 'Category - Item')
+                if item.startswith("Bulk - "):
+                    parts = item.split(" - ", 2)
+                    if len(parts) == 3:
+                        cat = f"Bulk - {parts[1]}"
+                elif " - " in item:
+                    cat = item.split(" - ", 1)[0]
+                else:
+                    cat = "Other"
+            cat_items[cat].append(item)
+
+        if not item_set:
             draw("No shortages recorded.")
         else:
             def draw_centered_text(tx, ty, tw, th, text, font="Helvetica", size=9):
@@ -1938,7 +2063,7 @@ def generate_pdf_bytes() -> bytes:
                 y_pos = ty - th + (th - size) / 2 + 2
                 c.drawString(tx + 2, y_pos, text)
 
-            def draw_table(trucks_chunk, start_y):
+            def draw_single_table(trucks_chunk, start_y, cat_items):
                 nonlocal y
                 margin = 40
                 max_width = w - (margin * 2)
@@ -1946,7 +2071,12 @@ def generate_pdf_bytes() -> bytes:
                 col_w = max(32, int((max_width - item_w) / max(1, len(trucks_chunk))))
                 header_h = 18
                 row_h = 16
-                needed = header_h + row_h * len(items) + 8
+                # Calculate needed space
+                total_rows = 0
+                for cat in sorted(cat_items.keys()):
+                    total_rows += 1  # category headline
+                    total_rows += len(cat_items[cat])
+                needed = header_h + row_h * total_rows + 8
                 if start_y - needed < 60:
                     c.showPage()
                     start_y = h - 40
@@ -1962,16 +2092,24 @@ def generate_pdf_bytes() -> bytes:
                     draw_centered_text(cx, y, col_w, header_h, f"{t}", font="Helvetica-Bold", size=9)
                 y -= header_h
 
-                # Item rows
-                for item in items:
-                    c.rect(margin, y - row_h, item_w, row_h)
-                    draw_left_text(margin, y, item_w, row_h, item)
-                    for idx, t in enumerate(trucks_chunk):
-                        cx = margin + item_w + (idx * col_w)
-                        c.rect(cx, y - row_h, col_w, row_h)
-                        qty = qty_map.get(t, {}).get(item, "")
-                        draw_centered_text(cx, y, col_w, row_h, qty if qty else "")
+                # Category and item rows
+                for cat in sorted(cat_items.keys()):
+                    # Category headline row
+                    c.rect(margin, y - row_h, item_w + col_w * len(trucks_chunk), row_h, fill=1, stroke=0)
+                    c.setFillColorRGB(0.93, 0.89, 0.7)
+                    draw_left_text(margin, y, item_w, row_h, cat, font="Helvetica-Bold", size=10)
+                    c.setFillColorRGB(0, 0, 0)
                     y -= row_h
+                    # Item rows
+                    for item in sorted(cat_items[cat]):
+                        c.rect(margin, y - row_h, item_w, row_h)
+                        draw_left_text(margin, y, item_w, row_h, item)
+                        for idx, t in enumerate(trucks_chunk):
+                            cx = margin + item_w + (idx * col_w)
+                            c.rect(cx, y - row_h, col_w, row_h)
+                            qty = qty_map.get(t, {}).get(item, "")
+                            draw_centered_text(cx, y, col_w, row_h, qty if qty else "")
+                        y -= row_h
                 return y - 10
 
             margin = 40
@@ -1979,9 +2117,11 @@ def generate_pdf_bytes() -> bytes:
             item_w = 140
             max_cols = max(1, int((max_width - item_w) / 32))
             y -= 8
+            # Draw each category group
+            # Draw all categories/items in a single table
             for i in range(0, len(loaded_trucks), max_cols):
                 chunk = loaded_trucks[i : i + max_cols]
-                y = draw_table(chunk, y)
+                y = draw_single_table(chunk, y, cat_items)
 
     c.save()
     return buf.getvalue()
@@ -1995,14 +2135,30 @@ def generate_batch_cards_pdf_bytes() -> bytes:
     y = h - 40
     line = 14
 
-    def draw_line(text: str, bold=False):
+    # Color constants (match on-screen)
+    GREEN = "#16a34a"
+    ORANGE = "#f59e0b"
+    RED = "#dc2626"
+
+    def hex_to_rgb(hex_color):
+        hex_color = hex_color.lstrip('#')
+        return tuple(int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4))
+
+    def draw_line(text: str, bold=False, color=None, font_size=None):
         nonlocal y
         if y < 60:
             c.showPage()
             y = h - 40
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", 10 if not bold else 12)
+        font = "Helvetica-Bold" if bold else "Helvetica"
+        size = font_size if font_size else (12 if bold else 10)
+        c.setFont(font, size)
+        if color:
+            c.setFillColorRGB(*hex_to_rgb(color))
+        else:
+            c.setFillColorRGB(0, 0, 0)
         c.drawString(x, y, text[:140])
         y -= line
+        c.setFillColorRGB(0, 0, 0)  # Reset to black
 
     def wrap_text(text: str, max_chars: int = 90) -> list[str]:
         words = (text or "").split()
@@ -2020,15 +2176,23 @@ def generate_batch_cards_pdf_bytes() -> bytes:
         return lines or [""]
 
     run = st.session_state.run_date or date.today()
-    draw_line("Unload Batch Cards", bold=True)
+    draw_line("Unload Batch Cards", bold=True, font_size=14)
     draw_line(f"Run date: {fmt_long_date(run)}")
     draw_line(" ")
 
+    # --- TEXT PART AT TOP ---
     for i in range(1, BATCH_COUNT + 1):
         batch = st.session_state.batches.get(i, {"trucks": [], "total": 0})
         trucks = batch.get("trucks", [])
         total = int(batch.get("total", 0) or 0)
-        draw_line(f"Batch {i}", bold=True)
+        # Color logic for wearers (match on-screen)
+        if total < BATCH_CAP * 0.7:
+            color = GREEN
+        elif total < BATCH_CAP * 0.95:
+            color = ORANGE
+        else:
+            color = RED
+        draw_line(f"Batch {i}", bold=True, font_size=12)
         if trucks:
             parts = []
             for t in trucks:
@@ -2039,8 +2203,74 @@ def generate_batch_cards_pdf_bytes() -> bytes:
             truck_text = "Trucks (wearers): None"
         for line_text in wrap_text(truck_text):
             draw_line(line_text)
-        draw_line(f"Total wearers: {total} / {BATCH_CAP}")
+        draw_line(f"Total wearers: {total} / {BATCH_CAP}", bold=True, color=color, font_size=12)
         draw_line(" ")
+
+    # --- VISUAL CARDS AT BOTTOM ---
+    # Move y down a bit for spacing
+    y -= 20
+    cards_per_row = 3
+    usable_width = w - 2 * x
+    card_w = (usable_width - (cards_per_row - 1) * 18) / cards_per_row
+    card_h = 90
+    card_margin_x = 18
+    card_margin_y = 24
+    start_x = x
+    start_y = y
+    for idx in range(BATCH_COUNT):
+        i = idx + 1
+        batch = st.session_state.batches.get(i, {"trucks": [], "total": 0})
+        trucks = batch.get("trucks", [])
+        total = int(batch.get("total", 0) or 0)
+        # Color logic for wearers (match on-screen)
+        if total < BATCH_CAP * 0.7:
+            color = GREEN
+        elif total < BATCH_CAP * 0.95:
+            color = ORANGE
+        else:
+            color = RED
+
+        col = idx % cards_per_row
+        row = idx // cards_per_row
+        card_x = start_x + col * (card_w + card_margin_x)
+        card_y = start_y - row * (card_h + card_margin_y)
+        # If card_y too low, start new page
+        if card_y - card_h < 60:
+            c.showPage()
+            start_y = h - 40
+            card_y = start_y - row * (card_h + card_margin_y)
+
+        # Draw card rectangle with rounded corners
+        c.setLineWidth(1)
+        c.setStrokeColorRGB(0.2, 0.2, 0.2)
+        c.setFillColorRGB(0.15, 0.16, 0.2)
+        c.roundRect(card_x, card_y - card_h, card_w, card_h, 12, stroke=1, fill=1)
+
+        # Draw batch title centered
+        c.setFont("Helvetica-Bold", 16)
+        c.setFillColorRGB(1, 1, 1)
+        title = f"Batch {i}"
+        title_width = c.stringWidth(title, "Helvetica-Bold", 16)
+        c.drawString(card_x + (card_w - title_width) / 2, card_y - 24, title)
+
+        # Draw trucks list
+        c.setFont("Helvetica", 11)
+        trucks_str = f"Trucks: {trucks if trucks else '[]'}"
+        c.setFillColorRGB(0.85, 0.85, 0.85)
+        c.drawString(card_x + 16, card_y - 44, trucks_str)
+
+        # Draw total wearers with color
+        c.setFont("Helvetica-Bold", 13)
+        c.setFillColorRGB(*hex_to_rgb(color))
+        total_str = f"Total wearers: {total}"
+        total_width = c.stringWidth(total_str, "Helvetica-Bold", 13)
+        c.drawString(card_x + 16, card_y - 64, total_str)
+        c.setFillColorRGB(0.85, 0.85, 0.85)
+        c.setFont("Helvetica", 11)
+        c.drawString(card_x + 16 + total_width + 6, card_y - 64, f"/ {BATCH_CAP}")
+
+    # Move y below cards
+    y = card_y - card_h - 32
 
     c.save()
     return buf.getvalue()
@@ -3526,9 +3756,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
         render_fleet_management()
     st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
     with st.expander("Download PDFs", expanded=False):
-        st.write("### Load/Shortages PDF")
+        st.write("### Load/Shorts PDF")
         st.download_button(
-            "Download load/shortages",
+            "Download load/shorts",
             data=generate_pdf_bytes(),
             file_name=f"truck_readiness_{(st.session_state.run_date.isoformat() if st.session_state.run_date else 'workday')}.pdf",
             mime="application/pdf",
@@ -4096,7 +4326,7 @@ elif st.session_state.active_screen == "LOAD":
 # --------------------------
 elif st.session_state.active_screen == "SHORTS":
     t = st.session_state.shorts_truck
-    st.subheader(f"Shortages — Truck {t}")
+    st.subheader(f"Shorts — Truck {t}")
 
     if t is None:
         st.warning("No truck selected for shortages.")

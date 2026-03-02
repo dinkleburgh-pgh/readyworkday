@@ -1,7 +1,5 @@
 {
-  "cleaned_set": [
-    4
-  ],
+  "cleaned_set": [],
   "inprog_set": [],
   "loaded_set": [],
   "off_set": [],
@@ -15,15 +13,12 @@
   "special_set": [],
   "sup_notes_global": {},
   "sup_notes_daily": {},
-  "wearers": {
-    "4": 1
-  },
+  "daily_notes": "",
+  "wearers": {},
   "batches": {
     "1": {
-      "trucks": [
-        4
-      ],
-      "total": 1
+      "trucks": [],
+      "total": 0
     },
     "2": {
       "trucks": [],
@@ -53,22 +48,22 @@
   "unload_inprog_wearers": 0,
   "unload_durations": {},
   "setup_done": true,
-  "run_date": "2026-02-06",
-  "run_date_key": "2026-02-06",
-  "last_setup_date": "2026-02-10",
+  "run_date": "2026-02-15",
+  "run_date_key": "2026-02-16",
+  "last_setup_date": "2026-02-15",
   "ship_dates": [
-    "2026-02-07"
+    "2026-02-17"
   ],
-  "active_screen": "SETUP",
+  "active_screen": "SUPERVISOR",
   "shorts_truck": null,
   "selected_truck": null,
   "next_up_truck": null,
   "next_after_truck": null,
   "next_up_return_screen": null,
-  "last_requested_page": "SETUP",
-  "nav_seq": 1,
-  "last_screen_for_history": "SETUP",
-  "last_nav_seen": 1,
+  "last_requested_page": null,
+  "nav_seq": 1392,
+  "last_screen_for_history": "SUPERVISOR",
+  "last_nav_seen": 1392,
   "sup_manage_pref_action": null,
   "inprog_start_time": null,
   "break_start_time": null,
@@ -82,16 +77,14 @@
   "shorts_initials_ts": {},
   "shorts_initials_history": {},
   "shorts_button_state": {},
-  "shorts_mode": "Excel Sheet (current)",
-  "shorts_disabled": false,
+  "shorts_mode": "Disable (manual input)",
+  "shorts_disabled": true,
   "batching_disabled": false,
   "warn_seconds": 900,
   "timezone_key": "America/New_York",
   "ui_theme": "Dark",
   "activity_log": [],
-  "extra_fleet": [
-    4
-  ],
+  "extra_fleet": [],
   "removed_fleet": [],
   "off_schedule": {
     "1": [],

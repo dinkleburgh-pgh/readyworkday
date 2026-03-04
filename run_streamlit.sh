@@ -8,4 +8,4 @@ else
   source venv/bin/activate
   pip install -r requirements.txt
 fi
-nohup streamlit run app_unloadv1.1.py --server.port 8501 --server.headless true > .data/streamlit.log 2>&1 &
+nohup streamlit run app_unloadv1.2.py --server.port 8501 --server.headless true > .data/streamlit.log 2>&1 &

@@ -52,7 +52,7 @@ chmod +x run_streamlit.sh
 Notes:
 - `run_streamlit.sh` starts Streamlit in the background.
 - Script log output goes to `.data/streamlit.log`.
-- The script currently runs `app_unloadv1.1.py`; run `app_unloadv1.2.py` manually if you want the latest version.
+- The script runs `app_unloadv1.2.py`.
 
 ## Basic daily flow
 

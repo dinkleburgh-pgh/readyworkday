@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.2.1 - 2026-03-04
+
+Ordered list of final changes included in this release:
+
+1. Fleet Management now always opens on the refreshed truck picker when entering Fleet from navigation.
+2. Fleet Step 1 heading was simplified to "Select Truck" and helper text under the picker was removed.
+3. Fleet status updates now force an immediate rerun so live sidebar badges (including Shop) refresh instantly.
+4. Fleet status update success messaging now persists across rerun for consistent feedback.
+5. Out Of Service status page was split into two sections: "Spare" and "Out Of Service".
+6. Loaded and Shop visual status colors were aligned across badges and truck buttons (Loaded = blue, Shop = purple).
+7. Sidebar live-status badges now correctly apply the passed color style.
+8. Fleet truck picker highlights in-progress trucks with a flashing button treatment.
+9. Fleet remove-truck confirmation now returns users to the refreshed Fleet picker view after successful removal.
+10. Fleet "New" trailing button text was centered.
+11. Truck button auto-fit sizing was tuned to render three-digit truck numbers larger.
+12. Shorts entry view in button mode was simplified to compact rows with per-row delete (✕), replacing the heavier inline editor approach.
+
+Notes:
+- This release focuses on Fleet UX flow, status visibility consistency, and shorts-entry usability refinements.
+
 ## v1.2.0 - 2026-03-04
 
 Ordered list of final changes included in this release:

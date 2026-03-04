@@ -2,7 +2,16 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.2.0**
+Current release: **v1.2.1**
+
+## Recent updates (v1.2.1)
+
+- Fleet page now reopens in a clean "Select Truck" state when you enter Fleet from navigation.
+- Fleet status changes now refresh sidebar badge counts immediately after apply.
+- Fleet truck picker now flashes trucks that are currently **In Progress**.
+- OOS status page now separates trucks under **Spare** and **Out Of Service** headers.
+- Shorts button-mode entry now uses compact rows with per-row delete (✕).
+- Truck button rendering improvements: centered **New** button label and larger fit for 3-digit truck numbers.
 
 ## What the app does
 

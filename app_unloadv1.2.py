@@ -1354,7 +1354,6 @@ def render_fleet_management():
             else:
                 st.session_state.sup_manage_action = None
             st.rerun()
-        st.caption("Select a truck to manage.")
         return
 
     sel = int(selected)

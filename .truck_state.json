@@ -1,22 +1,17 @@
 {
   "cleaned_set": [
-    59,
-    61,
-    66,
-    68,
-    70,
-    75,
-    89
+    7,
+    60,
+    62,
+    83,
+    84,
+    88
   ],
-  "inprog_set": [
-    52
-  ],
-  "loaded_set": [
-    92,
-    94
-  ],
+  "inprog_set": [],
+  "loaded_set": [],
   "off_set": [],
   "spare_set": [
+    10,
     11,
     12,
     13,
@@ -30,29 +25,11 @@
   "shop_notes": {},
   "shop_spares": {},
   "shop_prev_status": {},
-  "shop_notice_log": [
-    {
-      "ts": 1772602945.7591949,
-      "msg": "Ran special: #101 needs unload",
-      "kind": "shop",
-      "type": "ran_special",
-      "truck": 101
-    },
-    {
-      "ts": 1772619750.0448947,
-      "msg": "Ran special: #102 needs unload",
-      "kind": "shop",
-      "type": "ran_special",
-      "truck": 102
-    }
-  ],
-  "special_set": [
-    101,
-    102
-  ],
+  "shop_notice_log": [],
+  "special_set": [],
   "sup_notes_global": {},
   "sup_notes_daily": {},
-  "daily_notes": "",
+  "daily_notes": "Check the charge-backs!",
   "wearers": {},
   "batches": {
     "1": {
@@ -90,210 +67,51 @@
   "ship_dates": [
     "2026-03-05"
   ],
-  "active_screen": "SHORTS",
-  "shorts_truck": 52,
+  "active_screen": "FLEET",
+  "shorts_truck": null,
   "selected_truck": null,
   "next_up_truck": null,
   "next_after_truck": null,
   "next_up_return_screen": null,
-  "last_requested_page": "SHORTS",
-  "nav_seq": 1483,
-  "last_screen_for_history": "SHORTS",
-  "last_nav_seen": 1483,
+  "last_requested_page": "FLEET",
+  "nav_seq": 1796,
+  "last_screen_for_history": "FLEET",
+  "last_nav_seen": 1796,
   "sup_manage_pref_action": null,
-  "inprog_start_time": 1772618115.360826,
+  "inprog_start_time": null,
   "break_start_time": null,
   "break_duration": 1800,
   "break_used": false,
-  "load_durations": {
-    "101": 298,
-    "94": 32,
-    "92": 18841
-  },
-  "load_start_times": {
-    "101": 1772598653.0493915,
-    "94": 1772598968.482121,
-    "92": 1772599007.3071575,
-    "52": 1772618115.360826
-  },
-  "load_finish_times": {
-    "101": 1772598951.842966,
-    "94": 1772599000.9111803,
-    "92": 1772617849.02515
-  },
-  "shorts": {
-    "101": [
-      {
-        "item": "Bulk - Aprons - Blue",
-        "qty": 50,
-        "note": ""
-      },
-      {
-        "item": "Bulk - Aprons - Blue",
-        "qty": 20,
-        "note": ""
-      }
-    ],
-    "94": [
-      {
-        "item": "Paper - DRC (AIRLAID)",
-        "qty": 20,
-        "note": ""
-      }
-    ],
-    "92": [
-      {
-        "item": "3x5 - Black",
-        "qty": 5,
-        "note": ""
-      },
-      {
-        "item": "4x6 - Black",
-        "qty": 10,
-        "note": ""
-      },
-      {
-        "item": "Paper - DRC (AIRLAID)",
-        "qty": 5,
-        "note": ""
-      },
-      {
-        "item": "3x5 - Onyx",
-        "qty": 5,
-        "note": ""
-      },
-      {
-        "item": "Paper - DRC (AIRLAID)",
-        "qty": 5,
-        "note": ""
-      },
-      {
-        "item": "Bulk - Aprons - Black",
-        "qty": 10,
-        "note": ""
-      },
-      {
-        "item": "3x5 - Brown",
-        "qty": 2,
-        "note": ""
-      }
-    ],
-    "52": [
-      {
-        "item": "4x6 - Indigo",
-        "qty": 5,
-        "note": ""
-      }
-    ]
-  },
-  "shorts_initials": {
-    "101": "nc",
-    "94": "nc"
-  },
-  "shorts_initials_ts": {
-    "101": "2026-03-03T23:35:51.841132-05:00",
-    "94": "2026-03-03T23:36:40.909402-05:00"
-  },
-  "shorts_initials_history": {
-    "101": [
-      {
-        "initials": "nc",
-        "ts": "2026-03-03T23:35:51.841132-05:00"
-      }
-    ],
-    "94": [
-      {
-        "initials": "nc",
-        "ts": "2026-03-03T23:36:40.909402-05:00"
-      }
-    ]
-  },
-  "shorts_button_state": {
-    "101": {
-      "step": "category",
-      "category": null,
-      "bulk_group": null,
-      "item": null,
-      "qty": 1
-    },
-    "94": {
-      "step": "category",
-      "category": null,
-      "bulk_group": null,
-      "item": null,
-      "qty": 1
-    },
-    "92": {
-      "step": "category",
-      "category": null,
-      "bulk_group": null,
-      "item": null,
-      "qty": 1
-    },
-    "52": {
-      "step": "recents",
-      "category": null,
-      "bulk_group": null,
-      "item": null,
-      "qty": 1
-    }
-  },
+  "load_durations": {},
+  "load_start_times": {},
+  "load_finish_times": {},
+  "shorts": {},
+  "shorts_initials": {},
+  "shorts_initials_ts": {},
+  "shorts_initials_history": {},
+  "shorts_button_state": {},
   "shorts_mode": "Button Selection",
   "shorts_disabled": false,
   "batching_disabled": false,
   "warn_seconds": 900,
   "timezone_key": "America/New_York",
   "ui_theme": "Dark",
+  "live_button_styling": true,
   "activity_log": [
-    "2/10 11:52 PM - Start loading Truck 4",
-    "2/11 12:24 AM - Start loading Truck 4",
-    "2/11 12:44 AM - Start loading Truck 4",
-    "2/11 12:45 AM - Truck 89 ran special (needs unload)",
-    "2/11 12:53 AM - Start loading Truck 7",
-    "2/11 12:58 AM - Start loading Truck 4",
-    "2/11 03:46 AM - Start loading Truck 73",
-    "2/11 03:59 AM - Start loading Truck 57",
-    "2/11 04:00 AM - Shorts saved for Truck 57 (2 items)",
-    "2/11 04:06 AM - Start loading Truck 4",
-    "2/11 12:33 PM - Start loading Truck 7",
-    "2/11 12:34 PM - Start loading Truck 50",
-    "2/11 02:26 PM - Start loading Truck 60",
-    "2/11 02:27 PM - Start loading Truck 88",
-    "2/11 02:28 PM - Start loading Truck 4",
-    "2/11 03:38 PM - Start loading Truck 69",
-    "2/11 03:39 PM - Start loading Truck 53",
-    "2/11 03:39 PM - Start loading Truck 54",
-    "2/11 03:39 PM - Start loading Truck 89",
-    "2/11 03:39 PM - Start loading Truck 73",
-    "2/11 03:41 PM - Start loading Truck 56",
-    "2/11 03:51 PM - Start loading Truck 62",
-    "2/11 04:16 PM - Start loading Truck 59",
-    "2/11 04:21 PM - Start loading Truck 86",
-    "2/11 11:58 PM - Start loading Truck 66",
-    "2/12 12:24 AM - Start loading Truck 55",
-    "2/12 12:38 AM - Shorts saved for Truck 96 (1 items)",
-    "2/12 12:39 AM - Start loading Truck 4",
-    "2/12 08:21 AM - Start loading Truck 52",
-    "2/12 08:22 AM - Start loading Truck 55",
-    "2/12 08:22 AM - Start loading Truck 64",
-    "2/12 08:32 AM - Start loading Truck 57",
-    "2/13 01:51 AM - Start loading Truck 7",
-    "2/13 02:06 AM - Start loading Truck 11",
-    "2/13 02:22 AM - Shorts saved for Truck 11 (1 items)",
-    "2/13 02:22 AM - Start loading Truck 101",
-    "2/14 05:22 PM - Start loading Truck 61",
-    "2/15 01:40 AM - Start loading Truck 101",
-    "3/3 11:30 PM - Start loading Truck 101",
-    "3/3 11:35 PM - Shorts saved for Truck 101 (2 items)",
-    "3/3 11:36 PM - Start loading Truck 94",
-    "3/3 11:36 PM - Shorts saved for Truck 94 (1 items)",
-    "3/3 11:36 PM - Start loading Truck 92",
-    "3/4 12:42 AM - Truck 101 ran special (needs unload)",
-    "3/4 04:55 AM - Start loading Truck 52",
-    "3/4 05:22 AM - Truck 102 ran special (needs unload)"
+    "3/4 06:30 AM - Start loading Truck 7",
+    "3/4 06:50 AM - Start loading Truck 62",
+    "3/4 06:53 AM - Shorts saved for Truck 62 (4 items)",
+    "3/4 07:02 AM - Shorts saved for Truck 62 (2 items)",
+    "3/4 07:07 AM - Truck 10 sent to Shop",
+    "3/4 07:10 AM - Start loading Truck 60",
+    "3/4 07:28 AM - Assign Truck 101 to Batch 1 (52 wearers)",
+    "3/4 07:29 AM - Start loading Truck 101",
+    "3/4 07:30 AM - Truck 88 sent to Shop",
+    "3/4 07:31 AM - Truck 88 sent to Shop"
   ],
   "extra_fleet": [
     4,
+    10,
     11,
     12,
     13,
@@ -302,9 +120,14 @@
     16,
     17,
     101,
-    102
+    102,
+    103
   ],
-  "removed_fleet": [],
+  "removed_fleet": [
+    101,
+    102,
+    103
+  ],
   "off_schedule": {
     "1": [
       50,

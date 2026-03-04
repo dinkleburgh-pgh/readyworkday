@@ -1,0 +1,10 @@
+{
+  "Towels": [1, 2, 5, 10],
+  "Toilet Paper": [1, 4, 8],
+  "Paper Towels": [1, 3, 6],
+  "Soap": [1, 2],
+  "Trash Bags": [1, 5, 10],
+  "Aprons": [1, 2, 4],
+  "Mats": [1, 2, 3],
+  "Other": [1, 2, 5]
+}

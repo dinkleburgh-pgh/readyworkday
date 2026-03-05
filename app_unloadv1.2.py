@@ -17,7 +17,7 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.2.0"
+_APP_VERSION = "1.3.0"
 _APP_DATE = "19930616"  
 
 # Setup logging
@@ -105,6 +105,60 @@ RED = "#dc2626"
 ORANGE = "#f59e0b"
 BLUE = "#2563eb"
 PURPLE = "#a855f7"
+
+DEFAULT_STATUS_BADGE_COLORS = {
+    "dirty": RED,
+    "shop": "#7400ff",
+    "in_progress": ORANGE,
+    "unloaded": GREEN,
+    "loaded": BLUE,
+    "off": "#6b7280",
+    "oos_spare": "#6b7280",
+}
+
+
+def _normalize_hex_color(value, fallback: str) -> str:
+    try:
+        raw = str(value).strip()
+    except Exception:
+        return fallback
+    if not raw:
+        return fallback
+    if raw.startswith("#") and len(raw) == 4:
+        raw = f"#{raw[1]*2}{raw[2]*2}{raw[3]*2}"
+    if not (raw.startswith("#") and len(raw) == 7):
+        return fallback
+    allowed = "0123456789abcdefABCDEF"
+    if any(ch not in allowed for ch in raw[1:]):
+        return fallback
+    return raw.lower()
+
+
+def _get_status_badge_colors() -> dict[str, str]:
+    raw = st.session_state.get("status_badge_colors")
+    raw_map = raw if isinstance(raw, dict) else {}
+    out = {}
+    for key, default_color in DEFAULT_STATUS_BADGE_COLORS.items():
+        out[key] = _normalize_hex_color(raw_map.get(key), default_color)
+    return out
+
+
+STATUS_BADGE_PICKER_KEYS = {
+    "dirty": "mgmt_badge_color_dirty",
+    "shop": "mgmt_badge_color_shop",
+    "in_progress": "mgmt_badge_color_in_progress",
+    "unloaded": "mgmt_badge_color_unloaded",
+    "loaded": "mgmt_badge_color_loaded",
+    "off": "mgmt_badge_color_off",
+    "oos_spare": "mgmt_badge_color_oos_spare",
+}
+
+
+def _set_status_badge_picker_values(color_map: dict[str, str]):
+    for color_key, widget_key in STATUS_BADGE_PICKER_KEYS.items():
+        st.session_state[widget_key] = _normalize_hex_color(
+            color_map.get(color_key), DEFAULT_STATUS_BADGE_COLORS[color_key]
+        )
 
 # ==========================================================
 # STATE
@@ -414,6 +468,9 @@ defaults = {
     # live truck button styling (status colors + auto-fit text)
     "live_button_styling": True,
 
+    # sidebar status badge colors
+    "status_badge_colors": dict(DEFAULT_STATUS_BADGE_COLORS),
+
     # activity log
     "activity_log": [],
 
@@ -589,6 +646,34 @@ try:
 except Exception as e:
     logging.error(f"Exception during fleet initialization: {e}")
 
+# Ensure active trucks from persisted state are always visible in Fleet views,
+# even if they are missing from truck_fleet.json.
+try:
+    status_keys = (
+        "cleaned_set",
+        "inprog_set",
+        "loaded_set",
+        "shop_set",
+        "off_set",
+        "spare_set",
+        "special_set",
+    )
+    active_state_trucks: set[int] = set()
+    for sk in status_keys:
+        for raw in (st.session_state.get(sk) or set()):
+            try:
+                active_state_trucks.add(int(raw))
+            except Exception:
+                pass
+
+    if active_state_trucks:
+        merged_fleet = sorted(set(FLEET) | active_state_trucks)
+        if merged_fleet != FLEET:
+            FLEET = merged_fleet
+            save_fleet_file(FLEET)
+except Exception as e:
+    logging.error(f"Exception while merging active trucks into fleet: {e}")
+
 # ==========================================================
 # CSS (bubbled truck lists on status pages)
 # ==========================================================
@@ -599,7 +684,7 @@ st.markdown(
             border: 1px solid rgba(148, 163, 184, 0.35);
             border-radius: 12px;
             background: rgba(15, 23, 42, 0.65);
-            margin: 8px 0 10px 0;
+            margin: 0 0 2px 0;
             overflow: hidden;
         }
         .notice-bar {
@@ -1048,23 +1133,63 @@ def _truck_grid_columns(default_cols: int = 8) -> int:
         return max(2, min(4, int(default_cols)))
     return max(1, int(default_cols))
 
-def _truck_status_colors(truck_num: int) -> tuple[str, str]:
+
+def _color_text_for_background(bg_hex: str) -> str:
+    normalized = _normalize_hex_color(bg_hex, "#334155")
+    try:
+        r = int(normalized[1:3], 16)
+        g = int(normalized[3:5], 16)
+        b = int(normalized[5:7], 16)
+        luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+        return "#0f172a" if luminance > 0.65 else "#ffffff"
+    except Exception:
+        return "#ffffff"
+
+
+def _color_darken(bg_hex: str, factor: float = 0.62) -> str:
+    normalized = _normalize_hex_color(bg_hex, "#334155")
+    try:
+        r = int(normalized[1:3], 16)
+        g = int(normalized[3:5], 16)
+        b = int(normalized[5:7], 16)
+        r = max(0, min(255, int(r * factor)))
+        g = max(0, min(255, int(g * factor)))
+        b = max(0, min(255, int(b * factor)))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception:
+        return "#1e293b"
+
+
+def _truck_status_colors(truck_num: int, badge_colors: dict[str, str] | None = None) -> tuple[str, str, str]:
+    colors = badge_colors or _get_status_badge_colors()
     status = current_status_label(int(truck_num))
     if status == "Dirty":
-        return "#dc2626", "#991b1b"
-    if status == "Unloaded":
-        return "#16a34a", "#166534"
-    if status == "In Progress":
-        return "#f59e0b", "#92400e"
-    if status == "Loaded":
-        return BLUE, "#1d4ed8"
-    if status == "Shop":
-        return PURPLE, "#7e22ce"
-    if status in ("Out Of Service", "Spare"):
-        return "#6b7280", "#374151"
-    if status == "Special":
-        return "#7c3aed", "#5b21b6"
-    return "#334155", "#1e293b"
+        bg = colors["dirty"]
+        text_color = "#000000"
+    elif status == "Unloaded":
+        bg = colors["unloaded"]
+        text_color = "#000000"
+    elif status == "In Progress":
+        bg = colors["in_progress"]
+        text_color = "#000000"
+    elif status == "Loaded":
+        bg = colors["loaded"]
+        text_color = "#000000"
+    elif status == "Shop":
+        bg = colors["shop"]
+        text_color = "#000000"
+    elif status in ("Out Of Service", "Spare"):
+        bg = colors["oos_spare"]
+        text_color = "#ffffff"
+    elif status == "Special":
+        bg = "#7c3aed"
+        text_color = "#000000"
+    else:
+        bg = "#334155"
+        text_color = "#000000"
+
+    border = _color_darken(bg, factor=0.62)
+    return bg, border, text_color
 
 def render_numeric_truck_buttons(
     trucks: list[int],
@@ -1073,6 +1198,7 @@ def render_numeric_truck_buttons(
     trailing_button_label: str | None = None,
     trailing_button_value: str | None = None,
     flash_trucks: set[int] | None = None,
+    force_text_color: str | None = None,
 ) -> int | str | None:
     ordered = sorted({int(t) for t in (trucks or [])})
     if not ordered and not trailing_button_label:
@@ -1080,6 +1206,7 @@ def render_numeric_truck_buttons(
 
     live_button_styling = bool(st.session_state.get("live_button_styling", True))
     trailing_labels_json = json.dumps([str(trailing_button_label).strip()]) if trailing_button_label else "[]"
+    force_text_color_json = json.dumps(_normalize_hex_color(force_text_color, "#000000") if force_text_color else "")
 
     if not live_button_styling:
         components.html(
@@ -1137,10 +1264,11 @@ def render_numeric_truck_buttons(
             width=0,
         )
 
+    status_color_map = _get_status_badge_colors()
     color_map: dict[str, dict[str, str]] = {}
     for truck_num in ordered:
-        bg, border = _truck_status_colors(truck_num)
-        color_map[str(int(truck_num))] = {"bg": bg, "border": border}
+        bg, border, text_color = _truck_status_colors(truck_num, status_color_map)
+        color_map[str(int(truck_num))] = {"bg": bg, "border": border, "fg": text_color}
 
     if live_button_styling and (color_map or trailing_button_label):
         color_map_json = json.dumps(color_map)
@@ -1151,6 +1279,7 @@ def render_numeric_truck_buttons(
                 const root = window.parent.document;
                 const colorMap = {color_map_json};
                 const trailingLabels = new Set({trailing_labels_json});
+                const forceTextColor = {force_text_color_json};
                 const applyTruckColors = () => {{
                     try {{
                         const buttons = root.querySelectorAll('button[kind="primary"]');
@@ -1163,20 +1292,34 @@ def render_numeric_truck_buttons(
                                     btn.style.setProperty('justify-content', 'center', 'important');
                                     btn.style.setProperty('text-align', 'center', 'important');
                                     btn.style.setProperty('font-weight', '800', 'important');
+                                    btn.style.setProperty('padding', '0', 'important');
+                                    btn.style.setProperty('overflow', 'hidden', 'important');
+                                    btn.style.setProperty('white-space', 'nowrap', 'important');
+                                    if (forceTextColor) {{
+                                        btn.style.setProperty('color', forceTextColor, 'important');
+                                    }}
                                     const textNodes = btn.querySelectorAll('p, span');
                                     textNodes.forEach((node) => {{
+                                        node.style.setProperty('display', 'flex', 'important');
+                                        node.style.setProperty('align-items', 'center', 'important');
+                                        node.style.setProperty('justify-content', 'center', 'important');
+                                        node.style.setProperty('width', '100%', 'important');
                                         node.style.setProperty('text-align', 'center', 'important');
                                         node.style.setProperty('margin', '0', 'important');
                                         node.style.setProperty('padding', '0', 'important');
+                                        if (forceTextColor) {{
+                                            node.style.setProperty('color', forceTextColor, 'important');
+                                        }}
                                     }});
                                 }}
                                 return;
                             }}
                             const colors = colorMap[raw];
                             if (!colors) return;
+                            const fg = forceTextColor || colors.fg || '#000000';
                             btn.style.setProperty('background', colors.bg, 'important');
                             btn.style.setProperty('border', `1px solid ${{colors.border}}`, 'important');
-                            btn.style.setProperty('color', '#000000', 'important');
+                            btn.style.setProperty('color', fg, 'important');
                             btn.style.setProperty('font-weight', '900', 'important');
                             btn.style.setProperty('display', 'flex', 'important');
                             btn.style.setProperty('align-items', 'center', 'important');
@@ -1200,6 +1343,7 @@ def render_numeric_truck_buttons(
                             btn.style.setProperty('line-height', '1', 'important');
                             const textNodes = btn.querySelectorAll('p, span');
                             textNodes.forEach((node) => {{
+                                node.style.setProperty('color', fg, 'important');
                                 node.style.setProperty('font-weight', '900', 'important');
                                 node.style.setProperty('font-size', scaledSize, 'important');
                                 node.style.setProperty('line-height', '1', 'important');
@@ -1240,9 +1384,24 @@ def render_numeric_truck_buttons(
                         const styleEl = root.createElement('style');
                         styleEl.id = styleId;
                         styleEl.textContent = `@keyframes truckFlashPulse {{
-                            0% {{ filter: brightness(1); }}
-                            50% {{ filter: brightness(1.4); }}
-                            100% {{ filter: brightness(1); }}
+                            0%, 100% {{
+                                opacity: 1;
+                                box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.55), 0 0 14px rgba(251, 191, 36, 0.45);
+                            }}
+                            50% {{
+                                opacity: 1;
+                                box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.95), 0 0 26px rgba(251, 191, 36, 0.95);
+                            }}
+                        }}
+                        @-webkit-keyframes truckFlashPulse {{
+                            0%, 100% {{
+                                opacity: 1;
+                                box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.55), 0 0 14px rgba(251, 191, 36, 0.45);
+                            }}
+                            50% {{
+                                opacity: 1;
+                                box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.95), 0 0 26px rgba(251, 191, 36, 0.95);
+                            }}
                         }}`;
                         root.head.appendChild(styleEl);
                     }}
@@ -1252,12 +1411,25 @@ def render_numeric_truck_buttons(
                         const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
                         if (!/^\d+$/.test(raw)) return;
                         if (flashSet.has(raw)) {{
+                            btn.style.setProperty('visibility', 'visible', 'important');
+                            btn.style.setProperty('opacity', '1', 'important');
+                            btn.style.setProperty('position', 'relative', 'important');
+                            btn.style.setProperty('z-index', '1', 'important');
+                            btn.style.setProperty('transform', 'translateZ(0)', 'important');
+                            btn.style.setProperty('backface-visibility', 'hidden', 'important');
+                            btn.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
                             btn.style.setProperty('animation', 'truckFlashPulse 1s ease-in-out infinite', 'important');
-                            btn.style.setProperty('box-shadow', '0 0 0 2px rgba(251, 191, 36, 0.55), 0 0 18px rgba(251, 191, 36, 0.75)', 'important');
+                            btn.style.setProperty('-webkit-animation', 'truckFlashPulse 1s ease-in-out infinite', 'important');
                             btn.dataset.truckFlash = '1';
                         }} else if (btn.dataset.truckFlash === '1') {{
                             btn.style.removeProperty('animation');
+                            btn.style.removeProperty('-webkit-animation');
                             btn.style.removeProperty('box-shadow');
+                            btn.style.removeProperty('transform');
+                            btn.style.removeProperty('backface-visibility');
+                            btn.style.removeProperty('-webkit-backface-visibility');
+                            btn.style.removeProperty('position');
+                            btn.style.removeProperty('z-index');
                             delete btn.dataset.truckFlash;
                         }}
                     }});
@@ -1287,6 +1459,103 @@ def render_numeric_truck_buttons(
                     return str(value)
     return None
 
+
+def _add_truck_to_fleet(truck: int) -> tuple[bool, str]:
+    t = int(truck)
+    if t in FLEET:
+        return False, f"Truck {t} already exists in fleet."
+
+    extras = list(st.session_state.get("extra_fleet") or [])
+    try:
+        extras = [int(x) for x in extras]
+    except Exception:
+        pass
+    extras.append(t)
+    st.session_state["extra_fleet"] = sorted(set(extras))
+
+    try:
+        FLEET[:] = sorted(set(FLEET) | {t})
+    except Exception:
+        pass
+
+    save_fleet_file(FLEET)
+    _mark_and_save()
+    return True, f"Truck {t} added to fleet."
+
+
+def _render_add_truck_to_fleet_form(number_key: str, button_key: str) -> int | None:
+    st.write("### Add truck to fleet")
+    try:
+        suggested = max(FLEET) + 1 if FLEET else FLEET_MAX + 1
+    except Exception:
+        suggested = FLEET_MAX + 1
+
+    new_truck = st.number_input(
+        "Truck number to add",
+        min_value=1,
+        max_value=9999,
+        value=int(suggested),
+        step=1,
+        key=number_key,
+    )
+    if st.button("Add truck to fleet", key=button_key):
+        t = int(new_truck)
+        ok, message = _add_truck_to_fleet(t)
+        if ok:
+            st.success(message)
+            return t
+        st.warning(message)
+    return None
+
+
+def _apply_truck_status_change(
+    truck: int,
+    status_label: str,
+    shop_load_on: str = "",
+    emit_shop_return_notice: bool = True,
+):
+    t = int(truck)
+    was_shop = t in st.session_state.shop_set
+    prev_status = current_status_label(t)
+
+    st.session_state.cleaned_set.discard(t)
+    st.session_state.loaded_set.discard(t)
+    st.session_state.inprog_set.discard(t)
+    st.session_state.shop_set.discard(t)
+    st.session_state.off_set.discard(t)
+    st.session_state.spare_set.discard(t)
+    st.session_state.special_set.discard(t)
+
+    if status_label == "Dirty":
+        pass
+    elif status_label == "Unloaded":
+        st.session_state.cleaned_set.add(t)
+    elif status_label == "In Progress":
+        start_loading_truck(t)
+    elif status_label == "Loaded":
+        st.session_state.loaded_set.add(t)
+        st.session_state.load_finish_times[t] = time.time()
+    elif status_label == "Shop":
+        st.session_state.shop_set.add(t)
+        load_on = (shop_load_on or "").strip()
+        if load_on:
+            st.session_state.shop_spares[int(t)] = load_on
+            push_shop_notice(f"Sent to shop: #{t} (Load on: {load_on})", kind="shop", notice_type="shop_send", truck=t)
+        else:
+            st.session_state.shop_spares.pop(int(t), None)
+            push_shop_notice(f"Sent to shop: #{t}", kind="shop", notice_type="shop_send", truck=t)
+        if not was_shop:
+            st.session_state.shop_prev_status[int(t)] = prev_status
+    elif status_label == "Out Of Service":
+        st.session_state.off_set.add(t)
+    elif status_label == "Spare":
+        st.session_state.spare_set.add(t)
+    elif status_label == "Special":
+        st.session_state.special_set.add(t)
+
+    if was_shop and status_label != "Shop" and emit_shop_return_notice:
+        push_shop_notice(f"Returned from shop: #{t} — {status_label}", kind="return")
+
 def render_fleet_management():
     st.markdown("<div style='text-align:center; font-weight:800; font-size:22px;'>Select Truck</div>", unsafe_allow_html=True)
     selected = st.session_state.get("sup_manage_truck")
@@ -1299,34 +1568,13 @@ def render_fleet_management():
                 st.rerun()
 
         st.divider()
-        st.write("### Add truck to fleet")
-        try:
-            suggested = max(FLEET) + 1 if FLEET else FLEET_MAX + 1
-        except Exception:
-            suggested = FLEET_MAX + 1
-        new_truck = st.number_input("Truck number to add", min_value=1, max_value=9999, value=int(suggested), step=1, key="sup_add_truck_num")
-        if st.button("Add truck to fleet", key="sup_add_truck_add"):
-            t = int(new_truck)
-            if t in FLEET:
-                st.warning(f"Truck {t} already exists in fleet.")
-            else:
-                extras = list(st.session_state.get("extra_fleet") or [])
-                try:
-                    extras = [int(x) for x in extras]
-                except Exception:
-                    extras = extras
-                extras.append(t)
-                extras = sorted(set(extras))
-                st.session_state["extra_fleet"] = extras
-                try:
-                    FLEET[:] = sorted(set(FLEET) | {t})
-                except Exception:
-                    pass
-                save_fleet_file(FLEET)
-                _mark_and_save()
-                st.success(f"Truck {t} added to fleet.")
-                st.session_state.sup_manage_new_mode = False
-                st.rerun()
+        added_truck = _render_add_truck_to_fleet_form(
+            number_key="sup_add_truck_num",
+            button_key="sup_add_truck_add",
+        )
+        if added_truck is not None:
+            st.session_state.sup_manage_new_mode = False
+            st.rerun()
         return
 
     if selected is None:
@@ -1488,44 +1736,11 @@ def render_fleet_management():
                 st.warning("In Progress can only be set for one truck at a time.")
             else:
                 for truck_num in target_trucks:
-                    t = int(truck_num)
-                    was_shop = t in st.session_state.shop_set
-                    prev_status = current_status_label(t)
-                    st.session_state.cleaned_set.discard(t)
-                    st.session_state.loaded_set.discard(t)
-                    st.session_state.inprog_set.discard(t)
-                    st.session_state.shop_set.discard(t)
-                    st.session_state.off_set.discard(t)
-                    st.session_state.spare_set.discard(t)
-                    st.session_state.special_set.discard(t)
-
-                    if status_sel == "Dirty":
-                        pass
-                    elif status_sel == "Unloaded":
-                        st.session_state.cleaned_set.add(t)
-                    elif status_sel == "In Progress":
-                        start_loading_truck(t)
-                    elif status_sel == "Loaded":
-                        st.session_state.loaded_set.add(t)
-                        st.session_state.load_finish_times[t] = time.time()
-                    elif status_sel == "Shop":
-                        st.session_state.shop_set.add(t)
-                        load_on = (shop_load_on or "").strip()
-                        if load_on:
-                            st.session_state.shop_spares[int(t)] = load_on
-                            push_shop_notice(f"Sent to shop: #{t} (Load on: {load_on})", kind="shop", notice_type="shop_send", truck=t)
-                        else:
-                            st.session_state.shop_spares.pop(int(t), None)
-                            push_shop_notice(f"Sent to shop: #{t}", kind="shop", notice_type="shop_send", truck=t)
-                        if not was_shop:
-                            st.session_state.shop_prev_status[int(t)] = prev_status
-                    elif status_sel == "Out Of Service":
-                        st.session_state.off_set.add(t)
-                    elif status_sel == "Spare":
-                        st.session_state.spare_set.add(t)
-
-                    if was_shop and status_sel != "Shop":
-                        push_shop_notice(f"Returned from shop: #{t} — {status_sel}", kind="return")
+                    _apply_truck_status_change(
+                        int(truck_num),
+                        status_sel,
+                        shop_load_on=shop_load_on,
+                    )
 
                 _mark_and_save()
                 if len(target_trucks) == 1:
@@ -1746,33 +1961,12 @@ def render_fleet_management():
                     st.rerun()
 
         st.divider()
-        st.write("### Add truck to fleet")
-        try:
-            suggested = max(FLEET) + 1 if FLEET else FLEET_MAX + 1
-        except Exception:
-            suggested = FLEET_MAX + 1
-        new_truck = st.number_input("Truck number to add", min_value=1, max_value=9999, value=int(suggested), step=1, key="sup_add_truck_num")
-        if st.button("Add truck to fleet", key="sup_add_truck_add"):
-            t = int(new_truck)
-            if t in FLEET:
-                st.warning(f"Truck {t} already exists in fleet.")
-            else:
-                extras = list(st.session_state.get("extra_fleet") or [])
-                try:
-                    extras = [int(x) for x in extras]
-                except Exception:
-                    extras = extras
-                extras.append(t)
-                extras = sorted(set(extras))
-                st.session_state["extra_fleet"] = extras
-                try:
-                    FLEET[:] = sorted(set(FLEET) | {t})
-                except Exception:
-                    pass
-                save_fleet_file(FLEET)
-                _mark_and_save()
-                st.success(f"Truck {t} added to fleet.")
-                st.rerun()
+        added_truck = _render_add_truck_to_fleet_form(
+            number_key="sup_add_truck_num",
+            button_key="sup_add_truck_add",
+        )
+        if added_truck is not None:
+            st.rerun()
 
 
 def average_load_time_seconds(trucks: list[int]) -> int | None:
@@ -2123,7 +2317,6 @@ def render_shorts_button_flow(truck: int):
 
     st.write("### Select Shortages")
     if step == "category":
-        st.caption("Select a category")
         cols = st.columns(len(SHORTS_BUTTON_MAP.keys()) + 1)
         # Category buttons
         for idx, cat in enumerate(SHORTS_BUTTON_MAP.keys()):
@@ -2137,6 +2330,42 @@ def render_shorts_button_flow(truck: int):
             if st.button("Recents", use_container_width=True, key=f"shorts_cat_{t}_recents"):
                 _set_shorts_button_state(t, {"step": "recents", "category": None, "bulk_group": None, "item": None, "qty": 1})
                 st.rerun()
+
+        if st.session_state.get("active_screen") == "IN_PROGRESS":
+            components.html(
+                """
+                <script>
+                (function(){
+                    try {
+                        const root = window.parent.document;
+                        const centerRecents = () => {
+                            const buttons = root.querySelectorAll('button');
+                            buttons.forEach((btn) => {
+                                const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
+                                if (raw !== 'Recents') return;
+                                btn.style.setProperty('display', 'flex', 'important');
+                                btn.style.setProperty('align-items', 'center', 'important');
+                                btn.style.setProperty('justify-content', 'center', 'important');
+                                btn.style.setProperty('text-align', 'center', 'important');
+                                const nodes = btn.querySelectorAll('p, span');
+                                nodes.forEach((node) => {
+                                    node.style.setProperty('text-align', 'center', 'important');
+                                    node.style.setProperty('margin', '0', 'important');
+                                    node.style.setProperty('padding', '0', 'important');
+                                    node.style.setProperty('width', '100%', 'important');
+                                });
+                            });
+                        };
+                        centerRecents();
+                        setTimeout(centerRecents, 50);
+                        setTimeout(centerRecents, 200);
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
         return
 
     if step == "recents":
@@ -2268,40 +2497,12 @@ def _mark_and_save():
 
 
 def badge_label(label: str) -> str:
-    icon_map = {
-        "Dirty": "🔴",
-        "Shop": "🟣",
-        "In Progress": "🟠",
-        "Unloaded": "🟢",
-        "Loaded": "🔵",
-        "Out Of Service": "⚫",  # Black circle for OOS
-        "Spare": "⚫",
-        "OFF": "⚫",
-        "OOS/SPARE": "⚫",
-        "OFF/OOS/SPARE": "⚫",
-    }
-    icon = icon_map.get(label, "")
-    return f"{icon} {label}" if icon else label
+    return label
 
 
 def sidebar_badge_link(label: str, value: str | int, color: str, target_page: str):
-    # Try to use the local badge component (no full reload) and fall back to
-    # a simple button if components aren't available.
-    # Always use fallback UI (sidebar button) since custom component is unavailable
+    # Sidebar status button (default theme styling).
     display_text = f"{badge_label(label)}  •  {value}"
-
-    def _badge_text_color(bg_hex: str) -> str:
-        try:
-            h = bg_hex.lstrip("#")
-            if len(h) != 6:
-                return "#ffffff"
-            r = int(h[0:2], 16)
-            g = int(h[2:4], 16)
-            b = int(h[4:6], 16)
-            luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-            return "#0f172a" if luminance > 0.65 else "#ffffff"
-        except Exception:
-            return "#ffffff"
 
     with st.sidebar.container():
         if st.button(display_text, key=f"sidebar_badge_{target_page}", use_container_width=True):
@@ -2310,8 +2511,7 @@ def sidebar_badge_link(label: str, value: str | int, color: str, target_page: st
             st.rerun()
 
     display_text_json = json.dumps(display_text)
-    color_json = json.dumps(color)
-    text_color_json = json.dumps(_badge_text_color(color))
+    dot_color_json = json.dumps(_normalize_hex_color(color, "#6b7280"))
     components.html(
         f"""
         <script>
@@ -2320,17 +2520,39 @@ def sidebar_badge_link(label: str, value: str | int, color: str, target_page: st
                 const root = window.parent.document;
                 const sidebar = root.querySelector('section[data-testid="stSidebar"]');
                 if (!sidebar) return;
-                const targetText = {display_text_json};
-                const bg = {color_json};
-                const fg = {text_color_json};
+
+                const styleId = 'sidebar-status-dot-style';
+                if (!root.getElementById(styleId)) {{
+                    const styleEl = root.createElement('style');
+                    styleEl.id = styleId;
+                    styleEl.textContent = `
+                    section[data-testid="stSidebar"] .stButton > button.status-dot-badge {{
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: flex-start !important;
+                        gap: 0.5rem !important;
+                    }}
+                    section[data-testid="stSidebar"] .stButton > button.status-dot-badge::before {{
+                        content: '';
+                        width: 0.72rem;
+                        height: 0.72rem;
+                        border-radius: 9999px;
+                        flex: 0 0 0.72rem;
+                        background: var(--status-dot-color, #6b7280);
+                        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3);
+                    }}`;
+                    root.head.appendChild(styleEl);
+                }}
+
+                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\s+/g, ' ').trim();
+                const target = normalize({display_text_json});
+                const dotColor = {dot_color_json};
                 const buttons = sidebar.querySelectorAll('.stButton > button');
                 buttons.forEach((btn) => {{
-                    const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                    if (raw !== targetText) return;
-                    btn.style.setProperty('background', bg, 'important');
-                    btn.style.setProperty('border', `1px solid ${{bg}}`, 'important');
-                    btn.style.setProperty('color', fg, 'important');
-                    btn.style.setProperty('font-weight', '900', 'important');
+                    const raw = normalize(btn.innerText || btn.textContent || '');
+                    if (raw !== target) return;
+                    btn.classList.add('status-dot-badge');
+                    btn.style.setProperty('--status-dot-color', dotColor);
                 }});
             }} catch (e) {{}}
         }})();
@@ -3107,16 +3329,17 @@ cleaned_list_no_oos = [t for t in cleaned_list if t not in oos_spare_set]
 loaded_list_no_oos = [t for t in loaded_list if t not in oos_spare_set]
 inprog_truck_no_oos = inprog_truck if inprog_truck not in oos_spare_set else None
 
-sidebar_badge_link("Dirty", len(dirty_trucks_no_oos), RED, "UNLOAD")
-sidebar_badge_link("Shop", len(shop_list_no_oos), PURPLE, "STATUS_SHOP")
-sidebar_badge_link("In Progress", str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None", ORANGE, "IN_PROGRESS")
-sidebar_badge_link("Unloaded", len(cleaned_list_no_oos), GREEN, "STATUS_CLEANED")
-sidebar_badge_link("Loaded", len(loaded_list_no_oos), BLUE, "STATUS_LOADED")
+badge_colors = _get_status_badge_colors()
 
-# OFF and OOS/SPARE badges (grey)
-GREY = "#6b7280"  # Tailwind Gray-500
-sidebar_badge_link("OFF", len(sorted(list(off_today))), GREY, "STATUS_OFF")
-sidebar_badge_link("OOS/SPARE", len(sorted(list(oos_spare_set))), GREY, "STATUS_OOS")
+sidebar_badge_link("Dirty", len(dirty_trucks_no_oos), badge_colors["dirty"], "UNLOAD")
+sidebar_badge_link("Shop", len(shop_list_no_oos), badge_colors["shop"], "STATUS_SHOP")
+sidebar_badge_link("In Progress", str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None", badge_colors["in_progress"], "IN_PROGRESS")
+sidebar_badge_link("Unloaded", len(cleaned_list_no_oos), badge_colors["unloaded"], "STATUS_CLEANED")
+sidebar_badge_link("Loaded", len(loaded_list_no_oos), badge_colors["loaded"], "STATUS_LOADED")
+
+# OFF and OOS/SPARE badges
+sidebar_badge_link("OFF", len(sorted(list(off_today))), badge_colors["off"], "STATUS_OFF")
+sidebar_badge_link("OOS/SPARE", len(sorted(list(oos_spare_set))), badge_colors["oos_spare"], "STATUS_OOS")
 
 if st.session_state.setup_done:
     st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
@@ -3177,7 +3400,48 @@ if st.session_state.active_screen.startswith("STATUS_"):
         st.write("### Spare")
         render_truck_bubbles(spare_only, st.session_state.active_screen)
         st.write("### Out Of Service")
-        render_truck_bubbles(oos_only, st.session_state.active_screen)
+        add_mode_key = "status_oos_add_mode"
+        oos_add_options = sorted({int(t) for t in FLEET} - {int(t) for t in oos_only})
+
+        oos_click = render_numeric_truck_buttons(
+            oos_only,
+            "status_oos_grid",
+            default_cols=8,
+            trailing_button_label="Add" if oos_add_options else None,
+            trailing_button_value="__ADD_OOS__" if oos_add_options else None,
+        )
+        if oos_click == "__ADD_OOS__":
+            st.session_state[add_mode_key] = not bool(st.session_state.get(add_mode_key, False))
+            st.rerun()
+        elif oos_click is not None:
+            st.session_state.selected_truck = int(oos_click)
+            st.session_state.active_screen = "TRUCK"
+            _mark_and_save()
+            st.rerun()
+
+        if st.session_state.get(add_mode_key, False):
+            if oos_add_options:
+                st.caption("Select truck to add to Out Of Service.")
+                add_pick = render_numeric_truck_buttons(
+                    oos_add_options,
+                    "status_oos_add_pick_grid",
+                    default_cols=8,
+                )
+                if add_pick is not None:
+                    t = int(add_pick)
+                    _apply_truck_status_change(
+                        t,
+                        "Out Of Service",
+                        emit_shop_return_notice=False,
+                    )
+                    st.session_state[add_mode_key] = False
+                    _mark_and_save()
+                    st.success(f"Truck {t} added to Out Of Service.")
+                    st.rerun()
+            else:
+                st.session_state[add_mode_key] = False
+        elif not oos_add_options:
+            st.caption("All fleet trucks are already Out Of Service.")
     else:
         # Always show the truck bubbles list
         st.write("### Trucks")
@@ -3362,26 +3626,38 @@ if st.session_state.active_screen.startswith("STATUS_"):
 # --------------------------
 elif st.session_state.active_screen == "IN_PROGRESS":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+            [data-testid="stMainBlockContainer"] {
+                padding-top: 0.15rem !important;
+                padding-left: 0.45rem !important;
+                padding-right: 0.9rem !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
     reminder = st.session_state.get("daily_notes", "")
     safe_reminder = html.escape(reminder).replace("\n", "<br>")
     no_notes = "<span style=\"opacity:0.5;\">No notes set.</span>"
     notes_html = safe_reminder if safe_reminder else no_notes
-    left_col, center_col = st.columns([1, 2], gap="large")
+    left_col, center_col = st.columns([1, 2], gap="small")
     with left_col:
         st.markdown(
             (
-                "<div style='width:100%; margin:4px 0 24px 0;'>"
+                "<div style='width:100%; margin:-4px 0 10px 0; position:-webkit-sticky; position:sticky; top:68px; align-self:flex-start; z-index:20;'>"
                 "  <div id='daily-notes-box' style='width:100%; min-width:260px; "
                 "      border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
-                "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
+                "      background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28); max-height:calc(100vh - 120px); display:flex; flex-direction:column;'>"
                 "    <div id='daily-notes-bar' style='display:flex; align-items:center; justify-content:center; "
                 "        padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; "
                 "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>"
                 "      <span style='margin:0 auto;'>Daily Notes</span>"
                 "    </div>"
-                "    <div id='daily-notes-body' style='padding:20px 24px; font-size:22px; line-height:1.25;'>"
+                "    <div id='daily-notes-body' style='padding:20px 24px; font-size:22px; line-height:1.25; overflow-y:auto;'>"
                 f"      {notes_html}"
                 "    </div>"
                 "  </div>"
@@ -3424,18 +3700,18 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 safe_note = "".join(sections)
                 st.markdown(
                     (
-                        "<div style='width:100%; display:flex; flex-direction:row; align-items:flex-start; justify-content:center; margin:4px 0 4px 0;'>"
-                        "  <div id='inprog-notes' style='width:360px; max-width:40vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28); margin-right:32px;'>"
+                        "<div style='width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; margin:0;'>"
+                        "  <div style='text-align:center; margin:0 0 1px 0;'>"
+                        "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900; margin-bottom:1px;'>Current Truck</div>"
+                        f"    <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
+                        "  </div>"
+                        "  <div id='inprog-notes' style='width:560px; max-width:80vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>"
                         "    <div id='inprog-notes-bar' style='display:flex; align-items:center; justify-content:space-between; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:pointer; position:relative;'>"
                         "      <span style='margin:0 auto;'>Notes</span>"
                         "    </div>"
                         "    <div id='inprog-notes-body' style='padding:20px 24px; font-size:28px; line-height:1.25;'>"
                         f"      {safe_note}"
                         "    </div>"
-                        "  </div>"
-                        "  <div style='display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
-                        "    <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900; margin-bottom:8px;'>Current Truck</div>"
-                        f"    <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                         "  </div>"
                         "</div>"
                     ),
@@ -3444,7 +3720,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             else:
                 st.markdown(
                     (
-                        "<div style='text-align:center; margin:0 0 4px 0;'>"
+                        "<div style='text-align:center; margin:0;'>"
                         "  <div style='font-size:32px; letter-spacing:0.36em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
                         f"  <div style='font-size:112px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                         "</div>"
@@ -3454,13 +3730,13 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             # Render elapsed timer into a DOM element that JS will update every second.
             warn_m = int(st.session_state.warn_seconds) // 60 if st.session_state.warn_seconds else None
             warn_visible = 'block' if (st.session_state.warn_seconds and elapsed >= int(st.session_state.warn_seconds)) else 'none'
-            warn_text = f"Load time exceeded the warning threshold ({warn_m} minutes)." if warn_m else ""
+            warn_text = "Load time exceeded" if warn_m else ""
             init_elapsed = int(elapsed)
             start_epoch = int(st.session_state.inprog_start_time or time.time())
             warn_threshold = int(st.session_state.warn_seconds or 0)
             timer_html = f"""
-                    <div style='position:relative; width:100%; margin:4px 0 24px 0;'>
-                        <div id='inprog-timer-box' style='width:560px; max-width:80vw; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
+                    <div style='position:relative; width:100%; margin:0 0 16px 0;'>
+                        <div id='inprog-timer-box' style='width:560px; max-width:80vw; margin:0 auto; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
                             <div id='inprog-timer-bar' style="display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;">
                                 <span style="margin:0 auto; font-weight:900;">ELAPSED TIME</span>
                             </div>
@@ -3967,7 +4243,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 default=[int(x) for x in current_sched] if current_sched else [],
                 key="sup_sched_pick",
             )
-        if st.button("Apply & Save", use_container_width=True):
+        if st.button("Apply management settings", use_container_width=True):
             if "sup_sched_day" in st.session_state:
                 sd = int(st.session_state.get("sup_sched_day"))
                 pick = st.session_state.get("sup_sched_pick") or []
@@ -4005,20 +4281,72 @@ elif st.session_state.active_screen == "SUPERVISOR":
             value=bool(st.session_state.get("live_button_styling", True)),
             key="mgmt_live_button_styling_pick",
         )
-        st.caption("Truck button layout auto-detects mobile phones per device/user session.")
-        st.caption("Disable this to use legacy/default truck button styling.")
-        st.caption("Theme is forced to Dark for all devices.")
+
+        current_badge_colors = _get_status_badge_colors()
+        st.markdown("##### Status bubble colors")
+        c_badge_left, c_badge_right = st.columns(2)
+        with c_badge_left:
+            badge_dirty_pick = st.color_picker(
+                "Dirty",
+                value=current_badge_colors["dirty"],
+                key="mgmt_badge_color_dirty",
+            )
+            badge_inprog_pick = st.color_picker(
+                "In Progress",
+                value=current_badge_colors["in_progress"],
+                key="mgmt_badge_color_in_progress",
+            )
+            badge_loaded_pick = st.color_picker(
+                "Loaded",
+                value=current_badge_colors["loaded"],
+                key="mgmt_badge_color_loaded",
+            )
+            badge_oos_spare_pick = st.color_picker(
+                "OOS/SPARE",
+                value=current_badge_colors["oos_spare"],
+                key="mgmt_badge_color_oos_spare",
+            )
+        with c_badge_right:
+            badge_shop_pick = st.color_picker(
+                "Shop",
+                value=current_badge_colors["shop"],
+                key="mgmt_badge_color_shop",
+            )
+            badge_unloaded_pick = st.color_picker(
+                "Unloaded",
+                value=current_badge_colors["unloaded"],
+                key="mgmt_badge_color_unloaded",
+            )
+            badge_off_pick = st.color_picker(
+                "OFF",
+                value=current_badge_colors["off"],
+                key="mgmt_badge_color_off",
+            )
+
         if st.button("Apply app settings", use_container_width=True, key="mgmt_app_settings_apply"):
             st.session_state.timezone_key = tz_pick
             st.session_state.ui_theme = "Dark"
             st.session_state.live_button_styling = bool(live_button_styling_pick)
+            st.session_state.status_badge_colors = {
+                "dirty": _normalize_hex_color(badge_dirty_pick, DEFAULT_STATUS_BADGE_COLORS["dirty"]),
+                "shop": _normalize_hex_color(badge_shop_pick, DEFAULT_STATUS_BADGE_COLORS["shop"]),
+                "in_progress": _normalize_hex_color(badge_inprog_pick, DEFAULT_STATUS_BADGE_COLORS["in_progress"]),
+                "unloaded": _normalize_hex_color(badge_unloaded_pick, DEFAULT_STATUS_BADGE_COLORS["unloaded"]),
+                "loaded": _normalize_hex_color(badge_loaded_pick, DEFAULT_STATUS_BADGE_COLORS["loaded"]),
+                "off": _normalize_hex_color(badge_off_pick, DEFAULT_STATUS_BADGE_COLORS["off"]),
+                "oos_spare": _normalize_hex_color(badge_oos_spare_pick, DEFAULT_STATUS_BADGE_COLORS["oos_spare"]),
+            }
             save_state()
             st.success("App settings saved.")
             st.rerun()
 
-    st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
-    with st.expander("Fleet Management", expanded=False):
-        render_fleet_management()
+        if st.button("Reset to defaults color scheme", use_container_width=True, key="mgmt_app_settings_reset_color_defaults"):
+            st.session_state.status_badge_colors = dict(DEFAULT_STATUS_BADGE_COLORS)
+            _set_status_badge_picker_values(st.session_state.status_badge_colors)
+            save_state()
+            st.success("Status bubble colors reset to defaults.")
+            st.rerun()
+
     st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
     with st.expander("Download PDFs", expanded=False):
         st.write("### Load/Shortages PDF")
@@ -4688,11 +5016,47 @@ elif st.session_state.active_screen == "SHORTS":
 
         edited = None
         if shorts_mode == SHORTS_MODE_BUTTONS:
+            pending_delete_key = "shorts_pending_delete"
+            pending_delete = st.session_state.get(pending_delete_key)
+            if not (isinstance(pending_delete, dict) and int(pending_delete.get("truck", -1)) == int(t)):
+                pending_delete = None
+
             render_shorts_button_flow(t)
             rows = st.session_state.shorts.get(t, [])
             indexed_rows = [(idx, r) for idx, r in enumerate(rows) if _short_row_has_item(r)]
+
+            pending_row_idx = None
+            if pending_delete is not None:
+                try:
+                    pending_row_idx = int(pending_delete.get("row_idx"))
+                except Exception:
+                    pending_row_idx = None
+                if pending_row_idx is None or pending_row_idx < 0 or pending_row_idx >= len(rows) or not _short_row_has_item(rows[pending_row_idx]):
+                    pending_row_idx = None
+                    st.session_state[pending_delete_key] = None
+
+            if pending_row_idx is not None:
+                pending_row = rows[pending_row_idx]
+                pending_item = str(pending_row.get("item", "")).strip() or "—"
+                pending_qty = pending_row.get("qty")
+                pending_qty_text = "—" if pending_qty in (None, "") else str(pending_qty)
+                pending_note = str(pending_row.get("note", "")).strip() or "—"
+                st.warning(f"Confirm delete: {pending_item} • Qty {pending_qty_text} • Note {pending_note}")
+                c_del_1, c_del_2 = st.columns([1, 1])
+                with c_del_1:
+                    if st.button("Confirm delete", key=f"shorts_delete_confirm_{t}_{pending_row_idx}", use_container_width=True):
+                        remaining = [r for idx, r in enumerate(rows) if idx != pending_row_idx]
+                        remaining = [r for r in remaining if _short_row_has_item(r)]
+                        st.session_state.shorts[t] = remaining if remaining else [{"item": "None", "qty": None, "note": ""}]
+                        st.session_state[pending_delete_key] = None
+                        st.rerun()
+                with c_del_2:
+                    if st.button("Cancel", key=f"shorts_delete_cancel_{t}", use_container_width=True):
+                        st.session_state[pending_delete_key] = None
+                        st.rerun()
+
             if indexed_rows:
-                st.caption("Tap ✕ to delete a short. To edit, delete it and add the corrected one above.")
+                st.caption("Tap ✕, then confirm deletion. To edit, delete it and add the corrected one above.")
                 h1, h2, h3, h4 = st.columns([4, 1, 4, 0.6])
                 with h1:
                     st.markdown("**Item**")
@@ -4714,12 +5078,13 @@ elif st.session_state.active_screen == "SHORTS":
                     with c3:
                         st.write(note_text if note_text else "—")
                     with c4:
-                        if st.button("✕", key=f"shorts_delete_{t}_{row_idx}"):
-                            remaining = [r for idx, r in enumerate(rows) if idx != row_idx]
-                            remaining = [r for r in remaining if _short_row_has_item(r)]
-                            st.session_state.shorts[t] = remaining if remaining else [{"item": "None", "qty": None, "note": ""}]
+                        is_pending_row = pending_row_idx is not None and int(pending_row_idx) == int(row_idx)
+                        delete_label = "⚠" if is_pending_row else "✕"
+                        if st.button(delete_label, key=f"shorts_delete_{t}_{row_idx}"):
+                            st.session_state[pending_delete_key] = {"truck": int(t), "row_idx": int(row_idx)}
                             st.rerun()
             else:
+                st.session_state[pending_delete_key] = None
                 st.caption("No shortages recorded yet.")
 
             # Move initials input here, after button area but before Save & Done

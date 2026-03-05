@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.0 - 2026-03-05
+
+Ordered list of final changes included in this release:
+
+1. In Progress page now keeps **Daily Notes** sticky while scrolling, with constrained viewport height and internal notes scrolling.
+2. In Progress layout was tightened and centered so **Current Truck** and timer alignment are consistent with reduced top/side spacing.
+3. Timer warning copy was simplified to **"Load time exceeded"**.
+4. Added configurable **Status bubble colors** in App Settings with live persistence to state.
+5. Added **Reset to defaults color scheme** action under App Settings and synchronized picker values after reset/apply.
+6. Truck status-button rendering now consumes configured status colors (bubble-to-button color mapping).
+7. Sidebar live-status controls were reverted from colored backgrounds to default buttons and now show a color dot indicator only.
+8. Truck number text color is now forced black across pages except OOS/Spare (white on grey) for readability consistency.
+9. OOS workflow was improved by moving the **Add** action into the OOS truck grid as a trailing slot.
+10. SHORTS button-mode delete now uses two-step confirmation (✕ then Confirm delete/Cancel).
+11. SHORTS category helper text was removed and **Recents** label centering was improved on In Progress.
+12. App metadata version was updated to **1.3.0**.
+
+Notes:
+- This release focuses on In Progress UX polish, status-color control reliability, and safer/clearer SHORTS interactions.
+
 ## v1.2.1 - 2026-03-04
 
 Ordered list of final changes included in this release:

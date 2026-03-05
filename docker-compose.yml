@@ -1,0 +1,15 @@
+services:
+  truckapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: truckapp
+    ports:
+      - "8501:8501"
+    environment:
+      APP_FILE: ${APP_FILE:-app_unloadv1.3.py}
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+    volumes:
+      - ./:/app
+    restart: unless-stopped

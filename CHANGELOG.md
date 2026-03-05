@@ -16,6 +16,10 @@ Ordered list of final changes included in this release:
 10. SHORTS button-mode delete now uses two-step confirmation (✕ then Confirm delete/Cancel).
 11. SHORTS category helper text was removed and **Recents** label centering was improved on In Progress.
 12. App metadata version was updated to **1.3.0**.
+13. Promoted `app_unloadv1.3.py` as the primary app entry file for v1.3 release usage.
+14. Updated startup defaults to v1.3 in shell runner and container environment (`APP_FILE`).
+15. Added first-class containerization assets: `Dockerfile`, `docker-compose.yml`, and `.dockerignore`.
+16. Added README deployment guidance for Docker Compose and Portainer Git-stack deployment.
 
 Notes:
 - This release focuses on In Progress UX polish, status-color control reliability, and safer/clearer SHORTS interactions.

@@ -1,0 +1,12 @@
+services:
+  truckapp:
+    image: ${IMAGE_NAME:-ghcr.io/dinkleburgh-pgh/readyworkday:latest}
+    container_name: truckapp
+    pull_policy: always
+    ports:
+      - "8501:8501"
+    environment:
+      APP_FILE: ${APP_FILE:-app_unloadv1.3.py}
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+    restart: unless-stopped

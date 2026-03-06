@@ -20,6 +20,9 @@ Ordered list of final changes included in this release:
 14. Updated startup defaults to v1.3 in shell runner and container environment (`APP_FILE`).
 15. Added first-class containerization assets: `Dockerfile`, `docker-compose.yml`, and `.dockerignore`.
 16. Added README deployment guidance for Docker Compose and Portainer Git-stack deployment.
+17. Added `docker-compose.portainer.yml` image-only stack file to bypass Portainer compose-build permission issues.
+18. Added GitHub Actions workflow (`.github/workflows/docker-publish.yml`) to publish container images to GHCR.
+19. Expanded README Portainer section with build vs no-build deployment paths and required environment variables.
 
 Notes:
 - This release focuses on In Progress UX polish, status-color control reliability, and safer/clearer SHORTS interactions.

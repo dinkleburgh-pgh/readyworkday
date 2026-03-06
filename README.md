@@ -56,7 +56,7 @@ Notes:
 
 ## Containerized run (Docker)
 
-This workspace now includes `Dockerfile`, `docker-compose.yml`, and `.dockerignore`.
+This workspace now includes `Dockerfile`, `docker-compose.yml`, `docker-compose.portainer.yml`, and `.dockerignore`.
 
 ### Start (recommended)
 
@@ -89,13 +89,28 @@ APP_FILE=app_unloadv1.3.py docker compose up --build
 
 ## Deploy with Portainer
 
-Recommended approach: deploy as a **Git-based Stack** so Portainer can access the full build context (`Dockerfile`, app files, and `requirements.txt`).
+Use a **Git-based Stack** in Portainer.
+
+### Option A: Build in Portainer (requires working compose build permissions)
 
 1. Push this workspace to GitHub/GitLab.
 2. In Portainer, open **Stacks → Add stack → Repository**.
 3. Set repository URL/branch and compose path to `docker-compose.yml`.
-4. Set env var `APP_FILE=app_unloadv1.3.py` (or another app file if needed).
-5. Deploy and open `http://<docker-host>:8501`.
+4. Set env var `APP_FILE=app_unloadv1.3.py`.
+5. Deploy.
+
+### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
+
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:latest` exists (published from GitHub Actions).
+2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
+3. Set env vars:
+	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:latest`
+	- `APP_FILE=app_unloadv1.3.py`
+4. Deploy and open `http://<docker-host>:8501`.
+
+Notes:
+- If GHCR package visibility is private, add registry credentials in Portainer before deploy.
+- The no-build compose avoids Portainer compose-build permissions entirely.
 
 ### Stop
 

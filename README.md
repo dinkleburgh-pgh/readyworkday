@@ -2,9 +2,15 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.3.0**
+Current release: **v1.3.1**
 
-## Recent updates (v1.3.0)
+## Recent updates (v1.3.1)
+
+- Fresh-slate runtime data reset committed: no load duration history and no active OOS/spare assignments in the default state files.
+- In Progress elapsed timer now starts flashing at **20:00**.
+- OOS workflow safety: once an OOS route is assigned a spare, that OOS route is removed from Unloaded to prevent double loading.
+
+## Prior updates (v1.3.0)
 
 - In Progress layout refinements: centered **Current Truck** + timer, tighter spacing, and sticky **Daily Notes** with internal scroll.
 - Status color controls in App Settings: configurable status bubble colors plus a one-click **Reset to defaults color scheme** action.

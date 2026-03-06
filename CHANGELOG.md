@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.1 - 2026-03-06
+
+Ordered list of final changes included in this release:
+
+1. In Progress elapsed timer now starts flashing at **20:00** (20 minutes).
+2. On Unloaded, once an OOS route is assigned a spare, that OOS route is removed from Unloaded to prevent double loading.
+3. Normalization and derived-list logic now keeps assigned OOS routes excluded from Unloaded until assignment is cleared.
+4. Fresh-slate data reset applied to repository runtime data:
+	- cleared `load_durations.json`
+	- cleared `.truck_state.json` OOS/spare state and OOS→spare assignments
+	- cleared persisted in-progress timing/duration maps in `.truck_state.json`
+
+Notes:
+- This release focuses on cleaner OOS loading workflow behavior and a fresh baseline dataset.
+
 ## v1.3.0 - 2026-03-05
 
 Ordered list of final changes included in this release:

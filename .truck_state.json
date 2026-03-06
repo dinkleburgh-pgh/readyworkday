@@ -1,26 +1,24 @@
 {
   "cleaned_set": [
-    7,
-    60,
-    62,
-    83,
-    84,
-    88
+    13,
+    66,
+    68,
+    70,
+    75,
+    89,
+    92,
+    94
   ],
   "inprog_set": [],
-  "loaded_set": [],
-  "off_set": [],
-  "spare_set": [
+  "loaded_set": [
     10,
     11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17
+    59
   ],
+  "off_set": [],
+  "spare_set": [],
   "off_notes": {},
+  "oos_spare_assignments": {},
   "shop_set": [],
   "shop_notes": {},
   "shop_spares": {},
@@ -61,22 +59,22 @@
   "unload_inprog_start_time": null,
   "unload_inprog_wearers": 0,
   "setup_done": true,
-  "run_date": "2026-03-04",
-  "run_date_key": "2026-03-04",
-  "last_setup_date": "2026-03-04",
+  "run_date": "2026-03-06",
+  "run_date_key": "2026-03-06",
+  "last_setup_date": "2026-03-06",
   "ship_dates": [
-    "2026-03-05"
+    "2026-03-07"
   ],
-  "active_screen": "FLEET",
+  "active_screen": "STATUS_CLEANED",
   "shorts_truck": null,
   "selected_truck": null,
   "next_up_truck": null,
-  "next_after_truck": null,
+  "pending_oos_route": null,
   "next_up_return_screen": null,
-  "last_requested_page": "FLEET",
-  "nav_seq": 1796,
-  "last_screen_for_history": "FLEET",
-  "last_nav_seen": 1796,
+  "last_requested_page": "STATUS_CLEANED",
+  "nav_seq": 2536,
+  "last_screen_for_history": "STATUS_CLEANED",
+  "last_nav_seen": 2536,
   "sup_manage_pref_action": null,
   "inprog_start_time": null,
   "break_start_time": null,
@@ -85,11 +83,48 @@
   "load_durations": {},
   "load_start_times": {},
   "load_finish_times": {},
-  "shorts": {},
+  "shorts": {
+    "59": [
+      {
+        "item": "None",
+        "qty": null,
+        "note": ""
+      }
+    ],
+    "11": [
+      {
+        "item": "None",
+        "qty": null,
+        "note": ""
+      }
+    ],
+    "10": [
+      {
+        "item": "None",
+        "qty": null,
+        "note": ""
+      }
+    ],
+    "12": [
+      {
+        "item": "None",
+        "qty": null,
+        "note": ""
+      }
+    ]
+  },
   "shorts_initials": {},
   "shorts_initials_ts": {},
   "shorts_initials_history": {},
-  "shorts_button_state": {},
+  "shorts_button_state": {
+    "59": {
+      "step": "item",
+      "category": "Paper",
+      "bulk_group": null,
+      "item": null,
+      "qty": 1
+    }
+  },
   "shorts_mode": "Button Selection",
   "shorts_disabled": false,
   "batching_disabled": false,
@@ -97,6 +132,15 @@
   "timezone_key": "America/New_York",
   "ui_theme": "Dark",
   "live_button_styling": true,
+  "status_badge_colors": {
+    "dirty": "#dc2626",
+    "shop": "#7400ff",
+    "in_progress": "#f59e0b",
+    "unloaded": "#16a34a",
+    "loaded": "#2563eb",
+    "off": "#6b7280",
+    "oos_spare": "#6b7280"
+  },
   "activity_log": [
     "3/4 06:30 AM - Start loading Truck 7",
     "3/4 06:50 AM - Start loading Truck 62",
@@ -107,7 +151,28 @@
     "3/4 07:28 AM - Assign Truck 101 to Batch 1 (52 wearers)",
     "3/4 07:29 AM - Start loading Truck 101",
     "3/4 07:30 AM - Truck 88 sent to Shop",
-    "3/4 07:31 AM - Truck 88 sent to Shop"
+    "3/4 07:31 AM - Truck 88 sent to Shop",
+    "3/4 10:10 PM - Start loading Truck 7",
+    "3/5 12:03 AM - Start loading Truck 4",
+    "3/5 01:19 AM - Start loading Truck 60",
+    "3/5 01:38 AM - Truck 50 sent to Shop",
+    "3/5 02:25 AM - Start loading Truck 62",
+    "3/5 11:23 PM - Start loading Truck 55",
+    "3/5 11:29 PM - Start loading Truck 7",
+    "3/5 11:35 PM - Start loading Truck 93",
+    "3/5 11:37 PM - Assign Truck 82 to Batch 1 (5 wearers)",
+    "3/5 11:37 PM - Assign Truck 85 to Batch 1 (85 wearers)",
+    "3/5 11:43 PM - Start loading Truck 4",
+    "3/5 11:44 PM - Start loading Truck 50",
+    "3/5 11:44 PM - Start loading Truck 51",
+    "3/6 12:00 AM - Start loading Truck 59",
+    "3/6 12:03 AM - Start loading Truck 61",
+    "3/6 12:16 AM - Truck 80 sent to Shop",
+    "3/6 12:17 AM - Truck 80 returned from Shop",
+    "3/6 12:53 AM - Start loading Truck 59",
+    "3/6 12:59 AM - Start loading Truck 11",
+    "3/6 01:00 AM - Start loading Truck 10",
+    "3/6 01:05 AM - Start loading Truck 12"
   ],
   "extra_fleet": [
     4,
@@ -123,11 +188,7 @@
     102,
     103
   ],
-  "removed_fleet": [
-    101,
-    102,
-    103
-  ],
+  "removed_fleet": [],
   "off_schedule": {
     "1": [
       50,

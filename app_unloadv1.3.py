@@ -17,7 +17,7 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.3.0"
+_APP_VERSION = "1.3.1"
 _APP_DATE = "19930616"  
 
 # Setup logging
@@ -268,7 +268,7 @@ def load_state() -> dict:
             out[k] = date.fromisoformat(v) if v else None
         elif k == "ship_dates":
             out[k] = [date.fromisoformat(s) for s in v] if v else []
-        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
+        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "oos_spare_assignments", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
             if isinstance(v, dict):
                 new = {}
                 for kk, vv in v.items():
@@ -310,7 +310,7 @@ def _serialize_state() -> dict:
             data[k] = v.isoformat() if v else None
         elif k == "ship_dates":
             data[k] = [d.isoformat() for d in v]
-        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
+        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "oos_spare_assignments", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
             ser = {}
             for kk, vv in (v or {}).items():
                 ser[str(kk)] = vv
@@ -390,6 +390,7 @@ defaults = {
     "off_set": set(),
     "spare_set": set(),
     "off_notes": {},                 # {truck: text}
+    "oos_spare_assignments": {},     # {oos_route: spare_truck}
     "shop_set": set(),
     "shop_notes": {},                # {truck: text}
     "shop_spares": {},               # {truck: text}
@@ -408,7 +409,7 @@ defaults = {
     "wearers": {},                   # {truck:int}
     "batches": {i: {"trucks": [], "total": 0} for i in range(1, BATCH_COUNT + 1)},
 
-    # unload in-progress (cleaning) state
+    # unload batching state
     "unload_inprog_truck": None,
     "unload_inprog_start_time": None,
     "unload_inprog_wearers": 0,
@@ -427,7 +428,8 @@ defaults = {
     "selected_truck": None,
     # queued next-up truck (Unloaded)
     "next_up_truck": None,
-    "next_after_truck": None,
+    # pending OOS route awaiting spare assignment
+    "pending_oos_route": None,
     "next_up_return_screen": None,
     # track last requested page from URL to avoid stale query param lock-in
     "last_requested_page": None,
@@ -817,7 +819,17 @@ def _push_nav_history(force: bool = False):
         seq = int(st.session_state.get("nav_seq") or 0) + 1
         st.session_state.nav_seq = seq
         st.session_state.last_screen_for_history = current
-        _set_query_params(page=_page_param_for_screen(current), nav=str(seq), truck=None, pick=None, start=None, **{"from": None})
+        pick_value = None
+        if current == "BATCH":
+            pick_candidate = st.session_state.get("unload_inprog_truck")
+            if pick_candidate is None:
+                pick_candidate = st.session_state.get("unload_truck_select")
+            try:
+                if pick_candidate is not None:
+                    pick_value = str(int(pick_candidate))
+            except Exception:
+                pick_value = None
+        _set_query_params(page=_page_param_for_screen(current), nav=str(seq), truck=None, pick=pick_value, start=None, **{"from": None})
 
 # ==========================================================
 # Helpers
@@ -1207,6 +1219,10 @@ def render_numeric_truck_buttons(
     live_button_styling = bool(st.session_state.get("live_button_styling", True))
     trailing_labels_json = json.dumps([str(trailing_button_label).strip()]) if trailing_button_label else "[]"
     force_text_color_json = json.dumps(_normalize_hex_color(force_text_color, "#000000") if force_text_color else "")
+    try:
+        oos_labels_json = json.dumps(sorted({str(int(t)) for t in (st.session_state.get("off_set") or set())}))
+    except Exception:
+        oos_labels_json = "[]"
 
     if not live_button_styling:
         components.html(
@@ -1363,6 +1379,79 @@ def render_numeric_truck_buttons(
                 window.parent.__truckColorResizeHandler = () => setTimeout(applyTruckColors, 0);
                 window.parent.addEventListener('resize', window.parent.__truckColorResizeHandler);
                 window.parent.__truckColorResizeBound = true;
+            }})();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+
+    if ordered:
+        components.html(
+            f"""
+            <script>
+            (function() {{
+                try {{
+                    const root = window.parent.document;
+                    const oosSet = new Set({oos_labels_json});
+                    const styleId = 'truck-oos-cross-style';
+                    if (!root.getElementById(styleId)) {{
+                        const styleEl = root.createElement('style');
+                        styleEl.id = styleId;
+                        styleEl.textContent = `
+                        button[kind="primary"].truck-oos-x {{
+                            position: relative !important;
+                            overflow: hidden !important;
+                        }}
+                        button[kind="primary"].truck-oos-x::before,
+                        button[kind="primary"].truck-oos-x::after {{
+                            content: '' !important;
+                            position: absolute !important;
+                            left: -10%;
+                            top: 50%;
+                            width: 120%;
+                            height: 3px;
+                            border-radius: 999px;
+                            background: rgba(220, 38, 38, 0.95);
+                            box-shadow: 0 0 3px rgba(255,255,255,0.65);
+                            pointer-events: none !important;
+                            z-index: 9 !important;
+                            transform-origin: center !important;
+                        }}
+                        button[kind="primary"].truck-oos-x::before {{
+                            transform: translateY(-50%) rotate(33deg) !important;
+                        }}
+                        button[kind="primary"].truck-oos-x::after {{
+                            transform: translateY(-50%) rotate(-33deg) !important;
+                        }}
+                        button[kind="primary"].truck-oos-x p,
+                        button[kind="primary"].truck-oos-x span {{
+                            position: relative !important;
+                            z-index: 1 !important;
+                        }}`;
+                        root.head.appendChild(styleEl);
+                    }}
+
+                    const applyOosCross = () => {{
+                        const buttons = root.querySelectorAll('button[kind="primary"]');
+                        buttons.forEach((btn) => {{
+                            const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
+                            if (!/^\d+$/.test(raw)) {{
+                                btn.classList.remove('truck-oos-x');
+                                return;
+                            }}
+                            if (oosSet.has(raw)) {{
+                                btn.classList.add('truck-oos-x');
+                            }} else {{
+                                btn.classList.remove('truck-oos-x');
+                            }}
+                        }});
+                    }};
+
+                    applyOosCross();
+                    setTimeout(applyOosCross, 50);
+                    setTimeout(applyOosCross, 250);
+                }} catch (e) {{}}
             }})();
             </script>
             """,
@@ -1548,6 +1637,7 @@ def _apply_truck_status_change(
             st.session_state.shop_prev_status[int(t)] = prev_status
     elif status_label == "Out Of Service":
         st.session_state.off_set.add(t)
+        st.session_state.cleaned_set.add(t)
     elif status_label == "Spare":
         st.session_state.spare_set.add(t)
     elif status_label == "Special":
@@ -1980,15 +2070,49 @@ def average_load_time_seconds(trucks: list[int]) -> int | None:
         return None
     return int(sum(durations) / len(durations))
 
+
+def _normalize_oos_spare_assignments():
+    raw = st.session_state.get("oos_spare_assignments") or {}
+    normalized: dict[int, int] = {}
+    used_spares: set[int] = set()
+    eligible_spares = (
+        set(st.session_state.get("spare_set", set()))
+        | set(st.session_state.get("cleaned_set", set()))
+        | set(st.session_state.get("inprog_set", set()))
+        | set(st.session_state.get("loaded_set", set()))
+    )
+    for route_raw, spare_raw in raw.items():
+        try:
+            route = int(route_raw)
+            spare = int(spare_raw)
+        except Exception:
+            continue
+        if route not in st.session_state.off_set:
+            continue
+        if spare not in eligible_spares:
+            continue
+        if spare in st.session_state.off_set or spare in st.session_state.shop_set:
+            continue
+        if spare == route:
+            continue
+        if spare in used_spares:
+            continue
+        used_spares.add(spare)
+        normalized[route] = spare
+    st.session_state.oos_spare_assignments = normalized
+
 def normalize_states():
     # Shop excludes everything else
     st.session_state.cleaned_set -= st.session_state.shop_set
     st.session_state.inprog_set -= st.session_state.shop_set
     st.session_state.loaded_set -= st.session_state.shop_set
 
-    # OOS and Spare exclude active workflow/status sets
-    blocked = set(st.session_state.off_set) | set(st.session_state.get("spare_set", set()))
-    st.session_state.cleaned_set -= blocked
+    # OOS trucks are treated as Unloaded; Spares are excluded from Unloaded.
+    off_oos = set(st.session_state.off_set)
+    spare_only = set(st.session_state.get("spare_set", set()))
+    blocked = off_oos | spare_only
+    st.session_state.cleaned_set -= spare_only
+    st.session_state.cleaned_set |= off_oos
     st.session_state.inprog_set -= blocked
     st.session_state.loaded_set -= blocked
     st.session_state.shop_set -= blocked
@@ -2014,6 +2138,31 @@ def normalize_states():
     if len(st.session_state.inprog_set) > 1:
         keep = min(st.session_state.inprog_set)
         st.session_state.inprog_set = {keep}
+
+    _normalize_oos_spare_assignments()
+    assigned_oos_routes = {
+        int(route)
+        for route in (st.session_state.get("oos_spare_assignments") or {}).keys()
+        if route is not None
+    }
+    if assigned_oos_routes:
+        st.session_state.cleaned_set -= assigned_oos_routes
+        next_up = st.session_state.get("next_up_truck")
+        if next_up is not None:
+            try:
+                if int(next_up) in assigned_oos_routes:
+                    st.session_state.next_up_truck = None
+            except Exception:
+                st.session_state.next_up_truck = None
+
+    pending_oos_route = st.session_state.get("pending_oos_route")
+    if pending_oos_route is not None:
+        try:
+            route_num = int(pending_oos_route)
+        except Exception:
+            route_num = None
+        if route_num is None or route_num not in st.session_state.off_set:
+            st.session_state.pending_oos_route = None
 
 def current_status_label(truck: int) -> str:
     t = int(truck)
@@ -2042,15 +2191,13 @@ def start_loading_truck(truck: int):
     t = int(truck)
     if t in st.session_state.cleaned_set:
         st.session_state.cleaned_set.discard(t)
+    st.session_state.spare_set.discard(t)
     st.session_state.inprog_set = {t}
     st.session_state.inprog_start_time = time.time()
     st.session_state.load_start_times[t] = st.session_state.inprog_start_time
     st.session_state.load_finish_times.pop(t, None)
     if st.session_state.get("next_up_truck") == t:
-        st.session_state.next_up_truck = st.session_state.get("next_after_truck")
-        st.session_state.next_after_truck = None
-    if st.session_state.get("next_after_truck") == t:
-        st.session_state.next_after_truck = None
+        st.session_state.next_up_truck = None
     log_action(f"Start loading Truck {t}")
 
 def mark_return_from_shop(truck: int, new_status_label: str):
@@ -2067,23 +2214,26 @@ def mark_return_from_shop(truck: int, new_status_label: str):
 def render_next_up_controls(context_key: str):
     unloaded = sorted(st.session_state.cleaned_set)
     current = st.session_state.get("next_up_truck")
-    next_after = st.session_state.get("next_after_truck")
     off_today = off_trucks_for_today()
+    off_today_set = {int(t) for t in (off_today or [])}
     st.write("### Next up queue")
     if current:
         st.info(f"Current next up: Truck {int(current)}")
-        if next_after:
-            st.caption(f"Current in-progress unload: Truck {int(next_after)}")
     else:
         st.caption("No next-up truck set.")
     if not unloaded:
         st.caption("No Unloaded trucks available.")
         return
-    pick = st.selectbox("Select next up", options=unloaded, key=f"next_up_select_{context_key}")
+    pick = st.selectbox(
+        "Select next up",
+        options=unloaded,
+        format_func=lambda t: f"Truck {int(t)} — Off" if int(t) in off_today_set else f"Truck {int(t)}",
+        key=f"next_up_select_{context_key}",
+    )
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("Set Next Up", key=f"next_up_set_{context_key}", use_container_width=True):
-            if int(pick) in off_today:
+            if int(pick) in off_today_set:
                 st.session_state.next_up_pending = int(pick)
             else:
                 st.session_state.next_up_truck = int(pick)
@@ -2131,7 +2281,7 @@ def render_next_up_controls(context_key: str):
             off_list_text = ", ".join(str(int(t)) for t in sorted(off_today))
             off_button_label = "Show Off"
             with c_off:
-                if st.button(off_button_label, key=f"next_after_show_off_{context_key}", use_container_width=True):
+                if st.button(off_button_label, key=f"next_up_show_off_{context_key}", use_container_width=True):
                     st.info(f"Off Day {off_day_label}: {off_list_text}")
 
 def remove_truck_from_batches(truck: int):
@@ -2166,6 +2316,7 @@ def reset_status_for_new_day(day_num: int | None):
     st.session_state.off_set = preserved_oos
     st.session_state.spare_set = preserved_spares
     st.session_state.off_notes = {}
+    st.session_state.oos_spare_assignments = {}
 
     st.session_state.inprog_start_time = None
     st.session_state.load_start_times = {}
@@ -2175,8 +2326,8 @@ def reset_status_for_new_day(day_num: int | None):
     st.session_state.break_used = False
 
     st.session_state.next_up_truck = None
-    st.session_state.next_after_truck = None
     st.session_state.next_up_return_screen = None
+    st.session_state.pending_oos_route = None
     st.session_state.pending_start_truck = None
     st.session_state.start_blocked = False
     st.session_state.start_blocking_truck = None
@@ -2215,6 +2366,18 @@ def remove_truck_entirely(truck: int):
 
     # Remove wearers and notes
     st.session_state.wearers.pop(t, None)
+    assignments = st.session_state.get("oos_spare_assignments") or {}
+    cleaned_assignments: dict[int, int] = {}
+    for route, spare in assignments.items():
+        try:
+            route_num = int(route)
+            spare_num = int(spare)
+        except Exception:
+            continue
+        if route_num == t or spare_num == t:
+            continue
+        cleaned_assignments[route_num] = spare_num
+    st.session_state.oos_spare_assignments = cleaned_assignments
     st.session_state.shop_notes.pop(t, None)
     st.session_state.shop_spares.pop(t, None)
     st.session_state.shop_prev_status.pop(t, None)
@@ -2236,6 +2399,8 @@ def remove_truck_entirely(truck: int):
 
     if st.session_state.get("next_up_truck") == t:
         st.session_state.next_up_truck = None
+    if st.session_state.get("pending_oos_route") == t:
+        st.session_state.pending_oos_route = None
 
 def batch_allowed_ids(wearers_needed: int) -> list[int]:
     allowed = []
@@ -2496,6 +2661,19 @@ def _mark_and_save():
     save_state()
 
 
+def render_page_heading(title: str):
+    safe_title = html.escape(str(title or ""))
+    st.markdown(
+        (
+            "<div style='text-align:center; font-size:30px; font-weight:800; "
+            "line-height:1.12; margin:0.12rem 0 0.62rem 0;'>"
+            f"{safe_title}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def badge_label(label: str) -> str:
     return label
 
@@ -2574,15 +2752,22 @@ def render_truck_bubbles(trucks: list[int], from_page: str | None = None):
         if from_page == "UNLOAD":
             st.session_state["unload_truck_select"] = int(t)
             st.session_state.active_screen = "BATCH"
+            _set_query_params(page="BATCH", pick=str(int(t)))
         elif from_page == "STATUS_CLEANED":
             st.session_state.selected_truck = int(t)
-            st.session_state.pending_start_truck = int(t)
+            if int(t) in st.session_state.off_set:
+                st.session_state.pending_oos_route = int(t)
+                st.session_state.pending_start_truck = None
+            else:
+                st.session_state.pending_start_truck = int(t)
+                st.session_state.pending_oos_route = None
         elif from_page == "STATUS_LOADED":
             st.session_state.selected_truck = int(t)
             st.session_state.active_screen = "STATUS_LOADED"
         elif from_page == "STATUS_DIRTY":
             st.session_state["unload_truck_select"] = int(t)
             st.session_state.active_screen = "BATCH"
+            _set_query_params(page="BATCH", pick=str(int(t)))
         elif from_page == "STATUS_SHOP":
             st.session_state.selected_truck = int(t)
             st.session_state.active_screen = "TRUCK"
@@ -2997,15 +3182,8 @@ def save_shorts_stop_timer(truck: int, initials: str, edited_rows: list[dict]) -
 
 # Auto-advance workday if last_setup_date is not today
 if st.session_state.get("last_setup_date") != date.today():
-    # Only auto-advance if run_date is not today
     today = date.today()
-    # If run_date is not today, set run_date to today and ship_dates to [today+1]
-    st.session_state.run_date = today
-    st.session_state.ship_dates = [today + timedelta(days=1)]
-    st.session_state.run_date_key = today.isoformat()
-    st.session_state.setup_done = True
-    st.session_state.last_setup_date = today
-    save_state()
+    apply_run_config(today, [today + timedelta(days=1)])
 
 # Only prompt to configure/start once per calendar day. If the app hasn't
 # been setup yet, or the last setup date doesn't match today, force SETUP.
@@ -3038,11 +3216,32 @@ dirty_trucks = sorted(
     - st.session_state.shop_set
     - oos_spare_set
 )
-cleaned_list = sorted(st.session_state.cleaned_set)
+cleaned_effective_set = (
+    set(st.session_state.cleaned_set)
+    | (
+        set(st.session_state.off_set)
+        - {
+            int(route)
+            for route in (st.session_state.get("oos_spare_assignments") or {}).keys()
+            if route is not None
+        }
+    )
+) - set(st.session_state.get("spare_set", set())) - set(st.session_state.loaded_set) - set(st.session_state.inprog_set) - set(st.session_state.shop_set)
+cleaned_list = sorted(cleaned_effective_set)
 loaded_list = sorted(st.session_state.loaded_set)
 shop_list = sorted(st.session_state.shop_set)
 inprog_truck = next(iter(st.session_state.inprog_set)) if st.session_state.inprog_set else None
 off_today = off_trucks_for_today()
+
+if st.session_state.get("start_blocked"):
+    try:
+        blocking_truck = int(st.session_state.get("start_blocking_truck"))
+    except Exception:
+        blocking_truck = None
+    if (blocking_truck is None) or (blocking_truck not in st.session_state.inprog_set):
+        st.session_state.start_blocked = False
+        st.session_state.start_blocking_truck = None
+        st.session_state.start_attempt_truck = None
 
 true_available = sorted(
     st.session_state.cleaned_set
@@ -3052,28 +3251,6 @@ true_available = sorted(
     - oos_spare_set
     - off_today
 )
-
-# If a start attempt was blocked because another truck is in progress, show
-# a global suggestion to navigate to the in-progress page (unless we're
-# already on STATUS_CLEANED or IN_PROGRESS which already show the message).
-if st.session_state.get("start_blocked") and st.session_state.active_screen not in ("STATUS_CLEANED", "IN_PROGRESS"):
-    blocking = st.session_state.get("start_blocking_truck")
-    attempt = st.session_state.get("start_attempt_truck")
-    st.error(f"Cannot start Truck {attempt}: Truck {blocking} is already in progress. Visit the In Progress page?")
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        if st.button("Go to in-progress truck", key="go_to_inprog_from_block"):
-            st.session_state.active_screen = "IN_PROGRESS"
-            # clear the start-block flags
-            st.session_state.start_blocked = False
-            st.session_state.start_blocking_truck = None
-            st.session_state.start_attempt_truck = None
-            st.rerun()
-    with c2:
-        if st.button("Dismiss", key="dismiss_start_block"):
-            st.session_state.start_blocked = False
-            st.session_state.start_blocking_truck = None
-            st.session_state.start_attempt_truck = None
 
 # ==========================================================
 # Apply query-param navigation (status bar links)
@@ -3325,7 +3502,8 @@ st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 st.sidebar.markdown("<div style='text-align:center; font-weight:800; font-size:1.2rem; margin:0 0 4px 0;'>Live status</div>", unsafe_allow_html=True)
 shop_list_no_oos = [t for t in shop_list if t not in oos_spare_set]
 dirty_trucks_no_oos = [t for t in dirty_trucks if t not in oos_spare_set]
-cleaned_list_no_oos = [t for t in cleaned_list if t not in oos_spare_set]
+spare_set_now = set(st.session_state.get("spare_set", set()))
+cleaned_list_no_oos = [t for t in cleaned_list if t not in spare_set_now]
 loaded_list_no_oos = [t for t in loaded_list if t not in oos_spare_set]
 inprog_truck_no_oos = inprog_truck if inprog_truck not in oos_spare_set else None
 
@@ -3381,7 +3559,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
         title = "OOS/SPARE"
     if st.session_state.active_screen == "STATUS_OFF":
         title = "OFF"
-    st.subheader(title)
+    render_page_heading(title)
 
 
     mapping = {
@@ -3442,9 +3620,12 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 st.session_state[add_mode_key] = False
         elif not oos_add_options:
             st.caption("All fleet trucks are already Out Of Service.")
+    elif st.session_state.active_screen == "STATUS_CLEANED":
+        render_truck_bubbles(trucks, st.session_state.active_screen)
+        if st.session_state.off_set:
+            st.caption("OOS trucks are included in Unloaded. Tap an OOS badge to assign or update its spare.")
     else:
         # Always show the truck bubbles list
-        st.write("### Trucks")
         render_truck_bubbles(trucks, st.session_state.active_screen)
 
     if st.session_state.active_screen == "STATUS_SHOP" and trucks:
@@ -3460,7 +3641,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
     if st.session_state.active_screen == "STATUS_LOADED" and st.session_state.selected_truck:
         t = st.session_state.selected_truck
         if t not in st.session_state.loaded_set:
-            st.warning(f"Truck {t} is not currently marked Loaded.")
             st.session_state.selected_truck = None
         else:
             st.subheader(f"Loaded — Truck {t}")
@@ -3537,8 +3717,125 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 _mark_and_save()
                 st.rerun()
 
+    if st.session_state.active_screen == "STATUS_CLEANED" and st.session_state.get("pending_oos_route") is not None:
+        try:
+            route_to_cover = int(st.session_state.get("pending_oos_route"))
+        except Exception:
+            route_to_cover = None
+
+        if route_to_cover is None or route_to_cover not in st.session_state.off_set:
+            st.session_state.pending_oos_route = None
+        else:
+            assignments_raw = st.session_state.get("oos_spare_assignments") or {}
+            assignments: dict[int, int] = {}
+            for route_raw, spare_raw in assignments_raw.items():
+                try:
+                    assignments[int(route_raw)] = int(spare_raw)
+                except Exception:
+                    continue
+
+            existing_spare = assignments.get(route_to_cover)
+            used_spares = {int(spare_num) for route_num, spare_num in assignments.items() if int(route_num) != route_to_cover}
+            spare_pool = {int(t) for t in (st.session_state.get("spare_set") or set())}
+            spare_candidates = sorted(
+                spare_pool
+                - set(st.session_state.shop_set)
+                - set(st.session_state.off_set)
+                - set(st.session_state.inprog_set)
+                - set(st.session_state.loaded_set)
+                - used_spares
+            )
+            if existing_spare is not None and existing_spare in spare_pool:
+                spare_candidates = sorted(set(spare_candidates) | {int(existing_spare)})
+
+            st.warning(f"Truck {route_to_cover} is OOS. Which spare should load route {route_to_cover}?")
+            if spare_candidates:
+                spare_pick = render_numeric_truck_buttons(
+                    spare_candidates,
+                    f"status_cleaned_pick_spare_{int(route_to_cover)}",
+                    default_cols=8,
+                )
+                if spare_pick is not None:
+                    chosen_spare = int(spare_pick)
+                    prior_spare = assignments.get(route_to_cover)
+                    if prior_spare is not None:
+                        try:
+                            prior_spare = int(prior_spare)
+                        except Exception:
+                            prior_spare = None
+
+                    if prior_spare is not None and prior_spare != chosen_spare:
+                        if (
+                            prior_spare not in st.session_state.off_set
+                            and prior_spare not in st.session_state.shop_set
+                            and prior_spare not in st.session_state.inprog_set
+                            and prior_spare not in st.session_state.loaded_set
+                        ):
+                            st.session_state.cleaned_set.discard(prior_spare)
+                            st.session_state.spare_set.add(prior_spare)
+
+                    st.session_state.spare_set.discard(chosen_spare)
+                    st.session_state.cleaned_set.add(chosen_spare)
+                    st.session_state.cleaned_set.discard(route_to_cover)
+                    st.session_state.loaded_set.discard(chosen_spare)
+                    st.session_state.inprog_set.discard(chosen_spare)
+                    st.session_state.special_set.discard(chosen_spare)
+
+                    assignments[route_to_cover] = chosen_spare
+                    st.session_state.oos_spare_assignments = assignments
+                    st.session_state.pending_oos_route = None
+                    st.session_state.pending_start_truck = None
+                    st.session_state.selected_truck = chosen_spare
+                    _mark_and_save()
+                    st.success(f"Spare {chosen_spare} assigned to route {route_to_cover} and moved to Unloaded.")
+                    st.rerun()
+            else:
+                st.info("No spare trucks are currently available for assignment.")
+
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if existing_spare is not None:
+                    if st.button("Clear assignment", use_container_width=True, key=f"clear_oos_assignment_{int(route_to_cover)}"):
+                        cleared_spare = assignments.pop(route_to_cover, None)
+                        if cleared_spare is not None:
+                            try:
+                                cleared_spare = int(cleared_spare)
+                            except Exception:
+                                cleared_spare = None
+                        if (
+                            cleared_spare is not None
+                            and cleared_spare not in st.session_state.off_set
+                            and cleared_spare not in st.session_state.shop_set
+                            and cleared_spare not in st.session_state.inprog_set
+                            and cleared_spare not in st.session_state.loaded_set
+                        ):
+                            st.session_state.cleaned_set.discard(cleared_spare)
+                            st.session_state.spare_set.add(cleared_spare)
+                        if route_to_cover in st.session_state.off_set:
+                            st.session_state.cleaned_set.add(route_to_cover)
+                        st.session_state.oos_spare_assignments = assignments
+                        st.session_state.pending_oos_route = None
+                        _mark_and_save()
+                        st.rerun()
+            with c2:
+                if st.button("Cancel", use_container_width=True, key=f"cancel_oos_assignment_{int(route_to_cover)}"):
+                    st.session_state.pending_oos_route = None
+                    _mark_and_save()
+                    st.rerun()
+
     if st.session_state.active_screen == "STATUS_CLEANED" and st.session_state.get("pending_start_truck"):
         pending_t = int(st.session_state.get("pending_start_truck"))
+        assigned_route = None
+        for route_raw, spare_raw in (st.session_state.get("oos_spare_assignments") or {}).items():
+            try:
+                route_num = int(route_raw)
+                spare_num = int(spare_raw)
+            except Exception:
+                continue
+            if spare_num == pending_t and route_num in st.session_state.off_set:
+                assigned_route = route_num
+                break
+
         if pending_t in st.session_state.shop_set:
             st.warning(f"Truck {pending_t} is marked Shop. Has it returned? Confirm to start loading.")
             c1, c2 = st.columns([1, 1])
@@ -3581,10 +3878,14 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     _mark_and_save()
                     st.rerun()
         else:
-            st.warning(f"Do you want to Load truck {pending_t}?")
+            if assigned_route is not None:
+                st.warning(f"Do you want to Load spare truck {pending_t} for OOS route {assigned_route}?")
+            else:
+                st.warning(f"Do you want to Load truck {pending_t}?")
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button("Yes, start loading", use_container_width=True, key="confirm_start_load"):
+                confirm_label = "Yes, start loading spare" if assigned_route is not None else "Yes, start loading"
+                if st.button(confirm_label, use_container_width=True, key="confirm_start_load"):
                     if not st.session_state.inprog_set:
                         start_loading_truck(pending_t)
                         st.session_state.active_screen = "IN_PROGRESS"
@@ -3734,8 +4035,18 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             init_elapsed = int(elapsed)
             start_epoch = int(st.session_state.inprog_start_time or time.time())
             warn_threshold = int(st.session_state.warn_seconds or 0)
+            flash_threshold = 20 * 60
             timer_html = f"""
                     <div style='position:relative; width:100%; margin:0 0 16px 0;'>
+                        <style>
+                            @keyframes inprogElapsedFlash {{
+                                0%, 100% {{ opacity: 1; }}
+                                50% {{ opacity: 0.22; }}
+                            }}
+                            #truck-elapsed.timer-flash {{
+                                animation: inprogElapsedFlash 0.8s linear infinite;
+                            }}
+                        </style>
                         <div id='inprog-timer-box' style='width:560px; max-width:80vw; margin:0 auto; border-radius:24px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 20px 48px rgba(0,0,0,0.28);'>
                             <div id='inprog-timer-bar' style="display:flex; align-items:center; justify-content:center; padding:16px 20px; font-weight:900; font-size:24px; letter-spacing:0.24em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;">
                                 <span style="margin:0 auto; font-weight:900;">ELAPSED TIME</span>
@@ -3765,6 +4076,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     const startEpoch = {start_epoch};
                     let elapsed = {init_elapsed};
                     const warn = {warn_threshold};
+                    const flashAt = {flash_threshold};
                     const tick = () => {{
                         const now = Math.floor(Date.now() / 1000);
                         elapsed = Math.max(0, now - startEpoch);
@@ -3774,6 +4086,8 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                         if (el) {{
                             el.textContent = fmt(elapsed);
                             el.style.color = colorFor(elapsed, warn);
+                            if (elapsed >= flashAt) el.classList.add('timer-flash');
+                            else el.classList.remove('timer-flash');
                         }}
                         if (warnEl) {{
                             if (warn > 0 && elapsed >= warn) warnEl.style.display = 'block';
@@ -4059,7 +4373,7 @@ elif st.session_state.active_screen == "BREAK":
 # Ready Workday
 # --------------------------
 elif st.session_state.active_screen == "SETUP":
-    st.subheader("Ready Workday")
+    render_page_heading("Ready Workday")
 
     run_date = st.date_input(
         "Run date (today)",
@@ -4135,13 +4449,13 @@ elif st.session_state.active_screen == "SETUP":
 # --------------------------
 elif st.session_state.active_screen == "FLEET":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
-    st.markdown("<h2 style='text-align:center; margin:0 0 10px 0;'>Fleet Management</h2>", unsafe_allow_html=True)
+    render_page_heading("Fleet Management")
     render_fleet_management()
 
 # --------------------------
 # Management page
 elif st.session_state.active_screen == "SUPERVISOR":
-    st.subheader("Management - Admin & Statistics")
+    render_page_heading("Management - Admin & Statistics")
 
     avg_sec = average_load_time_seconds(sorted(st.session_state.loaded_set))
     st.metric("Average load time (today)", seconds_to_mmss(avg_sec) if avg_sec is not None else "N/A")
@@ -4419,6 +4733,12 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     preserved_run_date = st.session_state.get("run_date")
                     preserved_ship_dates = list(st.session_state.get("ship_dates") or [])
                     preserved_last_setup_date = st.session_state.get("last_setup_date")
+                    preserved_oos = set()
+                    for oval in (st.session_state.get("off_set") or set()):
+                        try:
+                            preserved_oos.add(int(oval))
+                        except Exception:
+                            continue
                     preserved_spares = set()
                     for sval in (st.session_state.get("spare_set") or set()):
                         try:
@@ -4435,6 +4755,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["removed_fleet"] = []  # Clear removed list to restore all trucks
                     st.session_state["off_schedule"] = preserved_off_schedule
                     st.session_state["activity_log"] = preserved_activity
+                    st.session_state["off_set"] = preserved_oos
                     st.session_state["spare_set"] = preserved_spares
 
                     # Keep current run-day context so unloaded auto-pull can be reapplied
@@ -4452,7 +4773,8 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if st.session_state.get("ship_dates"):
                         current_load_day = ship_day_number(st.session_state["ship_dates"][0])
                     reset_status_for_new_day(current_load_day)
-                    # Ensure spares persist through the reset helper
+                    # Ensure OOS/spares persist through the reset helper
+                    st.session_state["off_set"] = preserved_oos
                     st.session_state["spare_set"] = preserved_spares
 
                     # Remove persisted state file
@@ -4463,7 +4785,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     except Exception:
                         pass
                     save_state()
-                    st.success("Workday data reset. Spares preserved and unloaded auto-pull reapplied for the current day.")
+                    st.success("Workday data reset. Out Of Service and Spares preserved, with unloaded auto-pull reapplied for the current day.")
                     st.session_state.reset_step = None
                     st.rerun()
             with c2:
@@ -4576,59 +4898,35 @@ elif st.session_state.active_screen == "SUPERVISOR":
 # --------------------------
 elif st.session_state.active_screen == "UNLOAD":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
-    st.subheader("Unload Management — Dirty Trucks")
+    render_page_heading("Unload Management — Dirty Trucks")
     # Truck selection by clicking bubble, not dropdown
-    sel_truck = st.session_state.get("unload_inprog_truck")
-    def render_unload_bubbles(trucks, selected):
+    def render_unload_bubbles(trucks):
         # Render dirty truck bubbles as Streamlit buttons for in-place navigation
         clicked_truck = render_numeric_truck_buttons(trucks, "dirty_truck", default_cols=8)
         if clicked_truck is not None:
             t = int(clicked_truck)
             if st.session_state.get("batching_disabled"):
-                st.session_state.pending_unload_truck = int(t)
+                st.session_state.cleaned_set.add(int(t))
+                st.session_state.pending_unload_truck = None
+                st.session_state.unload_inprog_truck = None
+                st.session_state.unload_inprog_start_time = None
+                st.session_state.unload_inprog_wearers = 0
+                try:
+                    st.session_state["unload_truck_select"] = None
+                except Exception:
+                    pass
+                _mark_and_save()
+                st.success(f"Truck {t} marked Unloaded (batching disabled).")
                 st.rerun()
             else:
                 st.session_state["unload_truck_select"] = int(t)
                 st.session_state.active_screen = "BATCH"
+                _set_query_params(page="BATCH", pick=str(int(t)))
                 _mark_and_save()
                 st.rerun()
-    render_unload_bubbles(dirty_trucks, sel_truck)
-    if st.session_state.get("batching_disabled") and st.session_state.get("pending_unload_truck") is not None:
-        pending_t = int(st.session_state.get("pending_unload_truck"))
-        if st.session_state.get("next_up_truck") and st.session_state.get("next_after_truck") is None:
-            st.info(f"Set the current in-progress unload. Use Truck {pending_t}?")
-            use_current = st.checkbox("Use this truck as current in-progress unload", value=True, key="next_after_unload_use_current")
-            if use_current:
-                if st.button(f"Set current in-progress unload to Truck {pending_t}", use_container_width=True, key="next_after_unload_set_current"):
-                    st.session_state.next_after_truck = int(pending_t)
-                    _mark_and_save()
-                    st.success(f"Current in-progress unload set to Truck {pending_t}.")
-            else:
-                options = [int(t) for t in FLEET if int(t) != int(st.session_state.get("next_up_truck"))]
-                if options:
-                    pick_after = st.selectbox("Select current in-progress unload", options=options, key="next_after_unload_pick")
-                    off_next = off_trucks_for_next_day()
-                    if int(pick_after) in off_next:
-                        st.warning(f"Truck {int(pick_after)} is scheduled Off next load day.")
-                    if int(pick_after) in st.session_state.shop_set:
-                        st.warning(f"Truck {int(pick_after)} is marked Shop.")
-                    if st.button("Set current in-progress unload", use_container_width=True, key="next_after_unload_set_pick"):
-                        st.session_state.next_after_truck = int(pick_after)
-                        _mark_and_save()
-                        st.success(f"Current in-progress unload set to Truck {int(pick_after)}.")
-        st.warning(f"Send Truck {pending_t} to Unloaded?")
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Yes, mark Unloaded", use_container_width=True, key="confirm_unload_manual"):
-                st.session_state.cleaned_set.add(pending_t)
-                st.session_state.pending_unload_truck = None
-                _mark_and_save()
-                st.success(f"Truck {pending_t} marked Unloaded (batching disabled).")
-                st.rerun()
-        with c2:
-            if st.button("Cancel", use_container_width=True, key="cancel_unload_manual"):
-                st.session_state.pending_unload_truck = None
-                st.rerun()
+    render_unload_bubbles(dirty_trucks)
+    if st.session_state.get("batching_disabled"):
+        st.session_state.pending_unload_truck = None
     st.info("Select a truck to begin unloading.")
 
     # Restore visually awesome batch cards at the bottom
@@ -4653,7 +4951,7 @@ elif st.session_state.active_screen == "UNLOAD":
                 st.markdown(f"""
                 <div style='border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.08); padding:18px 10px 14px 10px; background:rgba(255,255,255,0.08);'>
                     <div style='text-align:center; font-size:20px; font-weight:700; margin-bottom:8px;'>Batch {i}</div>
-                    <div style='font-size:15px; margin-bottom:6px;'>Trucks: <b>{trucks}</b></div>
+                    <div style='font-size:15px; margin-bottom:6px;'><b>{trucks}</b></div>
                     <div style='font-size:15px;'>
                         Total wearers: <span style='font-weight:800; color:{color}; font-size:18px;'>{total}</span> / {BATCH_CAP}
                     </div>
@@ -4677,7 +4975,7 @@ elif st.session_state.active_screen == "TRUCK":
     if t is None:
         st.warning("No truck selected.")
     else:
-        st.subheader(f"Truck {t} — View Only (edit in Management)")
+        render_page_heading(f"Truck {t}")
 
         # Overview: last duration, current in-progress elapsed, batch and wearers
         last_dur = st.session_state.load_durations.get(t)
@@ -4714,7 +5012,7 @@ elif st.session_state.active_screen == "TRUCK":
             st.write(f"Duration: {seconds_to_mmss(dur)}")
         st.write(f"Shorts: {shorts_count} • Initials: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
 
-        st.write("**Status membership**")
+        st.write("**Current status**")
         # determine current status
         if t in st.session_state.shop_set:
             cur_status = "Shop"
@@ -4727,55 +5025,69 @@ elif st.session_state.active_screen == "TRUCK":
         else:
             cur_status = "Dirty"
 
-        # Editing of truck membership/status is restricted to the Management panel.
-        st.info("Truck editing is restricted to the Management page. Open Management to make changes.")
+        st.caption(f"Status: {cur_status}")
+        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop", "Out Of Service", "Spare", "Special"]
+        status_index = status_options.index(cur_status) if cur_status in status_options else 0
+        status_sel = st.selectbox("Set status", status_options, index=status_index, key=f"truck_status_select_{t}")
+        shop_load_on = ""
+        if status_sel == "Shop":
+            shop_load_on = st.text_input("Load On? (optional)", key=f"truck_shop_load_on_{t}")
+        if st.button("Apply status change", use_container_width=True, key=f"truck_status_apply_{t}"):
+            _apply_truck_status_change(int(t), status_sel, shop_load_on=shop_load_on)
+            _mark_and_save()
+            st.success(f"Truck {t} status updated to {status_sel}.")
+            st.rerun()
 
         st.divider()
-        st.write("**Management note**")
-        _, _, note_text = get_truck_notes(t)
-        note = st.text_area("Note", value=note_text, key="truck_note_text", height=120, disabled=True)
-
-        # Quick status adjustments: mark cleaned/dirty
-        # Dirty -> offer batch assignment and mark cleaned
-        if t in dirty_trucks:
-            st.info("Truck is Dirty. Assign to batch to mark Unloaded.")
-            wearers_in = st.number_input("Wearers", min_value=0, step=1, key=f"assign_wearers_{t}")
-            allowed = batch_allowed_ids(wearers_in)
-            if not allowed:
-                st.warning("No batch can accept this truck with that many wearers.")
-            else:
-                batch_pick = st.selectbox("Assign to batch", options=allowed, key=f"assign_batch_{t}", format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})")
-                if st.button("Mark Unloaded & Assign", use_container_width=True, key=f"assign_btn_{t}"):
-                    st.session_state.wearers[t] = int(wearers_in)
-                    batch_assign(t, wearers_in, int(batch_pick))
-                    st.session_state.cleaned_set.add(t)
-                    _mark_and_save()
-                    st.success(f"Truck {t} marked Unloaded and assigned to Batch {batch_pick}.")
-        elif t in st.session_state.cleaned_set:
-            # allow toggling back to dirty or starting load
-            if st.button("Mark Dirty", use_container_width=True, key=f"mark_dirty_{t}"):
-                st.session_state.cleaned_set.discard(t)
+        st.write("**Management notes**")
+        global_note, daily_note, _ = get_truck_notes(t)
+        note_val_global = st.text_area(
+            "General notes (persist across days)",
+            value=global_note,
+            key=f"truck_note_global_{t}",
+            height=100,
+        )
+        note_val_daily = st.text_area(
+            "Daily notes (reset each run day)",
+            value=daily_note,
+            key=f"truck_note_daily_{t}",
+            height=100,
+        )
+        n1, n2, n3 = st.columns([1, 1, 1])
+        with n1:
+            if st.button("Save notes", use_container_width=True, key=f"truck_note_save_{t}"):
+                st.session_state.sup_notes_global[int(t)] = (note_val_global or "").strip()
+                st.session_state.sup_notes_daily[int(t)] = (note_val_daily or "").strip()
                 _mark_and_save()
-                st.success(f"Truck {t} moved to Dirty.")
-            if (t not in st.session_state.inprog_set) and (t not in st.session_state.loaded_set) and (t not in st.session_state.shop_set):
-                    if st.button("Start Loading (Management only)", use_container_width=True, key=f"start_load_{t}"):
-                        st.warning("Start Loading is only available from the Management page.")
+                st.success(f"Notes saved for Truck {t}.")
+        with n2:
+            if st.button("Clear daily", use_container_width=True, key=f"truck_note_clear_daily_{t}"):
+                st.session_state.sup_notes_daily.pop(int(t), None)
+                _mark_and_save()
+                st.success(f"Daily note cleared for Truck {t}.")
+                st.rerun()
+        with n3:
+            if st.button("Clear global", use_container_width=True, key=f"truck_note_clear_global_{t}"):
+                st.session_state.sup_notes_global.pop(int(t), None)
+                _mark_and_save()
+                st.success(f"General note cleared for Truck {t}.")
+                st.rerun()
 
         st.divider()
         c1, c2 = st.columns([1,1])
         with c1:
-            if st.button("Open in Management for editing", use_container_width=True):
-                st.session_state.sup_manage_truck = t
-                st.session_state.sup_manage_action = None
-                st.session_state.sup_manage_pref_action = None
-                st.session_state.active_screen = "FLEET"
-                _mark_and_save()
-                st.rerun()
-        with c2:
             if st.button("Open short sheet", use_container_width=True):
                 st.session_state.shorts_truck = t
                 ensure_shorts_model(t)
                 st.session_state.active_screen = "SHORTS"
+                _mark_and_save()
+                st.rerun()
+        with c2:
+            if st.button("Open Fleet Management", use_container_width=True):
+                st.session_state.sup_manage_truck = t
+                st.session_state.sup_manage_action = None
+                st.session_state.sup_manage_pref_action = None
+                st.session_state.active_screen = "FLEET"
                 _mark_and_save()
                 st.rerun()
 
@@ -4790,7 +5102,7 @@ elif st.session_state.active_screen == "TRUCK":
 # Batch page (opened when ?pick= is provided)
 # --------------------------
 elif st.session_state.active_screen == "BATCH":
-    st.subheader("Batch Assignment")
+    render_page_heading("Batch Assignment")
     t = st.session_state.get("unload_inprog_truck")
     if t is None:
         st.warning("No truck selected for batching.")
@@ -4811,12 +5123,32 @@ elif st.session_state.active_screen == "BATCH":
                 st.success(f"Truck {int(t)} marked Unloaded (batching disabled).")
                 st.rerun()
             st.stop()
-        st.write(f"Batching — Truck {t}")
+        try:
+            _set_query_params(page="BATCH", pick=str(int(t)))
+        except Exception:
+            pass
+        badge_bg, badge_border, badge_fg = _truck_status_colors(int(t))
+        st.markdown(
+            f"""
+            <div style='text-align:center; font-weight:700; margin-bottom:6px;'>Truck</div>
+            <div style='display:flex; justify-content:center; margin:0.1rem 0 0.85rem 0;'>
+                <div style='min-width:150px; max-width:230px; width:48%; height:66px; border-radius:14px; border:2px solid {badge_border}; background:{badge_bg}; color:{badge_fg}; font-weight:900; font-size:32px; line-height:66px; text-align:center; box-shadow:0 2px 10px rgba(0,0,0,0.12);'>
+                    {int(t)}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown("<div id='batch-wearers'></div>", unsafe_allow_html=True)
         components.html("<script>const el=document.getElementById('batch-wearers'); if(el) el.scrollIntoView({behavior:'smooth'});</script>", height=0)
+        wearers_default = st.session_state.get("unload_inprog_wearers", 0)
+        try:
+            wearers_default = int(wearers_default or 0)
+        except Exception:
+            wearers_default = 0
         wearers_raw = st.text_input(
             "Wearers",
-            value=str(int(st.session_state.get("unload_inprog_wearers", 0) or 0)),
+            value="" if wearers_default <= 0 else str(wearers_default),
             key=f"batch_wearers_{t}",
         )
         components.html(
@@ -4828,6 +5160,12 @@ elif st.session_state.active_screen == "BATCH":
                 inputs.forEach((el) => {
                     el.setAttribute('inputmode', 'numeric');
                     el.setAttribute('pattern', '[0-9]*');
+                    if (!el.dataset.batchLiveBound) {
+                        el.dataset.batchLiveBound = '1';
+                        el.addEventListener('input', () => {
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        });
+                    }
                 });
             })();
             </script>
@@ -4835,12 +5173,14 @@ elif st.session_state.active_screen == "BATCH":
             height=0,
             width=0,
         )
-        if str(wearers_raw).strip().isdigit():
-            w = int(wearers_raw)
-        elif str(wearers_raw).strip() == "":
+        wearers_text = str(wearers_raw).strip()
+        typed_digits = "".join(ch for ch in wearers_text if ch.isdigit())
+        if wearers_text.isdigit():
+            w = int(wearers_text)
+        elif wearers_text == "":
             w = 0
         else:
-            w = 0
+            w = int(typed_digits) if typed_digits else 0
             st.warning("Wearers must be a whole number.")
         st.session_state.unload_inprog_wearers = int(w)
         if st.button("Skip batching", use_container_width=True):
@@ -4855,21 +5195,30 @@ elif st.session_state.active_screen == "BATCH":
             st.session_state.active_screen = "UNLOAD"
             _mark_and_save()
             st.rerun()
-        if w > 0:
-            allowed = batch_allowed_ids(w)
+        preview_w = w if w > 0 else 0
+        allowed = batch_allowed_ids(preview_w)
+        if wearers_text != "" and w > 0:
             st.info(f"Assign **Truck {t}** (wearers: **{w}**) to a batch (≤ {BATCH_CAP}).")
-            if not allowed:
-                st.error("No batch can accept this truck without exceeding 400.")
-            else:
-                batch = st.selectbox(
-                    "Assign to batch",
-                    allowed,
-                    format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})",
-                    key="batch_assign_select",
-                )
-                c1, c2 = st.columns([1, 1])
-                with c1:
-                    if st.button("Assign to batch", use_container_width=True):
+        elif wearers_text != "":
+            st.caption("Enter at least 1 wearer before assigning.")
+        else:
+            st.caption("Enter wearers. Batch options are ready.")
+
+        if not allowed:
+            st.error("No batch can accept this truck without exceeding 400.")
+        else:
+            batch = st.selectbox(
+                "Assign to batch",
+                allowed,
+                format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})",
+                key="batch_assign_select",
+            )
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("Assign to batch", use_container_width=True):
+                    if w <= 0:
+                        st.warning("Enter at least 1 wearer before assigning.")
+                    else:
                         batch_assign(t, w, batch)
                         st.session_state.wearers[int(t)] = int(w)
                         st.session_state.cleaned_set.add(int(t))
@@ -4885,23 +5234,51 @@ elif st.session_state.active_screen == "BATCH":
                             pass
                         st.session_state.active_screen = "UNLOAD"
                         st.rerun()
-                with c2:
-                    if st.button("Cancel", use_container_width=True):
-                        st.session_state.unload_inprog_truck = None
-                        st.session_state.unload_inprog_start_time = None
-                        st.session_state.unload_inprog_wearers = 0
-                        try:
-                            st.session_state["unload_truck_select"] = None
-                        except Exception:
-                            pass
-                        st.session_state.active_screen = "UNLOAD"
-                        st.rerun()
+            with c2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.unload_inprog_truck = None
+                    st.session_state.unload_inprog_start_time = None
+                    st.session_state.unload_inprog_wearers = 0
+                    try:
+                        st.session_state["unload_truck_select"] = None
+                    except Exception:
+                        pass
+                    st.session_state.active_screen = "UNLOAD"
+                    st.rerun()
+
+        st.divider()
+        cols = st.columns(3)
+        for i in range(1, BATCH_COUNT + 1):
+            col = cols[(i - 1) % 3]
+            if (i - 1) % 3 == 0 and i != 1:
+                cols = st.columns(3)
+                col = cols[(i - 1) % 3]
+            with col:
+                with st.container(border=True):
+                    trucks = st.session_state.batches[i]['trucks']
+                    total = st.session_state.batches[i]['total']
+                    if total < BATCH_CAP * 0.7:
+                        color = GREEN
+                    elif total < BATCH_CAP * 0.95:
+                        color = ORANGE
+                    else:
+                        color = RED
+                    st.markdown(f"""
+                    <div style='border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.08); padding:18px 10px 14px 10px; background:rgba(255,255,255,0.08);'>
+                        <div style='text-align:center; font-size:20px; font-weight:700; margin-bottom:8px;'>Batch {i}</div>
+                        <div style='font-size:15px; margin-bottom:6px;'><b>{trucks}</b></div>
+                        <div style='font-size:15px;'>
+                            Total wearers: <span style='font-weight:800; color:{color}; font-size:18px;'>{total}</span> / {BATCH_CAP}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 # --------------------------
 # Load
 # --------------------------
 elif st.session_state.active_screen == "LOAD":
     st.markdown("<style>h2{display:none;}</style>", unsafe_allow_html=True)
+    render_page_heading("Load")
 
     history = load_duration_history()
     last_sec = int(history[-1].get("seconds")) if history else None
@@ -4966,7 +5343,7 @@ elif st.session_state.active_screen == "LOAD":
 # --------------------------
 elif st.session_state.active_screen == "SHORTS":
     t = st.session_state.shorts_truck
-    st.subheader(f"Shortages — Truck {t}")
+    render_page_heading(f"Shortages — Truck {t}")
 
     if t is None:
         st.warning("No truck selected for shortages.")

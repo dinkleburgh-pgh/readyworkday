@@ -4977,6 +4977,13 @@ if st.session_state.setup_done:
         st.session_state.active_screen = "SUPERVISOR"
         _mark_and_save()
         st.rerun()
+    version_label = str(_APP_VERSION).strip()
+    if version_label and not version_label.lower().startswith("v"):
+        version_label = f"v{version_label}"
+    st.sidebar.markdown(
+        f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label)}</div>",
+        unsafe_allow_html=True,
+    )
 # ==========================================================
 # PAGES
 # ==========================================================

@@ -1,25 +1,5 @@
 # Changelog
 
-## v1.4.0 - 2026-03-09
-
-Ordered list of final changes included in this release:
-
-1. Promoted `app_unloadv1.4.py` as the primary app entry file and updated app metadata version to **1.4.0**.
-2. Added `backups/v1.3/` snapshot with `app_unloadv1.3.py` and the prior `CHANGELOG.md`.
-3. In Progress layout was rebalanced to follow the centered status-page style while preserving the large timer-focused display.
-4. In Progress Daily Notes now render as bullets per line with larger, bolder text for display readability.
-5. In Progress empty-state messaging/buttons were resized and centered for better proportional spacing.
-6. Added In Progress keep-awake behavior using Screen Wake Lock with media/session fallback and auto-reacquire logic.
-7. Improved mobile wearers keypad reliability on unload batching with stronger focus retries and touch/click focus hooks.
-8. Shop workflow on `STATUS_SHOP` was simplified to reduce clutter: page now shows current shop trucks with concise **Send** and **Return** controls.
-9. Added shared helper functions for send/return shop transitions to keep Fleet and Status-Shop behavior consistent.
-10. Added Load-page **Load Progress** dropdown under Off Day showing scheduled total, remaining-to-load, and loaded count.
-11. Replaced always-visible remaining list with `Show remaining` / `Hide remaining` toggle in the Load Progress dropdown.
-12. Centered numeric totals in the Load Progress cards for clearer visual balance on wall/display screens.
-13. Updated runner/container defaults to v1.4 (`run_streamlit.sh`, `docker-entrypoint.sh`, `Dockerfile`, `docker-compose.yml`, `docker-compose.portainer.yml`).
-14. Updated README release docs and command examples to v1.4 defaults.
-15. Updated `requirements.txt` with explicit minimum dependency versions.
-
 ## v1.3.1 - 2026-03-06
 
 Ordered list of final changes included in this release:

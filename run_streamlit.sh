@@ -6,7 +6,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-APP_FILE="${APP_FILE:-app_unloadv1.2.py}"
+APP_FILE="${APP_FILE:-app_unloadv1.4.py}"
 VENV_DIR="${VENV_DIR:-venv}"
 LOG_DIR="${LOG_DIR:-.data}"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/streamlit.log}"
@@ -191,6 +191,17 @@ if kill -0 "$NEW_PID" >/dev/null 2>&1; then
   info "Streamlit started (PID $NEW_PID)."
   info "URL: http://localhost:$STREAMLIT_PORT"
   info "Log: $LOG_FILE"
+  # Auto-open browser
+  STREAMLIT_URL="http://localhost:$STREAMLIT_PORT"
+  if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    start "$STREAMLIT_URL"
+  elif have_cmd xdg-open; then
+    xdg-open "$STREAMLIT_URL"
+  elif have_cmd open; then
+    open "$STREAMLIT_URL"
+  else
+    info "Please open $STREAMLIT_URL in your browser."
+  fi
 else
   error "Streamlit failed to start. Recent log output:"
   tail -n 40 "$LOG_FILE" || true

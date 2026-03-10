@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
     STREAMLIT_SERVER_PORT=8501 \
-    APP_FILE=app_unloadv1.4.py
+    APP_FILE=app_unloadv1.5.py
 
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt

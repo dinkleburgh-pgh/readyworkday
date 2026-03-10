@@ -1,4 +1,13 @@
+import importlib
 import streamlit as st # type: ignore
+try:
+    st_autorefresh = importlib.import_module("streamlit_autorefresh").st_autorefresh
+except Exception:
+    st_autorefresh = None
+try:
+    stauth = importlib.import_module("streamlit_authenticator")
+except Exception:
+    stauth = None
 import logging
 import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
@@ -8,6 +17,7 @@ from io import BytesIO
 import json
 import html
 import os
+import re
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -17,8 +27,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.4.0"
-_APP_DATE = "20260309"  
+_APP_VERSION = "1.5"
+_APP_DATE = "20260310"  
 
 # Setup logging
 logging.basicConfig(
@@ -52,6 +62,9 @@ BATCH_CAP = 400  # cannot go over
 DEFAULT_WARN_MIN = 15  # default 15 minutes
 ROLLOVER_PROMPT_HOUR = 6
 ROLLOVER_SNOOZE_SECONDS = 60 * 60
+AUTO_REFRESH_DEFAULT_MS = 2 * 60 * 1000
+AUTO_REFRESH_INPROGRESS_MS = 60 * 1000
+AUTO_REFRESH_SIDEBAR_MS = 5 * 1000
 
 DEFAULT_SHORT_ITEMS = [
     "None",
@@ -171,6 +184,221 @@ FLEET_FILE = "truck_fleet.json"
 DURATIONS_FILE = "load_durations.json"
 OFF_SCHEDULE_DEFAULTS_FILE = "off_schedule_defaults.json"
 HISTORY_DIR = "state_history"
+AUTH_USERS_FILE = "auth_users.json"
+AUTH_REQUESTS_FILE = "auth_user_requests.json"
+COMMUNICATIONS_FILE = "communications_chat.json"
+CHAT_CENSOR_WORDS_FILE = "chat_censor_words.json"
+
+APP_VALID_PAGES = {
+    "SETUP", "UNLOAD", "LOAD", "SHORTS", "FLEET",
+    "COMMUNICATIONS",
+    "STATUS_DIRTY", "STATUS_CLEANED", "STATUS_LOADED", "STATUS_SHOP", "STATUS_OOS", "STATUS_OFF",
+    "TRUCK", "SUPERVISOR", "MANAGEMENT",
+    "IN_PROGRESS",
+    "BREAK",
+    "BATCH",
+}
+
+COMMUNICATIONS_CHANNEL = "Team"
+COMMUNICATIONS_AUTO_REFRESH_MS = 5 * 1000
+COMMUNICATIONS_MAX_MESSAGES = 500
+COMMUNICATIONS_MAX_MESSAGE_LENGTH = 1000
+DEFAULT_COMMUNICATIONS_CENSOR_WORDS = {
+    "anal",
+    "anus",
+    "arse",
+    "arsehole",
+    "ass",
+    "asshole",
+    "assmunch",
+    "bastard",
+    "biatch",
+    "bitch",
+    "bitches",
+    "blowjob",
+    "bollocks",
+    "boner",
+    "boob",
+    "boobs",
+    "booty",
+    "bugger",
+    "bullshit",
+    "butt",
+    "butthole",
+    "clit",
+    "clitoris",
+    "cock",
+    "cocks",
+    "crap",
+    "cum",
+    "cumming",
+    "cumshot",
+    "cunt",
+    "damn",
+    "dick",
+    "dildo",
+    "douche",
+    "douchebag",
+    "dumbass",
+    "ejaculate",
+    "ejaculation",
+    "fap",
+    "fart",
+    "fck",
+    "fellatio",
+    "fag",
+    "faggot",
+    "fingering",
+    "fisting",
+    "fk",
+    "freaking",
+    "freakin",
+    "fuck",
+    "fucked",
+    "fucker",
+    "fucking",
+    "goddamn",
+    "hell",
+    "horny",
+    "jackass",
+    "jerkoff",
+    "jizz",
+    "kinky",
+    "masturbation",
+    "motherfucker",
+    "naked",
+    "nipple",
+    "nipples",
+    "nutsack",
+    "orgasm",
+    "orgy",
+    "penis",
+    "piss",
+    "pissed",
+    "pissing",
+    "porn",
+    "porno",
+    "pornography",
+    "prick",
+    "pube",
+    "pubes",
+    "pussy",
+    "queef",
+    "rape",
+    "raped",
+    "raping",
+    "rapist",
+    "rimjob",
+    "scrotum",
+    "semen",
+    "sex",
+    "sexual",
+    "sexy",
+    "shit",
+    "shitty",
+    "slut",
+    "sperm",
+    "testicle",
+    "threesome",
+    "tit",
+    "tits",
+    "twat",
+    "vagina",
+    "wank",
+    "whore",
+}
+
+
+def _chat_censor_words_path() -> str:
+    return os.path.join(os.getcwd(), CHAT_CENSOR_WORDS_FILE)
+
+
+def _normalize_chat_censor_words(raw_words) -> set[str]:
+    words_block = raw_words.get("words") if isinstance(raw_words, dict) else raw_words
+    if not isinstance(words_block, (list, tuple, set)):
+        return set()
+
+    normalized: set[str] = set()
+    for raw_word in words_block:
+        token = str(raw_word or "").strip().lower()
+        if not token:
+            continue
+        token = re.sub(r"[^a-z0-9']+", "", token)
+        if len(token) < 2:
+            continue
+        normalized.add(token)
+    return normalized
+
+
+def load_chat_censor_words() -> set[str]:
+    path = _chat_censor_words_path()
+    loaded_words: set[str] = set()
+
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            loaded_words = _normalize_chat_censor_words(data)
+        except Exception:
+            loaded_words = set()
+
+    if not loaded_words:
+        loaded_words = set(DEFAULT_COMMUNICATIONS_CENSOR_WORDS)
+
+    if not os.path.exists(path):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"words": sorted(loaded_words)}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return loaded_words
+
+
+COMMUNICATIONS_CENSOR_WORDS = load_chat_censor_words()
+
+_CHAT_CENSOR_PATTERN = (
+    re.compile(
+        r"\b(" + "|".join(re.escape(word) for word in sorted(COMMUNICATIONS_CENSOR_WORDS, key=len, reverse=True)) + r")\b",
+        flags=re.IGNORECASE,
+    )
+    if COMMUNICATIONS_CENSOR_WORDS
+    else None
+)
+
+AUTH_ROLE_ADMIN = "fleet"
+AUTH_ROLE_LOADER = "loader"
+AUTH_ROLE_UNLOADER = "unloader"
+AUTH_ROLE_GUEST = "guest"
+AUTH_ROLE_OPTIONS = [
+    AUTH_ROLE_ADMIN,
+    AUTH_ROLE_LOADER,
+    AUTH_ROLE_UNLOADER,
+]
+
+AUTH_ROLE_LABELS = {
+    AUTH_ROLE_ADMIN: "Management",
+    AUTH_ROLE_LOADER: "Loader",
+    AUTH_ROLE_UNLOADER: "Unloader",
+    AUTH_ROLE_GUEST: "Guest",
+}
+
+ROLE_SCREEN_ACCESS = {
+    AUTH_ROLE_ADMIN: set(APP_VALID_PAGES),
+    AUTH_ROLE_LOADER: {
+        "LOAD",
+        "COMMUNICATIONS",
+        "STATUS_DIRTY", "STATUS_CLEANED", "STATUS_LOADED", "STATUS_SHOP", "STATUS_OOS", "STATUS_OFF",
+        "TRUCK", "IN_PROGRESS",
+    },
+    AUTH_ROLE_UNLOADER: {
+        "UNLOAD",
+        "COMMUNICATIONS",
+        "STATUS_DIRTY", "STATUS_CLEANED", "STATUS_LOADED", "STATUS_SHOP", "STATUS_OOS", "STATUS_OFF",
+        "TRUCK", "IN_PROGRESS",
+    },
+    AUTH_ROLE_GUEST: {"IN_PROGRESS"},
+}
 
 
 def _fleet_path() -> str:
@@ -221,6 +449,18 @@ def _durations_path() -> str:
 
 def _off_schedule_defaults_path() -> str:
     return os.path.join(os.getcwd(), OFF_SCHEDULE_DEFAULTS_FILE)
+
+
+def _auth_users_path() -> str:
+    return os.path.join(os.getcwd(), AUTH_USERS_FILE)
+
+
+def _auth_requests_path() -> str:
+    return os.path.join(os.getcwd(), AUTH_REQUESTS_FILE)
+
+
+def _communications_path() -> str:
+    return os.path.join(os.getcwd(), COMMUNICATIONS_FILE)
 
 
 def _normalize_off_schedule(raw) -> dict[int, list[int]]:
@@ -280,6 +520,465 @@ def save_off_schedule_defaults(schedule):
             json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def _normalize_auth_role(role_value) -> str:
+    role = str(role_value or "").strip().lower()
+    legacy_role_map = {
+        "admin": AUTH_ROLE_ADMIN,
+        "fleet": AUTH_ROLE_ADMIN,
+        "management": AUTH_ROLE_ADMIN,
+        "manager": AUTH_ROLE_ADMIN,
+        "loader": AUTH_ROLE_LOADER,
+        "operator": AUTH_ROLE_UNLOADER,
+        "unloader": AUTH_ROLE_UNLOADER,
+        "viewer": AUTH_ROLE_GUEST,
+        "guest": AUTH_ROLE_GUEST,
+    }
+    return legacy_role_map.get(role, AUTH_ROLE_GUEST)
+
+
+def _auth_role_label(role_value) -> str:
+    role = _normalize_auth_role(role_value)
+    return AUTH_ROLE_LABELS.get(role, AUTH_ROLE_LABELS[AUTH_ROLE_GUEST])
+
+
+def _allowed_screens_for_role(role_value) -> set[str]:
+    role = _normalize_auth_role(role_value)
+    allowed = ROLE_SCREEN_ACCESS.get(role)
+    if not isinstance(allowed, set):
+        return set(ROLE_SCREEN_ACCESS[AUTH_ROLE_GUEST])
+    return set(allowed)
+
+
+def _current_auth_role() -> str:
+    if not _auth_enabled():
+        return AUTH_ROLE_ADMIN
+    return _normalize_auth_role(st.session_state.get("auth_role"))
+
+
+def _current_actor_name() -> str:
+    auth_name = str(st.session_state.get("auth_name") or "").strip()
+    if auth_name:
+        return auth_name
+    auth_username = str(st.session_state.get("auth_username") or "").strip()
+    if auth_username:
+        return auth_username
+    return "Guest"
+
+
+def _screen_allowed_for_role(screen: str | None, role_value) -> bool:
+    screen_value = str(screen or "").strip().upper()
+    if not screen_value:
+        return False
+    return screen_value in _allowed_screens_for_role(role_value)
+
+
+def _screen_allowed_for_current_user(screen: str | None) -> bool:
+    return _screen_allowed_for_role(screen, _current_auth_role())
+
+
+def _default_screen_for_role(role_value) -> str:
+    role = _normalize_auth_role(role_value)
+    if role == AUTH_ROLE_GUEST:
+        return "IN_PROGRESS"
+    if role == AUTH_ROLE_LOADER:
+        return "LOAD"
+    if role in {AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN}:
+        return "UNLOAD"
+    return "IN_PROGRESS"
+
+
+def _render_guest_live_status_pace_card():
+    completion = current_load_day_completion()
+    remaining_count = len(completion.get("remaining") or [])
+
+    now_local = _now_local()
+    run_day = st.session_state.get("run_date")
+    shift_day = run_day if isinstance(run_day, date) else now_local.date()
+    shift_tz = now_local.tzinfo
+    shift_start = datetime(shift_day.year, shift_day.month, shift_day.day, 14, 0, 0, tzinfo=shift_tz)
+    shift_end = datetime(shift_day.year, shift_day.month, shift_day.day, 22, 0, 0, tzinfo=shift_tz)
+    shift_total_seconds = int((shift_end - shift_start).total_seconds())
+    raw_time_left_seconds = int((shift_end - now_local).total_seconds())
+    shift_time_left_seconds = max(0, min(shift_total_seconds, raw_time_left_seconds))
+
+    avg_sec = average_load_time_seconds([])
+    avg_per_truck_seconds = int(avg_sec) if (avg_sec is not None and int(avg_sec) > 0) else None
+
+    pace_header_value = "N/A"
+    pace_status_line = "Need load history for pace."
+    pace_value_color = ORANGE
+    if avg_per_truck_seconds is not None:
+        needed_seconds = int(remaining_count * avg_per_truck_seconds)
+        pace_delta_seconds = int(shift_time_left_seconds - needed_seconds)
+        ahead = pace_delta_seconds >= 0
+        pace_value = seconds_to_mmss(abs(pace_delta_seconds))
+        pace_sign = "+" if ahead else "-"
+        pace_header_value = f"{pace_sign}{pace_value}"
+        pace_status_line = f"{'Ahead' if ahead else 'Behind'} by {pace_value}"
+        pace_value_color = GREEN if ahead else RED
+
+    st.sidebar.markdown(
+        (
+            "<div style='margin:8px 0 2px 0; padding:8px 10px; border-radius:10px; border:1px solid rgba(59,130,246,0.35); background:rgba(15,23,42,0.48);'>"
+            "<div style='font-size:0.72rem; letter-spacing:0.08em; text-transform:uppercase; opacity:0.8; font-weight:800;'>Mini Pace</div>"
+            f"<div style='font-size:1.1rem; font-weight:900; color:{pace_value_color}; line-height:1.1;'>{pace_header_value}</div>"
+            f"<div style='font-size:0.72rem; opacity:0.8; margin-top:2px;'>{pace_status_line}</div>"
+            f"<div style='font-size:0.68rem; opacity:0.7; margin-top:2px;'>Remaining {remaining_count} • Left {seconds_to_mmss(shift_time_left_seconds)}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _to_bool(value, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _is_bcrypt_hash(value: str) -> bool:
+    raw = str(value or "").strip()
+    return raw.startswith("$2a$") or raw.startswith("$2b$") or raw.startswith("$2y$")
+
+
+def _normalize_auth_users(raw_users) -> dict[str, dict]:
+    users_block = raw_users
+    if isinstance(raw_users, dict) and isinstance(raw_users.get("users"), dict):
+        users_block = raw_users.get("users")
+
+    if not isinstance(users_block, dict):
+        return {}
+
+    normalized: dict[str, dict] = {}
+    for username_raw, user_raw in users_block.items():
+        username = str(username_raw or "").strip()
+        if not username or not isinstance(user_raw, dict):
+            continue
+
+        password_value = str(user_raw.get("password") or "").strip()
+        if not password_value:
+            continue
+
+        normalized[username] = {
+            "name": username,
+            "password": password_value,
+            "role": _normalize_auth_role(user_raw.get("role")),
+            "enabled": _to_bool(user_raw.get("enabled"), True),
+        }
+
+    return normalized
+
+
+def _load_auth_users() -> dict[str, dict]:
+    path = _auth_users_path()
+    if not os.path.exists(path):
+        return {}
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    return _normalize_auth_users(data)
+
+
+def _save_auth_users(users):
+    path = _auth_users_path()
+    normalized = _normalize_auth_users(users)
+    payload = {"users": normalized}
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _normalize_auth_requests(raw_requests) -> dict[str, dict]:
+    requests_block = raw_requests
+    if isinstance(raw_requests, dict) and isinstance(raw_requests.get("requests"), dict):
+        requests_block = raw_requests.get("requests")
+
+    if not isinstance(requests_block, dict):
+        return {}
+
+    normalized: dict[str, dict] = {}
+    for username_raw, request_raw in requests_block.items():
+        username = str(username_raw or "").strip()
+        if not username or " " in username or not isinstance(request_raw, dict):
+            continue
+
+        status_value = str(request_raw.get("status") or "pending").strip().lower()
+        if status_value not in {"pending", "approved", "rejected"}:
+            status_value = "pending"
+
+        password_value = str(request_raw.get("password") or "").strip()
+        if status_value == "pending" and not password_value:
+            continue
+
+        normalized[username] = {
+            "username": username,
+            "name": username,
+            "password": password_value,
+            "requested_role": _normalize_auth_role(
+                request_raw.get("requested_role") if request_raw.get("requested_role") is not None else request_raw.get("role")
+            ),
+            "status": status_value,
+            "requested_at": str(request_raw.get("requested_at") or ""),
+            "reviewed_at": str(request_raw.get("reviewed_at") or ""),
+            "reviewed_by": str(request_raw.get("reviewed_by") or ""),
+            "notes": str(request_raw.get("notes") or "").strip(),
+        }
+
+    return normalized
+
+
+def _load_auth_requests() -> dict[str, dict]:
+    path = _auth_requests_path()
+    if not os.path.exists(path):
+        return {}
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    return _normalize_auth_requests(data)
+
+
+def _save_auth_requests(requests):
+    path = _auth_requests_path()
+    normalized = _normalize_auth_requests(requests)
+    payload = {"requests": normalized}
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _normalize_communications_channel(channel_value) -> str:
+    _ = channel_value
+    return COMMUNICATIONS_CHANNEL
+
+
+def _sanitize_communications_message_id(raw_value, fallback: str) -> str:
+    value = str(raw_value or "").strip()
+    safe = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "-" for ch in value)
+    safe = safe.strip("-")
+    return safe or fallback
+
+
+def _chat_display_username(username_value) -> str:
+    username = str(username_value or "").strip()
+    if not username:
+        return "Unknown"
+    return f"{username[:1].upper()}{username[1:]}"
+
+
+def _censor_chat_message(message_value) -> str:
+    message_text = str(message_value or "")
+    if not message_text or _CHAT_CENSOR_PATTERN is None:
+        return message_text
+    return _CHAT_CENSOR_PATTERN.sub(lambda match: "*" * len(match.group(0)), message_text)
+
+
+def _normalize_communications_messages(raw_messages) -> list[dict]:
+    messages_block = raw_messages.get("messages") if isinstance(raw_messages, dict) else raw_messages
+    if not isinstance(messages_block, list):
+        return []
+
+    normalized: list[dict] = []
+    for idx, message_raw in enumerate(messages_block):
+        if not isinstance(message_raw, dict):
+            continue
+
+        message_text = _censor_chat_message(str(message_raw.get("message") or "").strip())
+        if not message_text:
+            continue
+
+        try:
+            ts_value = float(message_raw.get("ts"))
+        except Exception:
+            ts_value = time.time()
+
+        fallback_id = f"m{int(ts_value * 1000)}-{idx}"
+        message_id = _sanitize_communications_message_id(message_raw.get("id"), fallback_id)
+
+        normalized.append(
+            {
+                "id": message_id,
+                "ts": ts_value,
+                "channel": _normalize_communications_channel(message_raw.get("channel")),
+                "username": str(message_raw.get("username") or "Unknown").strip() or "Unknown",
+                "message": message_text[:COMMUNICATIONS_MAX_MESSAGE_LENGTH],
+            }
+        )
+
+    normalized.sort(key=lambda entry: float(entry.get("ts") or 0.0))
+    return normalized[-COMMUNICATIONS_MAX_MESSAGES:]
+
+
+def _load_communications_messages() -> list[dict]:
+    path = _communications_path()
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+
+    return _normalize_communications_messages(data)
+
+
+def _save_communications_messages(messages):
+    path = _communications_path()
+    normalized = _normalize_communications_messages(messages)
+    payload = {"messages": normalized}
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _append_communications_message(channel: str, username: str, message: str) -> tuple[bool, str]:
+    message_text_raw = str(message or "").strip()
+    if not message_text_raw:
+        return False, "Message cannot be empty."
+    if len(message_text_raw) > COMMUNICATIONS_MAX_MESSAGE_LENGTH:
+        return False, f"Message must be {COMMUNICATIONS_MAX_MESSAGE_LENGTH} characters or less."
+    message_text = _censor_chat_message(message_text_raw)
+
+    all_messages = _load_communications_messages()
+    message_id = _sanitize_communications_message_id(
+        f"m{int(time.time() * 1000)}-{int(time.perf_counter_ns() % 1_000_000)}",
+        f"m{int(time.time() * 1000)}",
+    )
+    all_messages.append(
+        {
+            "id": message_id,
+            "ts": time.time(),
+            "channel": _normalize_communications_channel(channel),
+            "username": str(username or "Unknown").strip() or "Unknown",
+            "message": message_text,
+        }
+    )
+    _save_communications_messages(all_messages)
+    return True, ""
+
+
+def _can_delete_communications_message(message_entry: dict, actor_username: str, actor_role) -> bool:
+    role = _normalize_auth_role(actor_role)
+    if role == AUTH_ROLE_ADMIN:
+        return True
+    actor = str(actor_username or "").strip().casefold()
+    sender = str(message_entry.get("username") or "").strip().casefold()
+    if not actor or not sender:
+        return False
+    return actor == sender
+
+
+def _delete_communications_message(message_id: str, actor_username: str, actor_role) -> tuple[bool, str, dict | None]:
+    target_id = _sanitize_communications_message_id(message_id, "")
+    if not target_id:
+        return False, "Invalid message id.", None
+
+    all_messages = _load_communications_messages()
+    kept_messages: list[dict] = []
+    removed_message: dict | None = None
+    for entry in all_messages:
+        entry_id = _sanitize_communications_message_id(entry.get("id"), "")
+        if removed_message is None and entry_id == target_id:
+            removed_message = entry
+            continue
+        kept_messages.append(entry)
+
+    if removed_message is None:
+        return False, "Message was not found.", None
+
+    if not _can_delete_communications_message(removed_message, actor_username, actor_role):
+        return False, "You can only delete your own messages.", None
+
+    _save_communications_messages(kept_messages)
+    return True, "Message deleted.", removed_message
+
+
+def _clear_communications_messages() -> int:
+    all_messages = _load_communications_messages()
+    removed_count = len(all_messages)
+    if removed_count > 0:
+        _save_communications_messages([])
+    return removed_count
+
+
+def _latest_communications_message_ts(messages: list[dict] | None = None) -> float:
+    entries = messages if isinstance(messages, list) else _load_communications_messages()
+    latest_ts = 0.0
+    for entry in entries:
+        try:
+            latest_ts = max(latest_ts, float(entry.get("ts") or 0.0))
+        except Exception:
+            continue
+    return latest_ts
+
+
+def _sync_communications_nav_flash_state(latest_ts: float | None = None):
+    current_latest = float(latest_ts) if latest_ts is not None else _latest_communications_message_ts()
+
+    if "communications_last_known_ts" not in st.session_state:
+        st.session_state.communications_last_known_ts = current_latest
+    if "communications_last_seen_ts" not in st.session_state:
+        st.session_state.communications_last_seen_ts = current_latest
+    if "communications_nav_flash_until" not in st.session_state:
+        st.session_state.communications_nav_flash_until = 0.0
+
+    last_known = float(st.session_state.get("communications_last_known_ts") or 0.0)
+    if current_latest > last_known:
+        st.session_state.communications_last_known_ts = current_latest
+        seen_ts = float(st.session_state.get("communications_last_seen_ts") or 0.0)
+        active_screen = str(st.session_state.get("active_screen") or "").upper()
+        if active_screen != "COMMUNICATIONS" and current_latest > seen_ts:
+            st.session_state.communications_nav_flash_until = max(
+                float(st.session_state.get("communications_nav_flash_until") or 0.0),
+                time.time() + 30.0,
+            )
+
+    if str(st.session_state.get("active_screen") or "").upper() == "COMMUNICATIONS":
+        st.session_state.communications_last_seen_ts = max(
+            float(st.session_state.get("communications_last_seen_ts") or 0.0),
+            current_latest,
+        )
+        st.session_state.communications_nav_flash_until = 0.0
+
+
+def _enabled_admin_count(users: dict[str, dict]) -> int:
+    count = 0
+    for user_data in _normalize_auth_users(users).values():
+        if bool(user_data.get("enabled")) and _normalize_auth_role(user_data.get("role")) == AUTH_ROLE_ADMIN:
+            count += 1
+    return count
 
 
 def load_duration_history() -> list[dict]:
@@ -433,39 +1132,762 @@ def save_state():
 def _sync_next_up_from_state_file(force: bool = False):
     path = _state_path()
     if not os.path.exists(path):
-        return
+        return False
     try:
         current_mtime = float(os.path.getmtime(path))
     except Exception:
-        return
+        return False
 
     last_seen_mtime = float(st.session_state.get("_next_up_sync_mtime") or 0.0)
     if (not force) and current_mtime <= last_seen_mtime:
-        return
+        return False
 
-    disk_next_up = load_state().get("next_up_truck")
-    try:
-        disk_next_up = int(disk_next_up) if disk_next_up is not None else None
-    except Exception:
-        disk_next_up = None
+    disk_state = load_state()
+    if not isinstance(disk_state, dict):
+        st.session_state._next_up_sync_mtime = current_mtime
+        return False
 
-    local_next_up = st.session_state.get("next_up_truck")
-    try:
-        local_next_up = int(local_next_up) if local_next_up is not None else None
-    except Exception:
-        local_next_up = None
-
-    if local_next_up != disk_next_up:
-        st.session_state.next_up_truck = disk_next_up
+    sync_keys = (
+        "next_up_truck",
+        "cleaned_set",
+        "inprog_set",
+        "loaded_set",
+        "shop_set",
+        "off_set",
+        "spare_set",
+        "special_set",
+        "inprog_start_time",
+        "oos_spare_assignments",
+        "used_spares_today",
+        "spares_needing_return",
+    )
+    changed = False
+    for key in sync_keys:
+        if key not in disk_state:
+            continue
+        disk_value = disk_state.get(key)
+        if st.session_state.get(key) != disk_value:
+            st.session_state[key] = disk_value
+            changed = True
 
     st.session_state._next_up_sync_mtime = current_mtime
+    return changed
+
+
+def _auto_refresh_interval_ms_for_screen(screen: str) -> int:
+    if str(screen or "").upper() == "IN_PROGRESS":
+        page_interval = AUTO_REFRESH_INPROGRESS_MS
+    else:
+        page_interval = AUTO_REFRESH_DEFAULT_MS
+    return min(page_interval, AUTO_REFRESH_SIDEBAR_MS)
+
+
+def _apply_soft_auto_refresh(screen: str):
+    if st_autorefresh is None:
+        return
+    if _auth_enabled() and st.session_state.get("authentication_status") is not True:
+        return
+    screen_key = str(screen or "UNKNOWN").upper()
+    if screen_key == "COMMUNICATIONS":
+        return
+    if screen_key == "IN_PROGRESS" and bool(st.session_state.get("inprog_set")):
+        return
+    interval_ms = max(5_000, int(_auto_refresh_interval_ms_for_screen(screen)))
+    st_autorefresh(interval=interval_ms, key=f"auto_refresh_{screen_key}")
+
+
+def _auth_enabled() -> bool:
+    raw = str(os.getenv("TRUCKAPP_AUTH_ENABLED", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _build_authenticator():
+    if stauth is None:
+        return None, {}
+
+    username = str(os.getenv("TRUCKAPP_AUTH_USERNAME", "ready")).strip() or "ready"
+    password_env = os.getenv("TRUCKAPP_AUTH_PASSWORD")
+    password_value = str(password_env if password_env is not None else "ready")
+    default_role = _normalize_auth_role(os.getenv("TRUCKAPP_AUTH_ROLE", AUTH_ROLE_ADMIN))
+    cookie_name = str(os.getenv("TRUCKAPP_AUTH_COOKIE_NAME", "truckapp_auth")).strip() or "truckapp_auth"
+    cookie_key = str(os.getenv("TRUCKAPP_AUTH_COOKIE_KEY", "truckapp_cookie_key_change_me")).strip() or "truckapp_cookie_key_change_me"
+    try:
+        cookie_days = float(os.getenv("TRUCKAPP_AUTH_COOKIE_DAYS", "7"))
+    except Exception:
+        cookie_days = 7.0
+
+    users = _load_auth_users()
+    users_changed = False
+
+    if not users:
+        users[username] = {
+            "name": username,
+            "password": stauth.Hasher.hash(password_value),
+            "role": default_role,
+            "enabled": True,
+        }
+        users_changed = True
+    elif username not in users and password_env is not None:
+        users[username] = {
+            "name": username,
+            "password": stauth.Hasher.hash(password_value),
+            "role": default_role,
+            "enabled": True,
+        }
+        users_changed = True
+
+    normalized_users: dict[str, dict] = {}
+    for existing_username, existing_data in _normalize_auth_users(users).items():
+        existing_password = str(existing_data.get("password") or "").strip()
+        if not existing_password:
+            continue
+        if not _is_bcrypt_hash(existing_password):
+            existing_password = stauth.Hasher.hash(existing_password)
+            users_changed = True
+        normalized_users[existing_username] = {
+            "name": existing_username,
+            "password": existing_password,
+            "role": _normalize_auth_role(existing_data.get("role")),
+            "enabled": _to_bool(existing_data.get("enabled"), True),
+        }
+
+    users = normalized_users
+    enabled_users = {
+        user_name: user_data
+        for user_name, user_data in users.items()
+        if _to_bool(user_data.get("enabled"), True)
+    }
+
+    if not enabled_users:
+        users[username] = {
+            "name": username,
+            "password": stauth.Hasher.hash(password_value),
+            "role": default_role,
+            "enabled": True,
+        }
+        enabled_users = {username: users[username]}
+        users_changed = True
+
+    if users_changed:
+        _save_auth_users(users)
+
+    credentials = {
+        "usernames": {
+            user_name: {
+                "name": str(user_name),
+                "password": str(user_data.get("password") or ""),
+            }
+            for user_name, user_data in enabled_users.items()
+        }
+    }
+    role_map = {
+        user_name: _normalize_auth_role(user_data.get("role"))
+        for user_name, user_data in enabled_users.items()
+    }
+    role_map_ci = {
+        str(user_name).strip().lower(): _normalize_auth_role(user_data.get("role"))
+        for user_name, user_data in enabled_users.items()
+    }
+    username_lookup = {
+        str(user_name).strip().lower(): str(user_name)
+        for user_name in enabled_users.keys()
+    }
+
+    try:
+        authenticator = stauth.Authenticate(
+            credentials=credentials,
+            cookie_name=cookie_name,
+            cookie_key=cookie_key,
+            cookie_expiry_days=max(0.0, cookie_days),
+            auto_hash=False,
+        )
+    except TypeError:
+        authenticator = stauth.Authenticate(
+            credentials,
+            cookie_name,
+            cookie_key,
+            max(0.0, cookie_days),
+        )
+
+    return authenticator, {
+        "default_password": password_env is None,
+        "username": username,
+        "roles": role_map,
+        "roles_ci": role_map_ci,
+        "username_lookup": username_lookup,
+    }
+
+
+def _show_login_portal(authenticator, default_password_active: bool = False):
+    @st.dialog("Login Portal")
+    def _login_dialog():
+        st.caption("Sign in for role-based access. You can continue viewing as Guest.")
+        login_kwargs = {
+            "location": "main",
+            "fields": {
+                "Form name": "Login Portal",
+                "Username": "Username",
+                "Password": "Password",
+                "Login": "Login",
+            },
+            "key": "truckapp_login",
+            "clear_on_submit": False,
+        }
+        try:
+            authenticator.login(**login_kwargs)
+            st.session_state.auth_login_cookie_recovery_attempts = 0
+        except Exception as exc:
+            error_text = str(exc or "").strip()
+            if "User not authorized" in error_text:
+                attempts = int(st.session_state.get("auth_login_cookie_recovery_attempts") or 0)
+                if attempts < 2:
+                    st.session_state.auth_login_cookie_recovery_attempts = attempts + 1
+                    try:
+                        cookie_controller = getattr(authenticator, "cookie_controller", None)
+                        if cookie_controller is not None and hasattr(cookie_controller, "delete_cookie"):
+                            cookie_controller.delete_cookie()
+                    except Exception:
+                        pass
+                    st.session_state["authentication_status"] = None
+                    st.session_state.pop("username", None)
+                    st.session_state.pop("name", None)
+                    st.session_state.pop("email", None)
+                    st.session_state.pop("roles", None)
+                    st.rerun()
+                st.error("Unable to render login form: User not authorized. Please clear browser cookies for this site and try again.")
+                return
+            st.error(f"Unable to render login form: {exc}")
+            return
+
+        auth_status = st.session_state.get("authentication_status")
+        if auth_status is False:
+            st.error("Username or password is incorrect.")
+        elif auth_status is None and default_password_active:
+            st.caption("Default password is active. Set TRUCKAPP_AUTH_PASSWORD to secure access.")
+
+    _login_dialog()
+
+
+def _show_account_request_portal():
+    @st.dialog("Request Account")
+    def _request_dialog():
+        st.caption("Submit an account request. Management users must approve it before you can sign in.")
+
+        request_role_options = [AUTH_ROLE_LOADER, AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN]
+        request_role_labels = [AUTH_ROLE_LABELS[r] for r in request_role_options]
+        request_role_by_label = {AUTH_ROLE_LABELS[r]: r for r in request_role_options}
+
+        with st.form("auth_request_form", clear_on_submit=False):
+            request_username = st.text_input("Requested username", key="auth_request_username")
+            request_password = st.text_input(
+                "Password",
+                type="password",
+                key="auth_request_password",
+                help="Must be 6 characters.",
+            )
+            request_password_confirm = st.text_input(
+                "Confirm password",
+                type="password",
+                key="auth_request_password_confirm",
+            )
+            request_role_label = st.selectbox(
+                "Requested role",
+                options=request_role_labels,
+                index=0,
+                key="auth_request_role",
+            )
+            request_notes = st.text_area("Notes (optional)", value="", key="auth_request_notes")
+            submit_request = st.form_submit_button("Submit request", use_container_width=True)
+
+        if not submit_request:
+            return
+
+        username_clean = str(request_username or "").strip()
+        password_clean = str(request_password or "")
+        password_confirm_clean = str(request_password_confirm or "")
+
+        if not username_clean:
+            st.error("Username is required.")
+            return
+        if " " in username_clean:
+            st.error("Username cannot contain spaces.")
+            return
+        if len(username_clean) < 3:
+            st.error("Username must be at least 3 characters.")
+            return
+        if not password_clean:
+            st.error("Password is required.")
+            return
+        if len(password_clean) < 6:
+            st.error("Password must be at least 6 characters.")
+            return
+        if password_clean != password_confirm_clean:
+            st.error("Passwords do not match.")
+            return
+
+        users = _load_auth_users()
+        requests = _load_auth_requests()
+        users_lower = {str(user_name).strip().lower() for user_name in users.keys()}
+        pending_lower = {
+            str(req_name).strip().lower()
+            for req_name, req_data in requests.items()
+            if str(req_data.get("status") or "pending").strip().lower() == "pending"
+        }
+
+        username_lower = username_clean.lower()
+        if username_lower in users_lower:
+            st.error("That username already exists.")
+            return
+        if username_lower in pending_lower:
+            st.error("A pending request already exists for that username.")
+            return
+
+        try:
+            password_hash = stauth.Hasher.hash(password_clean)
+        except Exception as exc:
+            st.error(f"Unable to submit request: {exc}")
+            return
+
+        request_role = request_role_by_label.get(request_role_label, AUTH_ROLE_UNLOADER)
+        requests[username_clean] = {
+            "username": username_clean,
+            "name": username_clean,
+            "password": password_hash,
+            "requested_role": request_role,
+            "status": "pending",
+            "requested_at": datetime.now().isoformat(),
+            "reviewed_at": "",
+            "reviewed_by": "",
+            "notes": str(request_notes or "").strip(),
+        }
+        _save_auth_requests(requests)
+        st.success("Account request submitted. A Management user must approve it before login is enabled.")
+
+    _request_dialog()
+
+
+def _apply_auth_gate():
+    if not _auth_enabled():
+        st.session_state.auth_name = "Local"
+        st.session_state.auth_username = "local"
+        st.session_state.auth_role = AUTH_ROLE_ADMIN
+        st.session_state.auth_login_portal_auto_prompted = False
+        st.session_state.auth_login_portal_pending = False
+        st.session_state.auth_request_portal_pending = False
+        return None
+
+    if stauth is None:
+        st.warning("Authentication dependency is unavailable. Viewing as Guest.")
+        st.session_state.auth_name = "Guest"
+        st.session_state.auth_username = "guest"
+        st.session_state.auth_role = AUTH_ROLE_GUEST
+        st.session_state.auth_login_portal_pending = False
+        st.session_state.auth_request_portal_pending = False
+        return None
+
+    authenticator, meta = _build_authenticator()
+    if authenticator is None:
+        st.warning("Authentication is unavailable. Viewing as Guest.")
+        st.session_state.auth_name = "Guest"
+        st.session_state.auth_username = "guest"
+        st.session_state.auth_role = AUTH_ROLE_GUEST
+        st.session_state.auth_login_portal_pending = False
+        st.session_state.auth_request_portal_pending = False
+        return None
+
+    auth_status = st.session_state.get("authentication_status")
+    request_portal_pending = bool(st.session_state.get("auth_request_portal_pending", False))
+    if auth_status is not True:
+        st.session_state.auth_name = "Guest"
+        st.session_state.auth_username = "guest"
+        st.session_state.auth_role = AUTH_ROLE_GUEST
+        should_show_login_portal = False
+        if not request_portal_pending:
+            if st.session_state.get("auth_login_portal_pending", False):
+                should_show_login_portal = True
+                st.session_state.auth_login_portal_pending = False
+            elif not st.session_state.get("auth_login_portal_auto_prompted", False):
+                should_show_login_portal = True
+                st.session_state.auth_login_portal_auto_prompted = True
+
+        if should_show_login_portal:
+            _show_login_portal(authenticator, bool(meta.get("default_password")))
+        auth_status = st.session_state.get("authentication_status")
+
+    if auth_status is True:
+        username = st.session_state.get("username")
+        raw_username = str(username or meta.get("username") or "guest").strip()
+        username_lookup = meta.get("username_lookup") if isinstance(meta.get("username_lookup"), dict) else {}
+        canonical_username = username_lookup.get(raw_username.lower(), raw_username)
+        st.session_state.auth_username = str(canonical_username or "guest")
+        st.session_state.auth_name = st.session_state.auth_username
+        role_map = meta.get("roles") if isinstance(meta.get("roles"), dict) else {}
+        role_map_ci = meta.get("roles_ci") if isinstance(meta.get("roles_ci"), dict) else {}
+        resolved_role = role_map.get(st.session_state.auth_username)
+        if not resolved_role:
+            resolved_role = role_map_ci.get(raw_username.lower())
+        st.session_state.auth_role = _normalize_auth_role(
+            resolved_role or AUTH_ROLE_ADMIN
+        )
+        st.session_state.auth_login_portal_auto_prompted = False
+        st.session_state.auth_login_portal_pending = False
+        st.session_state.auth_request_portal_pending = False
+
+    if auth_status is not True and request_portal_pending:
+        st.session_state.auth_request_portal_pending = False
+        _show_account_request_portal()
+
+    return authenticator
+
+
+def _enforce_active_screen_role_access():
+    current_screen = str(st.session_state.get("active_screen") or "").strip().upper()
+    role = _current_auth_role()
+    if not current_screen:
+        return
+    if (
+        current_screen == "SETUP"
+        and (
+            (not st.session_state.get("setup_done"))
+            or (st.session_state.get("run_date") is None)
+        )
+    ):
+        return
+    if _screen_allowed_for_role(current_screen, role):
+        return
+
+    fallback_screen = _default_screen_for_role(role)
+    if not _screen_allowed_for_role(fallback_screen, role):
+        allowed = sorted(_allowed_screens_for_role(role))
+        fallback_screen = allowed[0] if allowed else "SETUP"
+
+    st.session_state.role_access_notice = (
+        f"{_auth_role_label(role)} access does not allow {current_screen.replace('_', ' ').title()}. "
+        f"Redirected to {fallback_screen.replace('_', ' ').title()}."
+    )
+    st.session_state.active_screen = fallback_screen
+    _push_nav_history(force=True)
+    st.rerun()
+
+
+def _render_user_management_dropdown():
+    with st.expander("User Management", expanded=False):
+        role = _current_auth_role()
+        if role != AUTH_ROLE_ADMIN:
+            st.info("Only Management users can manage user accounts.")
+            return
+
+        if stauth is None:
+            st.error("User Management requires streamlit-authenticator.")
+            return
+
+        success_payload = st.session_state.get("mgmt_user_success_dialog")
+        if isinstance(success_payload, dict):
+            dialog_title = str(success_payload.get("title") or "User saved")
+            dialog_message = str(success_payload.get("message") or "User changes saved.")
+
+            @st.dialog(dialog_title)
+            def _mgmt_user_success_dialog():
+                st.success(dialog_message)
+                if st.button("OK", use_container_width=True, key="mgmt_user_success_ok"):
+                    st.session_state.pop("mgmt_user_success_dialog", None)
+                    st.rerun()
+
+            _mgmt_user_success_dialog()
+
+        users = _load_auth_users()
+        if not users:
+            st.warning("No users are configured.")
+            return
+
+        requests = _load_auth_requests()
+
+        role_labels = [AUTH_ROLE_LABELS[r] for r in AUTH_ROLE_OPTIONS]
+        role_by_label = {AUTH_ROLE_LABELS[r]: r for r in AUTH_ROLE_OPTIONS}
+
+        st.caption(
+            "Roles: Management (full app + user management), Loader (Load workflow), "
+            "Unloader (Unload workflow). Guests can view In Progress without a role."
+        )
+
+        pending_requests = {
+            req_username: req_data
+            for req_username, req_data in requests.items()
+            if str(req_data.get("status") or "pending").strip().lower() == "pending"
+        }
+
+        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+        st.markdown("##### Pending account requests")
+        if not pending_requests:
+            st.caption("No pending account requests.")
+        else:
+            for req_username in sorted(pending_requests.keys(), key=lambda x: str(x).lower()):
+                req_data = pending_requests[req_username]
+                req_role_label = _auth_role_label(req_data.get("requested_role"))
+                req_when = str(req_data.get("requested_at") or "Unknown")
+                st.markdown(
+                    f"- **{html.escape(req_username)}** requested {html.escape(req_role_label)} ({html.escape(req_when)})"
+                )
+
+            pending_pick = st.selectbox(
+                "Select pending request",
+                options=sorted(pending_requests.keys(), key=lambda x: str(x).lower()),
+                key="mgmt_request_pick",
+            )
+            pending_data = pending_requests.get(pending_pick, {})
+            pending_default_role = _normalize_auth_role(pending_data.get("requested_role"))
+            pending_default_label = AUTH_ROLE_LABELS.get(pending_default_role, AUTH_ROLE_LABELS[AUTH_ROLE_UNLOADER])
+            pending_default_index = (
+                role_labels.index(pending_default_label)
+                if pending_default_label in role_labels
+                else role_labels.index(AUTH_ROLE_LABELS[AUTH_ROLE_UNLOADER])
+            )
+
+            st.caption(f"Username: {pending_pick}")
+            st.caption(f"Requested at: {str(pending_data.get('requested_at') or 'Unknown')}")
+            pending_notes = str(pending_data.get("notes") or "").strip()
+            if pending_notes:
+                st.caption(f"Notes: {pending_notes}")
+
+            approve_role_label = st.selectbox(
+                "Approve as role",
+                options=role_labels,
+                index=pending_default_index,
+                key="mgmt_request_approve_role",
+            )
+            approve_enabled = st.checkbox(
+                "Enable login on approval",
+                value=True,
+                key="mgmt_request_approve_enabled",
+            )
+
+            approve_col, reject_col = st.columns(2)
+            with approve_col:
+                if st.button("Approve request", use_container_width=True, key="mgmt_request_approve_btn"):
+                    updated_requests = _normalize_auth_requests(requests)
+                    updated_users = _normalize_auth_users(users)
+                    target_request = updated_requests.get(pending_pick)
+                    if target_request is None:
+                        st.error("Selected request was not found.")
+                    elif str(target_request.get("status") or "pending").strip().lower() != "pending":
+                        st.error("Selected request is no longer pending.")
+                    elif pending_pick in updated_users:
+                        st.error("That username already exists as a user.")
+                    else:
+                        request_password = str(target_request.get("password") or "").strip()
+                        if not request_password:
+                            st.error("The request does not contain a password.")
+                        else:
+                            if not _is_bcrypt_hash(request_password):
+                                request_password = stauth.Hasher.hash(request_password)
+                            approved_role = role_by_label.get(approve_role_label, pending_default_role)
+                            updated_users[pending_pick] = {
+                                "name": pending_pick,
+                                "password": request_password,
+                                "role": approved_role,
+                                "enabled": bool(approve_enabled),
+                            }
+                            _save_auth_users(updated_users)
+
+                            target_request["status"] = "approved"
+                            target_request["reviewed_at"] = datetime.now().isoformat()
+                            target_request["reviewed_by"] = str(st.session_state.get("auth_username") or "fleet")
+                            target_request["requested_role"] = pending_default_role
+                            target_request["password"] = request_password
+                            updated_requests[pending_pick] = target_request
+                            _save_auth_requests(updated_requests)
+
+                            st.success(f"Approved account request for {pending_pick}.")
+                            st.rerun()
+
+            with reject_col:
+                if st.button("Reject request", use_container_width=True, key="mgmt_request_reject_btn"):
+                    updated_requests = _normalize_auth_requests(requests)
+                    target_request = updated_requests.get(pending_pick)
+                    if target_request is None:
+                        st.error("Selected request was not found.")
+                    elif str(target_request.get("status") or "pending").strip().lower() != "pending":
+                        st.error("Selected request is no longer pending.")
+                    else:
+                        target_request["status"] = "rejected"
+                        target_request["reviewed_at"] = datetime.now().isoformat()
+                        target_request["reviewed_by"] = str(st.session_state.get("auth_username") or "fleet")
+                        updated_requests[pending_pick] = target_request
+                        _save_auth_requests(updated_requests)
+                        st.warning(f"Rejected account request for {pending_pick}.")
+                        st.rerun()
+
+        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+        user_options = sorted(users.keys(), key=lambda x: str(x).lower())
+
+        def _user_pick_label(user_name: str) -> str:
+            user_data = users.get(user_name, {})
+            role_label = _auth_role_label(user_data.get("role"))
+            enabled_label = "Enabled" if bool(user_data.get("enabled", True)) else "Disabled"
+            return f"{user_name} ({role_label} • {enabled_label})"
+
+        selected_username = st.selectbox(
+            "Select user",
+            options=user_options,
+            format_func=_user_pick_label,
+            key="mgmt_user_edit_pick",
+        )
+        selected_user = users.get(selected_username, {})
+        current_role_label = _auth_role_label(selected_user.get("role"))
+        role_index = role_labels.index(current_role_label) if current_role_label in role_labels else 0
+        edit_role_label = st.selectbox(
+            "Role",
+            options=role_labels,
+            index=role_index,
+            key="mgmt_user_edit_role",
+        )
+        edit_enabled = st.checkbox(
+            "Enabled",
+            value=bool(selected_user.get("enabled", True)),
+            key="mgmt_user_edit_enabled",
+        )
+        edit_password = st.text_input(
+            "Reset password (optional)",
+            value="",
+            type="password",
+            key="mgmt_user_edit_password",
+        )
+
+        edit_save_col, edit_delete_col = st.columns(2)
+        with edit_save_col:
+            if st.button("Save user changes", use_container_width=True, key="mgmt_user_edit_save"):
+                updated_users = _normalize_auth_users(users)
+                target_user = updated_users.get(selected_username)
+                if target_user is None:
+                    st.error("Selected user was not found.")
+                else:
+                    new_role = role_by_label.get(edit_role_label, AUTH_ROLE_UNLOADER)
+                    new_enabled = bool(edit_enabled)
+                    current_is_enabled_admin = (
+                        bool(target_user.get("enabled", True))
+                        and _normalize_auth_role(target_user.get("role")) == AUTH_ROLE_ADMIN
+                    )
+                    will_be_enabled_admin = new_enabled and new_role == AUTH_ROLE_ADMIN
+                    if current_is_enabled_admin and (not will_be_enabled_admin) and _enabled_admin_count(updated_users) <= 1:
+                        st.error("At least one enabled Management user is required.")
+                    else:
+                        target_user["name"] = selected_username
+                        target_user["role"] = new_role
+                        target_user["enabled"] = new_enabled
+                        if str(edit_password or "").strip():
+                            target_user["password"] = stauth.Hasher.hash(str(edit_password).strip())
+                        updated_users[selected_username] = target_user
+                        _save_auth_users(updated_users)
+                        current_username = str(st.session_state.get("auth_username") or "").strip()
+                        if current_username and current_username.lower() == selected_username.lower():
+                            st.session_state.auth_username = selected_username
+                            st.session_state.auth_name = selected_username
+                            st.session_state.auth_role = new_role
+                        st.session_state["mgmt_user_success_dialog"] = {
+                            "title": "User changes saved",
+                            "message": f"Updated user {selected_username}.",
+                        }
+                        st.rerun()
+
+        with edit_delete_col:
+            if st.button("Delete user", use_container_width=True, key="mgmt_user_edit_delete"):
+                current_username = str(st.session_state.get("auth_username") or "")
+                updated_users = _normalize_auth_users(users)
+                target_user = updated_users.get(selected_username)
+                if target_user is None:
+                    st.error("Selected user was not found.")
+                elif selected_username == current_username:
+                    st.error("Cannot delete the account that is currently signed in.")
+                elif (
+                    bool(target_user.get("enabled", True))
+                    and _normalize_auth_role(target_user.get("role")) == AUTH_ROLE_ADMIN
+                    and _enabled_admin_count(updated_users) <= 1
+                ):
+                    st.error("At least one enabled Management user is required.")
+                else:
+                    updated_users.pop(selected_username, None)
+                    _save_auth_users(updated_users)
+                    st.success(f"Deleted user {selected_username}.")
+                    st.rerun()
+
+        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+        st.markdown("##### Add user")
+        new_username = st.text_input("Username", value="", key="mgmt_user_new_username")
+        new_password = st.text_input("Password", value="", type="password", key="mgmt_user_new_password")
+        new_role_label = st.selectbox(
+            "Role for new user",
+            options=role_labels,
+            index=role_labels.index(AUTH_ROLE_LABELS[AUTH_ROLE_UNLOADER]),
+            key="mgmt_user_new_role",
+        )
+        new_enabled = st.checkbox("Enabled for login", value=True, key="mgmt_user_new_enabled")
+
+        if st.button("Create user", use_container_width=True, key="mgmt_user_new_create"):
+            username_clean = str(new_username or "").strip()
+            if not username_clean:
+                st.error("Username is required.")
+            elif " " in username_clean:
+                st.error("Username cannot contain spaces.")
+            elif username_clean in users:
+                st.error("That username already exists.")
+            elif not str(new_password or "").strip():
+                st.error("Password is required.")
+            else:
+                updated_users = _normalize_auth_users(users)
+                updated_users[username_clean] = {
+                    "name": username_clean,
+                    "password": stauth.Hasher.hash(str(new_password).strip()),
+                    "role": role_by_label.get(new_role_label, AUTH_ROLE_UNLOADER),
+                    "enabled": bool(new_enabled),
+                }
+                _save_auth_users(updated_users)
+                st.session_state["mgmt_user_success_dialog"] = {
+                    "title": "User created",
+                    "message": f"Created user {username_clean}.",
+                }
+                st.rerun()
 
 
 def archive_current_state(run_date_key: str | None):
     if not run_date_key:
         return
     path = _history_state_path(run_date_key)
-    _write_state_file(path, _serialize_state())
+    payload = _serialize_state()
+
+    history_ship_date = None
+    ship_dates = payload.get("ship_dates") or []
+    if isinstance(ship_dates, list) and ship_dates:
+        candidate = str(ship_dates[0] or "").strip()
+        history_ship_date = candidate or None
+
+    history_load_day_num = None
+    if history_ship_date:
+        try:
+            ship_date_obj = date.fromisoformat(history_ship_date)
+            wd = int(ship_date_obj.weekday())
+            history_load_day_num = wd + 1 if 0 <= wd <= 4 else 1
+        except Exception:
+            history_load_day_num = None
+
+    day_name_map = {
+        1: "Monday",
+        2: "Tuesday",
+        3: "Wednesday",
+        4: "Thursday",
+        5: "Friday",
+    }
+    history_load_day_label = (
+        f"Day {int(history_load_day_num)} ({day_name_map.get(int(history_load_day_num), 'Unknown')})"
+        if history_load_day_num is not None
+        else None
+    )
+
+    payload["history_run_date_key"] = str(run_date_key)
+    payload["history_ship_date"] = history_ship_date
+    payload["history_load_day_num"] = history_load_day_num
+    payload["history_load_day_label"] = history_load_day_label
+
+    _write_state_file(path, payload)
 
 
 def apply_run_config(run_date: date, ship_dates: list[date]):
@@ -642,6 +2064,11 @@ defaults = {
     "rollover_prompt_snooze_until": 0.0,
     "rollover_prompt_hour": ROLLOVER_PROMPT_HOUR,
     "rollover_prompt_snooze_minutes": max(1, ROLLOVER_SNOOZE_SECONDS // 60),
+
+    # login portal state
+    "auth_login_portal_auto_prompted": False,
+    "auth_login_portal_pending": False,
+    "auth_request_portal_pending": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -1303,7 +2730,8 @@ def log_action(message: str):
     except Exception:
         now_ts = datetime.now()
     stamp = f"{now_ts.month}/{now_ts.day} {now_ts.strftime('%I:%M %p')}"
-    entry = f"{stamp} - {message}"
+    actor = str(_current_actor_name() or "Guest").strip() or "Guest"
+    entry = f"{stamp} - [{actor}] {message}"
     log = list(st.session_state.get("activity_log") or [])
     log.append(entry)
     st.session_state.activity_log = log[-50:]
@@ -3926,7 +5354,18 @@ def render_shorts_button_flow(truck: int):
         return
 
 def go(screen: str):
-    st.session_state.active_screen = screen
+    target_screen = str(screen or "").strip().upper()
+    if not _screen_allowed_for_current_user(target_screen):
+        role = _current_auth_role()
+        fallback_screen = _default_screen_for_role(role)
+        st.session_state.role_access_notice = (
+            f"{_auth_role_label(role)} access does not allow {target_screen.replace('_', ' ').title()}. "
+            f"Redirected to {fallback_screen.replace('_', ' ').title()}."
+        )
+        st.session_state.active_screen = fallback_screen
+        _push_nav_history(force=True)
+        st.rerun()
+    st.session_state.active_screen = target_screen
     _push_nav_history(force=True)
     st.rerun()
 
@@ -3955,6 +5394,8 @@ def badge_label(label: str) -> str:
 
 def sidebar_badge_link(label: str, value: str | int, color: str, target_page: str):
     # Sidebar status button (default theme styling).
+    if not _screen_allowed_for_current_user(target_page):
+        return
     display_text = f"{badge_label(label)}  •  {value}"
 
     with st.sidebar.container():
@@ -4048,6 +5489,116 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
                 setTimeout(() => {{
                     try {{ observer.disconnect(); }} catch (e) {{}}
                     if (root.__statusDotObserverAll === observer) delete root.__statusDotObserverAll;
+                }}, 2500);
+            }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _apply_sidebar_nav_outline(
+    active_labels: list[str] | set[str] | tuple[str, ...],
+    flash_labels: list[str] | set[str] | tuple[str, ...] | None = None,
+):
+    labels = sorted({str(label).strip() for label in (active_labels or []) if str(label).strip()})
+    labels_json = json.dumps(labels)
+    flashing = sorted({str(label).strip() for label in (flash_labels or []) if str(label).strip()})
+    flash_json = json.dumps(flashing)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            try {{
+                const root = window.parent.document;
+                const styleId = 'sidebar-nav-active-style';
+                if (!root.getElementById(styleId)) {{
+                    const styleEl = root.createElement('style');
+                    styleEl.id = styleId;
+                    styleEl.textContent = `
+                    section[data-testid="stSidebar"] .stButton > button.sidebar-nav-active {{
+                        border-color: rgba(59, 130, 246, 0.9) !important;
+                        outline: 2px solid rgba(59, 130, 246, 0.9) !important;
+                        outline-offset: -2px !important;
+                        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.24), 0 10px 22px rgba(0,0,0,0.10) !important;
+                        font-weight: 800 !important;
+                    }}
+                    @keyframes sidebarNavFlashPulse {{
+                        0% {{ box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.90), 0 0 0 0 rgba(250, 204, 21, 0.34); }}
+                        50% {{ box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.95), 0 0 0 7px rgba(250, 204, 21, 0.28); }}
+                        100% {{ box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.90), 0 0 0 0 rgba(250, 204, 21, 0.22); }}
+                    }}
+                    section[data-testid="stSidebar"] .stButton > button.sidebar-nav-flash {{
+                        border-color: rgba(250, 204, 21, 0.95) !important;
+                        outline: 2px solid rgba(250, 204, 21, 0.95) !important;
+                        outline-offset: -2px !important;
+                        animation: sidebarNavFlashPulse 1s ease-in-out infinite !important;
+                    }}`;
+                    root.head.appendChild(styleEl);
+                }}
+
+                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\s+/g, ' ').trim();
+                const navLabels = new Set([
+                    'Unload', 'Load', 'Fleet', 'Communications', 'On Break', 'Management',
+                    'Dirty', 'Shop', 'In Progress', 'Unloaded', 'Loaded', 'OFF', 'OOS/SPARE'
+                ].map(normalize));
+                const active = new Set(({labels_json} || []).map(normalize));
+                const flashing = new Set(({flash_json} || []).map(normalize));
+
+                const applyNavOutline = () => {{
+                    const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                    if (!sidebar) return false;
+                    const buttons = sidebar.querySelectorAll('.stButton > button');
+                    let appliedAny = false;
+                    buttons.forEach((btn) => {{
+                        const text = normalize(btn.innerText || btn.textContent || '');
+                        const labelOnly = normalize((text.split('•')[0] || text));
+                        if (!navLabels.has(labelOnly)) {{
+                            btn.classList.remove('sidebar-nav-active');
+                            return;
+                        }}
+                        if (active.has(labelOnly)) {{
+                            btn.classList.add('sidebar-nav-active');
+                            appliedAny = true;
+                        }} else {{
+                            btn.classList.remove('sidebar-nav-active');
+                        }}
+                        if (flashing.has(labelOnly)) {{
+                            btn.classList.add('sidebar-nav-flash');
+                        }} else {{
+                            btn.classList.remove('sidebar-nav-flash');
+                        }}
+                    }});
+                    return appliedAny;
+                }};
+
+                applyNavOutline();
+
+                let attempts = 0;
+                const maxAttempts = 24;
+                const retryApply = () => {{
+                    attempts += 1;
+                    applyNavOutline();
+                    if (attempts >= maxAttempts) return;
+                    setTimeout(retryApply, 50);
+                }};
+                setTimeout(retryApply, 0);
+
+                const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                if (!sidebar) return;
+                if (root.__sidebarNavActiveObserver) {{
+                    try {{ root.__sidebarNavActiveObserver.disconnect(); }} catch (e) {{}}
+                }}
+                const observer = new MutationObserver(() => {{
+                    applyNavOutline();
+                }});
+                observer.observe(sidebar, {{ childList: true, subtree: true }});
+                root.__sidebarNavActiveObserver = observer;
+                setTimeout(() => {{
+                    try {{ observer.disconnect(); }} catch (e) {{}}
+                    if (root.__sidebarNavActiveObserver === observer) delete root.__sidebarNavActiveObserver;
                 }}, 2500);
             }} catch (e) {{}}
         }})();
@@ -4482,7 +6033,9 @@ def save_shorts_stop_timer(truck: int, initials: str, edited_rows: list[dict]) -
     t = int(truck)
     ini = (initials or "").strip()
     if not ini:
-        st.error("Initials are required to save shortages.")
+        ini = _current_actor_name().strip()
+    if not ini:
+        st.error("Logged-in user name is required to save shortages.")
         return False
 
     st.session_state.shorts_initials[t] = ini
@@ -4737,16 +6290,8 @@ if requested == "FLEET" and (is_first_client_page_load or nav_from_url):
         else:
             st.session_state.sup_manage_action = fleet_action_val
 
-valid_pages = {
-    "SETUP", "UNLOAD", "LOAD", "SHORTS", "FLEET",
-    "STATUS_DIRTY", "STATUS_CLEANED", "STATUS_LOADED", "STATUS_SHOP", "STATUS_OOS", "STATUS_OFF",
-    "TRUCK", "SUPERVISOR", "MANAGEMENT",
-    "IN_PROGRESS",
-    "BREAK",
-    "BATCH",
-}
 prev_requested = st.session_state.get("last_requested_page")
-if requested in valid_pages:
+if requested in APP_VALID_PAGES:
     # Only honor a query-param page change when it changes from the last URL
     # value (prevents stale URLs from overriding in-app navigation).
     if (
@@ -4758,7 +6303,7 @@ if requested in valid_pages:
 st.session_state.last_requested_page = requested
 
 # When browser Back/Forward changes the URL, force a rerun to refresh the page.
-if nav_from_url and requested in valid_pages and requested != st.session_state.active_screen:
+if nav_from_url and requested in APP_VALID_PAGES and requested != st.session_state.active_screen:
     st.session_state.active_screen = requested
     st.rerun()
 
@@ -4826,6 +6371,13 @@ components.html(
 # Global notice for management Shop assignments
 render_shop_notice()
 
+authenticator = _apply_auth_gate()
+_enforce_active_screen_role_access()
+
+role_access_notice = st.session_state.pop("role_access_notice", None)
+if role_access_notice:
+    st.warning(str(role_access_notice))
+
 # ==========================================================
 # SIDEBAR
 # ==========================================================
@@ -4891,12 +6443,12 @@ with st.sidebar:
     )
 
 # Unload at top, Load middle
-if st.sidebar.button("Unload", use_container_width=True):
+if _screen_allowed_for_current_user("UNLOAD") and st.sidebar.button("Unload", use_container_width=True):
     st.session_state.active_screen = "UNLOAD"
     _mark_and_save()
     st.rerun()
 
-if st.sidebar.button("Load", use_container_width=True):
+if _screen_allowed_for_current_user("LOAD") and st.sidebar.button("Load", use_container_width=True):
     st.session_state.active_screen = "LOAD"
     _mark_and_save()
     st.rerun()
@@ -4904,7 +6456,7 @@ if st.sidebar.button("Load", use_container_width=True):
 if st.session_state.active_screen == "LOAD":
     st.markdown("<h2 style='text-align:center; margin:0 0 8px 0;'>Load Management</h2>", unsafe_allow_html=True)
 
-if st.sidebar.button("Fleet", use_container_width=True):
+if _screen_allowed_for_current_user("FLEET") and st.sidebar.button("Fleet", use_container_width=True):
     st.session_state.sup_manage_truck = None
     st.session_state.sup_manage_new_mode = False
     st.session_state.sup_manage_action = None
@@ -4913,10 +6465,22 @@ if st.sidebar.button("Fleet", use_container_width=True):
     _mark_and_save()
     st.rerun()
 
+_sync_communications_nav_flash_state()
+communications_nav_flash_active = (
+    float(st.session_state.get("communications_nav_flash_until") or 0.0) > time.time()
+)
+
+if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Communications", use_container_width=True):
+    st.session_state.active_screen = "COMMUNICATIONS"
+    st.session_state.communications_last_seen_ts = _latest_communications_message_ts()
+    st.session_state.communications_nav_flash_until = 0.0
+    _mark_and_save()
+    st.rerun()
+
 break_start = st.session_state.get("break_start_time")
 if break_start:
     break_remaining = (st.session_state.break_duration or 0) - (time.time() - break_start)
-    if break_remaining > 0:
+    if break_remaining > 0 and _screen_allowed_for_current_user("BREAK"):
         if st.sidebar.button("On Break", use_container_width=True):
             st.session_state.active_screen = "BREAK"
             _mark_and_save()
@@ -4934,49 +6498,115 @@ inprog_truck_no_oos = inprog_truck if inprog_truck not in oos_spare_set else Non
 
 badge_colors = _get_status_badge_colors()
 
-sidebar_badge_link("Dirty", len(dirty_trucks_no_oos), badge_colors["dirty"], "UNLOAD")
-sidebar_badge_link("Shop", len(shop_list_no_oos), badge_colors["shop"], "STATUS_SHOP")
-sidebar_badge_link("In Progress", str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None", badge_colors["in_progress"], "IN_PROGRESS")
-sidebar_badge_link("Unloaded", len(cleaned_list_no_oos), badge_colors["unloaded"], "STATUS_CLEANED")
-sidebar_badge_link("Loaded", len(loaded_list_no_oos), badge_colors["loaded"], "STATUS_LOADED")
+sidebar_dot_map: dict[str, str] = {}
+if _screen_allowed_for_current_user("STATUS_DIRTY"):
+    sidebar_badge_link("Dirty", len(dirty_trucks_no_oos), badge_colors["dirty"], "STATUS_DIRTY")
+    sidebar_dot_map[f"{badge_label('Dirty')}  •  {len(dirty_trucks_no_oos)}"] = badge_colors["dirty"]
+if _screen_allowed_for_current_user("STATUS_SHOP"):
+    sidebar_badge_link("Shop", len(shop_list_no_oos), badge_colors["shop"], "STATUS_SHOP")
+    sidebar_dot_map[f"{badge_label('Shop')}  •  {len(shop_list_no_oos)}"] = badge_colors["shop"]
+if _screen_allowed_for_current_user("IN_PROGRESS"):
+    inprog_badge_value = str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None"
+    sidebar_badge_link("In Progress", inprog_badge_value, badge_colors["in_progress"], "IN_PROGRESS")
+    sidebar_dot_map[f"{badge_label('In Progress')}  •  {inprog_badge_value}"] = badge_colors["in_progress"]
+if _screen_allowed_for_current_user("STATUS_CLEANED"):
+    sidebar_badge_link("Unloaded", len(cleaned_list_no_oos), badge_colors["unloaded"], "STATUS_CLEANED")
+    sidebar_dot_map[f"{badge_label('Unloaded')}  •  {len(cleaned_list_no_oos)}"] = badge_colors["unloaded"]
+if _screen_allowed_for_current_user("STATUS_LOADED"):
+    sidebar_badge_link("Loaded", len(loaded_list_no_oos), badge_colors["loaded"], "STATUS_LOADED")
+    sidebar_dot_map[f"{badge_label('Loaded')}  •  {len(loaded_list_no_oos)}"] = badge_colors["loaded"]
+if _screen_allowed_for_current_user("STATUS_OFF"):
+    off_count = len(sorted(list(off_today)))
+    sidebar_badge_link("OFF", off_count, badge_colors["off"], "STATUS_OFF")
+    sidebar_dot_map[f"{badge_label('OFF')}  •  {off_count}"] = badge_colors["off"]
+if _screen_allowed_for_current_user("STATUS_OOS"):
+    oos_spare_count = len(sorted(list(oos_spare_set)))
+    sidebar_badge_link("OOS/SPARE", oos_spare_count, badge_colors["oos_spare"], "STATUS_OOS")
+    sidebar_dot_map[f"{badge_label('OOS/SPARE')}  •  {oos_spare_count}"] = badge_colors["oos_spare"]
 
-# OFF and OOS/SPARE badges
-sidebar_badge_link("OFF", len(sorted(list(off_today))), badge_colors["off"], "STATUS_OFF")
-sidebar_badge_link("OOS/SPARE", len(sorted(list(oos_spare_set))), badge_colors["oos_spare"], "STATUS_OOS")
-_apply_sidebar_badge_dots(
-    {
-        f"{badge_label('Dirty')}  •  {len(dirty_trucks_no_oos)}": badge_colors["dirty"],
-        f"{badge_label('Shop')}  •  {len(shop_list_no_oos)}": badge_colors["shop"],
-        f"{badge_label('In Progress')}  •  {str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else 'None'}": badge_colors["in_progress"],
-        f"{badge_label('Unloaded')}  •  {len(cleaned_list_no_oos)}": badge_colors["unloaded"],
-        f"{badge_label('Loaded')}  •  {len(loaded_list_no_oos)}": badge_colors["loaded"],
-        f"{badge_label('OFF')}  •  {len(sorted(list(off_today)))}": badge_colors["off"],
-        f"{badge_label('OOS/SPARE')}  •  {len(sorted(list(oos_spare_set)))}": badge_colors["oos_spare"],
-    }
-)
+_apply_sidebar_badge_dots(sidebar_dot_map)
+
+if _current_auth_role() == AUTH_ROLE_GUEST:
+    _render_guest_live_status_pace_card()
 
 if st.session_state.setup_done:
     st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
     st.sidebar.subheader("Short sheet")
-    if loaded_list:
-        pick = st.sidebar.selectbox("Short Sheet", options=loaded_list, key="sidebar_shorts_pick")
-        if st.sidebar.button("Open selected short sheet", use_container_width=True):
-            sel = int(pick)
-            st.session_state.shorts_truck = sel
-            ensure_shorts_model(sel)
-            save_state()
-            # update URL to include truck so SHORTS opens the correct sheet
-            _set_query_params(page="SHORTS", truck=str(sel))
-            st.rerun()
+    if _screen_allowed_for_current_user("SHORTS"):
+        if loaded_list:
+            pick = st.sidebar.selectbox("Short Sheet", options=loaded_list, key="sidebar_shorts_pick")
+            if st.sidebar.button("Open selected short sheet", use_container_width=True):
+                sel = int(pick)
+                st.session_state.shorts_truck = sel
+                ensure_shorts_model(sel)
+                save_state()
+                # update URL to include truck so SHORTS opens the correct sheet
+                _set_query_params(page="SHORTS", truck=str(sel))
+                st.rerun()
+        else:
+            st.sidebar.caption("No loaded trucks yet today.")
     else:
-        st.sidebar.caption("No loaded trucks yet today.")
+        st.sidebar.caption("Short sheet access is restricted for your role.")
 
     # Management button at bottom of nav
     st.sidebar.divider()
-    if st.sidebar.button("Management", use_container_width=True):
+    if _screen_allowed_for_current_user("SUPERVISOR") and st.sidebar.button("Management", use_container_width=True):
         st.session_state.active_screen = "SUPERVISOR"
         _mark_and_save()
         st.rerun()
+    if authenticator is not None:
+        st.sidebar.caption(
+            f"Signed in as {st.session_state.get('auth_name', 'User')} ({_auth_role_label(st.session_state.get('auth_role'))})"
+        )
+        if st.session_state.get("authentication_status") is True:
+            try:
+                authenticator.logout("Logout", "sidebar", key="auth_logout_btn", use_container_width=True)
+            except Exception:
+                pass
+        else:
+            if st.sidebar.button("Open Login Portal", key="auth_open_login_btn", use_container_width=True):
+                st.session_state.auth_login_portal_pending = True
+                st.rerun()
+            if st.sidebar.button("Request Account", key="auth_open_request_btn", use_container_width=True):
+                st.session_state.auth_request_portal_pending = True
+                st.rerun()
+
+nav_active_labels = set()
+nav_flash_labels = set()
+current_screen = str(st.session_state.get("active_screen") or "").upper()
+_apply_soft_auto_refresh(current_screen)
+if current_screen in {"UNLOAD", "BATCH"}:
+    nav_active_labels.add("Unload")
+    nav_active_labels.add("Dirty")
+if current_screen in {"LOAD", "SHORTS"}:
+    nav_active_labels.add("Load")
+if current_screen == "FLEET":
+    nav_active_labels.add("Fleet")
+if current_screen == "COMMUNICATIONS":
+    nav_active_labels.add("Communications")
+if current_screen == "BREAK":
+    nav_active_labels.add("On Break")
+if current_screen == "SUPERVISOR":
+    nav_active_labels.add("Management")
+if current_screen == "STATUS_DIRTY":
+    nav_active_labels.add("Dirty")
+    nav_active_labels.add("Unload")
+if current_screen == "STATUS_SHOP":
+    nav_active_labels.add("Shop")
+if current_screen == "IN_PROGRESS":
+    nav_active_labels.add("In Progress")
+if current_screen == "STATUS_CLEANED":
+    nav_active_labels.add("Unloaded")
+if current_screen == "STATUS_LOADED":
+    nav_active_labels.add("Loaded")
+if current_screen == "STATUS_OFF":
+    nav_active_labels.add("OFF")
+if current_screen == "STATUS_OOS":
+    nav_active_labels.add("OOS/SPARE")
+if communications_nav_flash_active:
+    nav_flash_labels.add("Communications")
+_apply_sidebar_nav_outline(nav_active_labels, nav_flash_labels)
+
 # ==========================================================
 # PAGES
 # ==========================================================
@@ -5453,8 +7083,13 @@ elif st.session_state.active_screen == "IN_PROGRESS":
     reminder = st.session_state.get("daily_notes", "")
     no_notes = "<span style=\"opacity:0.5;\">No notes set.</span>"
     notes_html = _format_note_lines_as_bullets_html(reminder, empty_html=no_notes)
-    inprog_col_ratio = [1, 1] if _is_mobile_client() else [0.9, 2.1]
-    left_col, center_col = st.columns(inprog_col_ratio, gap="small")
+    is_mobile_inprog = _is_mobile_client()
+    if is_mobile_inprog:
+        left_col = st.container()
+        center_col = st.container()
+    else:
+        left_col, center_col = st.columns([0.9, 2.1], gap="small")
+    guest_read_only = _current_auth_role() == AUTH_ROLE_GUEST
     with left_col:
         st.markdown(
             (
@@ -5484,8 +7119,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     "<div style='width:100%; text-align:center; padding:11px 12px; border-radius:10px; border:1px solid rgba(59,130,246,0.28); background:rgba(30,58,138,0.35); color:#60a5fa; font-weight:700;'>No truck currently in progress.</div>",
                     unsafe_allow_html=True,
                 )
-                if true_available:
-                    if st.button("View Unloaded trucks to start loading", use_container_width=True, key="start_inprog_suggested"):
+                if true_available and _current_auth_role() != AUTH_ROLE_GUEST:
+                    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+                    if st.button("View Unloaded Trucks", use_container_width=True, key="start_inprog_suggested"):
                         st.session_state.active_screen = "STATUS_CLEANED"
                         _mark_and_save()
                         st.rerun()
@@ -5771,19 +7407,20 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             """
             components.html(timer_html, height=270)
 
-            if st.session_state.get("shorts_disabled"):
-                if st.button("Finish Loading", use_container_width=True, key="inprog_finish_loading_top_disabled"):
-                    _finish_in_progress_loading(
-                        f"Truck {int(inprog_truck)} marked Loaded (shortages handled manually)."
-                    )
-            else:
-                if st.button("Finish Loading", use_container_width=True, key="inprog_finish_loading_top"):
-                    st.session_state.shorts_truck = int(inprog_truck)
-                    ensure_shorts_model(inprog_truck)
-                    st.session_state.shorts_autostart_next_up_for_truck = int(inprog_truck)
-                    st.session_state.active_screen = "SHORTS"
-                    _mark_and_save()
-                    st.rerun()
+            if not guest_read_only:
+                if st.session_state.get("shorts_disabled"):
+                    if st.button("Finish Loading", use_container_width=True, key="inprog_finish_loading_top_disabled"):
+                        _finish_in_progress_loading(
+                            f"Truck {int(inprog_truck)} marked Loaded (shortages handled manually)."
+                        )
+                else:
+                    if st.button("Finish Loading", use_container_width=True, key="inprog_finish_loading_top"):
+                        st.session_state.shorts_truck = int(inprog_truck)
+                        ensure_shorts_model(inprog_truck)
+                        st.session_state.shorts_autostart_next_up_for_truck = int(inprog_truck)
+                        st.session_state.active_screen = "SHORTS"
+                        _mark_and_save()
+                        st.rerun()
 
             _sync_next_up_from_state_file()
             next_up = st.session_state.get("next_up_truck")
@@ -5841,14 +7478,17 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     ),
                     unsafe_allow_html=True,
                 )
-                clear_col = st.columns([1, 2, 1])[1]
-                with clear_col:
-                    if st.button("Clear Next Up", use_container_width=True, key="inprog_next_up_clear"):
-                        st.session_state.next_up_truck = None
-                        _mark_and_save()
-                        st.rerun()
+                if not guest_read_only:
+                    clear_col = st.columns([1, 2, 1])[1]
+                    with clear_col:
+                        if st.button("Clear Next Up", use_container_width=True, key="inprog_next_up_clear"):
+                            st.session_state.next_up_truck = None
+                            _mark_and_save()
+                            st.rerun()
             else:
-                if next_up_candidates:
+                if guest_read_only:
+                    st.caption("No next up truck is set.")
+                elif next_up_candidates:
                     candidate_labels = {}
                     for candidate in next_up_candidates:
                         candidate_num = int(candidate)
@@ -5885,7 +7525,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     )
 
             st.divider()
-            if not st.session_state.get("shorts_disabled"):
+            if not st.session_state.get("shorts_disabled") and not guest_read_only:
                 ensure_shorts_model(inprog_truck)
                 render_shorts_button_flow(inprog_truck)
                 inprog_short_rows = st.session_state.shorts.get(int(inprog_truck), [])
@@ -6195,22 +7835,9 @@ elif st.session_state.active_screen == "FLEET":
 # --------------------------
 # Management page
 elif st.session_state.active_screen == "SUPERVISOR":
-    render_page_heading("Management - Admin & Statistics")
+    render_page_heading("Management - Admin")
 
-    avg_sec = average_load_time_seconds(sorted(st.session_state.loaded_set))
-    st.metric("Average load time (today)", seconds_to_mmss(avg_sec) if avg_sec is not None else "N/A")
-
-    c0, c1, c2, c3, c4 = st.columns(5)
-    with c0:
-        st.metric("Dirty", len(dirty_trucks))
-    with c1:
-        st.metric("Unloaded", len(cleaned_list))
-    with c2:
-        st.metric("In Progress", str(inprog_truck) if inprog_truck is not None else "None")
-    with c3:
-        st.metric("Loaded", len(loaded_list))
-    with c4:
-        st.metric("Shop", len(shop_list))
+    _render_user_management_dropdown()
 
     with st.expander("Configure load day", expanded=False):
         run_date = st.date_input("Run date (today)", value=st.session_state.run_date or date.today(), key="sup_run_date")
@@ -6470,7 +8097,8 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.caption("No recent activity.")
         else:
             for entry in log:
-                st.markdown(f"<div style='margin:0; padding:0; line-height:1.1;'>- {entry}</div>", unsafe_allow_html=True)
+                safe_entry = html.escape(str(entry))
+                st.markdown(f"<div style='margin:0; padding:0; line-height:1.1;'>- {safe_entry}</div>", unsafe_allow_html=True)
     st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
     with st.expander("Reset Workday Data (Management)", expanded=False):
         st.caption("Dangerous: use only if you want to wipe the current day and saved state.")
@@ -6550,6 +8178,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["off_set"] = preserved_oos
                     st.session_state["spare_set"] = preserved_spares
 
+                    cleared_communications = _clear_communications_messages()
+                    st.session_state["communications_last_known_ts"] = 0.0
+                    st.session_state["communications_last_seen_ts"] = 0.0
+                    st.session_state["communications_nav_flash_until"] = 0.0
+
                     # Remove persisted state file
                     try:
                         p = _state_path()
@@ -6558,7 +8191,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     except Exception:
                         pass
                     save_state()
-                    st.success("Workday data reset. Out Of Service and Spares preserved, with unloaded auto-pull reapplied for the current day.")
+                    msg_label = "message" if cleared_communications == 1 else "messages"
+                    st.success(
+                        "Workday data reset. Out Of Service and Spares preserved, with unloaded auto-pull reapplied for the current day. "
+                        f"Communications cleared ({cleared_communications} {msg_label})."
+                    )
                     st.session_state.reset_step = None
                     st.rerun()
             with c2:
@@ -6649,6 +8286,26 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state.reset_activity_step = None
                     st.rerun()
 
+        if st.button("Clear Communications", use_container_width=True, key="sup_reset_comms_start"):
+            st.session_state.reset_comms_step = True
+        if st.session_state.get("reset_comms_step"):
+            st.warning("This clears all messages in Communications.")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("Confirm clear communications", key="sup_reset_comms_confirm"):
+                    cleared_communications = _clear_communications_messages()
+                    st.session_state["communications_last_known_ts"] = 0.0
+                    st.session_state["communications_last_seen_ts"] = 0.0
+                    st.session_state["communications_nav_flash_until"] = 0.0
+                    msg_label = "message" if cleared_communications == 1 else "messages"
+                    st.success(f"Communications cleared ({cleared_communications} {msg_label}).")
+                    st.session_state.reset_comms_step = None
+                    st.rerun()
+            with c2:
+                if st.button("Cancel", key="sup_reset_comms_cancel"):
+                    st.session_state.reset_comms_step = None
+                    st.rerun()
+
         if st.button("Reset Break (allow another)", use_container_width=True, key="sup_reset_break_start"):
             st.session_state.reset_break_step = True
         if st.session_state.get("reset_break_step"):
@@ -6665,6 +8322,226 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 if st.button("Cancel", key="sup_reset_break_cancel"):
                     st.session_state.reset_break_step = None
                     st.rerun()
+
+# --------------------------
+# Communications
+# --------------------------
+elif st.session_state.active_screen == "COMMUNICATIONS":
+    auth_status = st.session_state.get("authentication_status")
+    is_logged_in = (not _auth_enabled()) or (auth_status is True)
+    if (not is_logged_in) or _current_auth_role() == AUTH_ROLE_GUEST:
+        st.warning("Communications is available only to logged-in users.")
+        if _auth_enabled() and auth_status is not True:
+            if st.button("Open Login Portal", key="communications_open_login_btn", use_container_width=True):
+                st.session_state.auth_login_portal_pending = True
+                st.rerun()
+    else:
+        if st_autorefresh is not None:
+            st_autorefresh(
+                interval=max(5_000, int(COMMUNICATIONS_AUTO_REFRESH_MS)),
+                key="communications_auto_refresh",
+            )
+
+        current_username = str(st.session_state.get("auth_username") or "").strip()
+        current_role = _current_auth_role()
+
+        delete_qp = _get_query_params().get("chat_del", None)
+        delete_message_id = delete_qp[0] if isinstance(delete_qp, list) else delete_qp
+        delete_message_id = str(delete_message_id or "").strip()
+        if delete_message_id:
+            deleted_ok, deleted_msg, removed_entry = _delete_communications_message(
+                delete_message_id,
+                current_username,
+                current_role,
+            )
+            _set_query_params(page="COMMUNICATIONS", chat_del=None)
+            if deleted_ok and isinstance(removed_entry, dict):
+                removed_sender = _chat_display_username(removed_entry.get("username"))
+                log_action(f"Deleted Communications message from {removed_sender}.")
+            st.session_state.communications_delete_feedback = {
+                "ok": bool(deleted_ok),
+                "message": str(deleted_msg or ""),
+            }
+            st.rerun()
+
+        delete_feedback = st.session_state.pop("communications_delete_feedback", None)
+        if isinstance(delete_feedback, dict):
+            feedback_message = str(delete_feedback.get("message") or "").strip()
+            if feedback_message:
+                if bool(delete_feedback.get("ok")):
+                    st.success(feedback_message)
+                else:
+                    st.warning(feedback_message)
+
+        all_messages = _load_communications_messages()
+        recent_messages = all_messages[-120:]
+        _sync_communications_nav_flash_state(_latest_communications_message_ts(all_messages))
+        role_label_by_username: dict[str, str] = {}
+        for username, user_data in (_load_auth_users() or {}).items():
+            username_key = str(username or "").strip().casefold()
+            if not username_key:
+                continue
+            role_label_by_username[username_key] = _auth_role_label(user_data.get("role"))
+        if current_username:
+            role_label_by_username.setdefault(
+                current_username.casefold(),
+                _auth_role_label(current_role),
+            )
+        tzinfo = _get_tzinfo()
+        chat_reference_ts = time.time()
+        if recent_messages:
+            try:
+                chat_reference_ts = float(recent_messages[-1].get("ts"))
+            except Exception:
+                chat_reference_ts = time.time()
+        try:
+            chat_reference_dt = (
+                datetime.fromtimestamp(chat_reference_ts, tz=tzinfo)
+                if tzinfo
+                else datetime.fromtimestamp(chat_reference_ts)
+            )
+        except Exception:
+            chat_reference_dt = datetime.fromtimestamp(chat_reference_ts)
+        chat_date_label = (
+            f"{chat_reference_dt.strftime('%A, %B ')}"
+            f"{chat_reference_dt.day}"
+            f"{chat_reference_dt.strftime(', %Y')}"
+        )
+
+        st.markdown(
+            (
+                "<style>"
+                ".comms-head{margin:6px auto 10px auto; border-radius:18px; overflow:hidden; border:2px solid rgba(34,197,94,0.45);"
+                " background:rgba(15,23,42,0.65); box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
+                ".comms-head-bar{padding:10px 12px; text-align:center; font-weight:900; letter-spacing:0.14em; text-transform:uppercase;"
+                " background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26));}"
+                ".comms-head-date{padding:8px 12px; text-align:center; font-size:0.9rem; font-weight:700; opacity:0.86;}"
+                ".comms-feed{margin:0 0 10px 0; padding:8px; border-radius:16px; border:1px solid rgba(148,163,184,0.35);"
+                " background:rgba(15,23,42,0.45); box-shadow:0 12px 30px rgba(0,0,0,0.24); max-height:440px; overflow-y:auto;}"
+                ".comms-group{display:flex; width:100%; margin:0 0 6px 0;}"
+                ".comms-group:last-child{margin-bottom:0;}"
+                ".comms-group-left{justify-content:flex-start;}"
+                ".comms-group-right{justify-content:flex-end;}"
+                ".comms-bubble{max-width:min(80%, 760px); padding:8px 10px; border-radius:11px; border:1px solid rgba(148,163,184,0.35);"
+                " background:rgba(15,23,42,0.48);}"
+                ".comms-group-right .comms-bubble{border:1px solid rgba(59,130,246,0.42); background:rgba(30,58,138,0.24);}"
+                ".comms-meta{display:flex; align-items:baseline; justify-content:flex-start; gap:10px; margin-bottom:4px; opacity:0.96;}"
+                ".comms-sender{font-size:1.14rem; font-weight:900; line-height:1.05;}"
+                ".comms-role{font-size:1.02rem; font-weight:900; line-height:1.05; color:#93c5fd;}"
+                ".comms-thread-item + .comms-thread-item{border-top:1px solid rgba(148,163,184,0.28); margin-top:5px; padding-top:5px;}"
+                ".comms-body{line-height:1.24; word-break:break-word;}"
+                ".comms-time-row{display:flex; align-items:center; justify-content:flex-end; gap:7px; margin-top:1px;}"
+                ".comms-time{font-size:0.64rem; opacity:0.68; text-align:right;}"
+                ".comms-del-link{display:inline-block; font-size:0.63rem; font-weight:900; letter-spacing:0.03em; text-decoration:none;"
+                " padding:1px 5px; border-radius:7px; border:1px solid rgba(248,113,113,0.6); color:#fecaca; background:rgba(127,29,29,0.35);}"
+                ".comms-del-link:hover{border-color:rgba(248,113,113,0.95); color:#fee2e2; background:rgba(127,29,29,0.58);}" 
+                ".comms-empty{padding:12px; border-radius:12px; border:1px solid rgba(59,130,246,0.35);"
+                " background:rgba(30,58,138,0.22); text-align:center; font-weight:700; color:#93c5fd;}"
+                "</style>"
+                "<div class='comms-head'>"
+                "  <div class='comms-head-bar'>Team Chat</div>"
+                f"  <div class='comms-head-date'>{html.escape(chat_date_label)}</div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        if not recent_messages:
+            st.markdown("<div class='comms-empty'>No messages yet. Start the conversation below.</div>", unsafe_allow_html=True)
+        else:
+            grouped_rows: list[str] = []
+            grouped_messages: list[dict] = []
+            align_right = False
+            for entry in recent_messages:
+                try:
+                    entry_ts = float(entry.get("ts"))
+                except Exception:
+                    entry_ts = time.time()
+                sender_raw = str(entry.get("username") or "Unknown").strip() or "Unknown"
+                sender_key = sender_raw.casefold()
+                sender = html.escape(_chat_display_username(sender_raw))
+                sender_role = html.escape(role_label_by_username.get(sender_key, "Unknown"))
+                body = html.escape(str(entry.get("message") or "")).replace("\n", "<br>")
+                message_id = _sanitize_communications_message_id(entry.get("id"), "")
+                can_delete_message = bool(message_id) and _can_delete_communications_message(
+                    entry,
+                    current_username,
+                    current_role,
+                )
+                try:
+                    entry_dt = (
+                        datetime.fromtimestamp(entry_ts, tz=tzinfo)
+                        if tzinfo
+                        else datetime.fromtimestamp(entry_ts)
+                    )
+                except Exception:
+                    entry_dt = datetime.fromtimestamp(entry_ts)
+                timestamp_label = html.escape(entry_dt.strftime("%I:%M:%S %p").lstrip("0"))
+                delete_link_html = ""
+                if can_delete_message:
+                    delete_link_html = (
+                        f"<a class='comms-del-link' href='?page=COMMUNICATIONS&chat_del={message_id}' title='Delete message'>Delete</a>"
+                    )
+                message_item_html = (
+                    "<div class='comms-thread-item'>"
+                    f"  <div class='comms-body'>{body}</div>"
+                    f"  <div class='comms-time-row'><span class='comms-time'>{timestamp_label}</span>{delete_link_html}</div>"
+                    "</div>"
+                )
+
+                if (not grouped_messages) or grouped_messages[-1]["sender_key"] != sender_key:
+                    if grouped_messages:
+                        align_right = not align_right
+                    grouped_messages.append(
+                        {
+                            "sender_key": sender_key,
+                            "sender": sender,
+                            "sender_role": sender_role,
+                            "align_right": align_right,
+                            "items": [message_item_html],
+                        }
+                    )
+                else:
+                    grouped_messages[-1]["items"].append(message_item_html)
+
+            for group in grouped_messages:
+                group_class = "comms-group-right" if bool(group.get("align_right")) else "comms-group-left"
+                grouped_rows.append(
+                    (
+                        f"<div class='comms-group {group_class}'>"
+                        "  <div class='comms-bubble'>"
+                        f"    <div class='comms-meta'><span class='comms-sender'>{group.get('sender')}</span><span class='comms-role'>({group.get('sender_role')})</span></div>"
+                        f"    {''.join(group.get('items') or [])}"
+                        "  </div>"
+                        "</div>"
+                    )
+                )
+            st.markdown(f"<div class='comms-feed'>{''.join(grouped_rows)}</div>", unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.8rem; letter-spacing:0.1em; text-transform:uppercase; opacity:0.78; font-weight:800; margin:0 0 6px 0; text-align:center;'>Message</div>",
+                unsafe_allow_html=True,
+            )
+            with st.form("communications_form", clear_on_submit=True):
+                message_text = st.text_area(
+                    "Message",
+                    key="communications_draft",
+                    height=105,
+                    max_chars=COMMUNICATIONS_MAX_MESSAGE_LENGTH,
+                    label_visibility="collapsed",
+                )
+                send_message = st.form_submit_button("Send", use_container_width=True)
+
+        if send_message:
+            sender = str(st.session_state.get("auth_username") or _current_actor_name()).strip() or "Unknown"
+            ok, error_message = _append_communications_message(COMMUNICATIONS_CHANNEL, sender, message_text)
+            if not ok:
+                st.warning(error_message)
+            else:
+                log_action("Sent Communications message.")
+                st.success("Message sent.")
+                st.rerun()
 
 # --------------------------
 # Unload
@@ -6787,7 +8664,7 @@ elif st.session_state.active_screen == "TRUCK":
             st.write(f"Finished: {_format_ts(finish_ts)}")
         if dur is not None:
             st.write(f"Duration: {seconds_to_mmss(dur)}")
-        st.write(f"Shorts: {shorts_count} • Initials: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
+        st.write(f"Shorts: {shorts_count} • Saved by: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
 
         st.write("**Current status**")
         status_feedback_key = f"truck_status_feedback_{int(t)}"
@@ -7115,10 +8992,15 @@ elif st.session_state.active_screen == "BATCH":
 # --------------------------
 elif st.session_state.active_screen == "LOAD":
     st.markdown("<style>h2{display:none;}</style>", unsafe_allow_html=True)
-    render_page_heading("Load")
+    render_page_heading("Load Management")
 
     off_today_list = sorted({int(t) for t in off_today})
-    load_left_col, load_main_col = st.columns([1, 3], gap="medium")
+    is_mobile_load = _is_mobile_client()
+    if is_mobile_load:
+        load_left_col = st.container()
+        load_main_col = st.container()
+    else:
+        load_left_col, load_main_col = st.columns([1, 3], gap="medium")
 
     with load_left_col:
         st.markdown(
@@ -7221,52 +9103,57 @@ elif st.session_state.active_screen == "LOAD":
         with c1:
             st.metric("Average load duration", seconds_to_mmss(avg_sec) if avg_sec is not None else "N/A")
 
-        st.write("### Start loading")
-        if (len(true_available) == 0) or (inprog_truck is not None):
-            if inprog_truck is not None:
-                st.caption(f"Truck {int(inprog_truck)} is already in progress.")
-            elif cleaned_list:
-                if off_today_list:
-                    st.caption("No available trucks to start. Unloaded trucks are scheduled Off today.")
+        if inprog_truck is not None:
+            render_next_up_controls("load")
+            if st.button("Go to Unloaded trucks", use_container_width=True, key="load_go_unloaded_inprog"):
+                st.session_state.active_screen = "STATUS_CLEANED"
+                _mark_and_save()
+                st.rerun()
+        else:
+            st.write("### Start loading")
+            if len(true_available) == 0:
+                if cleaned_list:
+                    if off_today_list:
+                        st.caption("No available trucks to start. Unloaded trucks are scheduled Off today.")
+                    else:
+                        st.caption("No available trucks to start.")
                 else:
                     st.caption("No available trucks to start.")
+                if cleaned_list:
+                    if st.button("Go to Unloaded trucks", use_container_width=True, key="load_go_unloaded"):
+                        st.session_state.active_screen = "STATUS_CLEANED"
+                        _mark_and_save()
+                        st.rerun()
             else:
-                st.caption("No available trucks to start.")
-            if cleaned_list:
-                if st.button("Go to Unloaded trucks", use_container_width=True, key="load_go_unloaded"):
-                    st.session_state.active_screen = "STATUS_CLEANED"
+                clicked_truck = render_numeric_truck_buttons(true_available, "load_start", default_cols=8)
+                if clicked_truck is not None:
+                    t = int(clicked_truck)
+                    if int(t) in st.session_state.shop_set:
+                        st.session_state.pending_start_truck = int(t)
+                        st.session_state.active_screen = "STATUS_CLEANED"
+                        _mark_and_save()
+                        st.rerun()
+                    start_loading_truck(int(t))
                     _mark_and_save()
+                    st.session_state.active_screen = "IN_PROGRESS"
                     st.rerun()
-        else:
-            clicked_truck = render_numeric_truck_buttons(true_available, "load_start", default_cols=8)
-            if clicked_truck is not None:
-                t = int(clicked_truck)
-                if int(t) in st.session_state.shop_set:
-                    st.session_state.pending_start_truck = int(t)
-                    st.session_state.active_screen = "STATUS_CLEANED"
-                    _mark_and_save()
-                    st.rerun()
-                start_loading_truck(int(t))
-                _mark_and_save()
-                st.session_state.active_screen = "IN_PROGRESS"
-                st.rerun()
 
-        st.divider()
-        next_up = st.session_state.get("next_up_truck")
-        if next_up is not None and not st.session_state.inprog_set:
-            st.info(f"Next up: Truck {int(next_up)}")
-            if st.button(f"Start Next Up (Truck {int(next_up)})", use_container_width=True, key="start_next_up_load"):
-                if int(next_up) in st.session_state.shop_set:
-                    st.session_state.pending_start_truck = int(next_up)
-                    st.session_state.active_screen = "STATUS_CLEANED"
+            st.divider()
+            next_up = st.session_state.get("next_up_truck")
+            if next_up is not None and not st.session_state.inprog_set:
+                st.info(f"Next up: Truck {int(next_up)}")
+                if st.button(f"Start Next Up (Truck {int(next_up)})", use_container_width=True, key="start_next_up_load"):
+                    if int(next_up) in st.session_state.shop_set:
+                        st.session_state.pending_start_truck = int(next_up)
+                        st.session_state.active_screen = "STATUS_CLEANED"
+                        _mark_and_save()
+                        st.rerun()
+                    start_loading_truck(int(next_up))
                     _mark_and_save()
+                    st.session_state.active_screen = "IN_PROGRESS"
                     st.rerun()
-                start_loading_truck(int(next_up))
-                _mark_and_save()
-                st.session_state.active_screen = "IN_PROGRESS"
-                st.rerun()
 
-        render_next_up_controls("load")
+            render_next_up_controls("load")
 
 # --------------------------
 # Shorts
@@ -7313,7 +9200,7 @@ elif st.session_state.active_screen == "SHORTS":
             st.write(f"Finished: {_format_ts(finish_ts)}")
         if dur is not None:
             st.write(f"Duration: {seconds_to_mmss(dur)}")
-        st.write(f"Shorts: {shorts_count} • Initials: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
+        st.write(f"Shorts: {shorts_count} • Saved by: {st.session_state.shorts_initials.get(t,'—')}" + (f" (saved {initials_ts})" if initials_ts else ""))
         _, _, note_text = get_truck_notes(t)
         if note_text:
             st.divider()
@@ -7397,31 +9284,14 @@ elif st.session_state.active_screen == "SHORTS":
                 st.session_state[pending_delete_key] = None
                 st.caption("No shortages recorded yet.")
 
-            # Move initials input here, after button area but before Save & Done
-            preset_initials = ["AG", "AH", "EW", "ML", "NC", "PB", "TH", "Other"]
-            current_initials = (st.session_state.shorts_initials.get(t, "") or "").strip()
-            preset_default = current_initials if current_initials in preset_initials else "Other"
-            initials_pick = st.selectbox(
-                "Initials (required)",
-                options=preset_initials,
-                index=preset_initials.index(preset_default),
-                key="shorts_initials_select",
-            )
-            custom_initials = ""
-            if initials_pick == "Other":
-                custom_initials = st.text_input(
-                    "Custom initials",
-                    value=current_initials if current_initials not in preset_initials else "",
-                    max_chars=5,
-                    key="shorts_initials_custom",
-                )
-            initials = custom_initials if initials_pick == "Other" else initials_pick
+            initials = _current_actor_name()
+            st.caption(f"Saved by (logged in): {initials}")
 
             hist = st.session_state.shorts_initials_history.get(t, [])
             if hist:
                 initials_list = ", ".join([str(h.get("initials", "")).strip() for h in hist if str(h.get("initials", "")).strip()])
                 if initials_list:
-                    st.caption(f"All initials: {initials_list}")
+                    st.caption(f"Saved by history: {initials_list}")
 
             c1, c2 = st.columns([1, 3])
             with c1:
@@ -7443,31 +9313,14 @@ elif st.session_state.active_screen == "SHORTS":
                 },
                 key="shorts_editor",
             )
-            # Initials input stays in original place for non-button mode
-            preset_initials = ["AG", "AH", "EW", "ML", "NC", "PB", "TH", "Other"]
-            current_initials = (st.session_state.shorts_initials.get(t, "") or "").strip()
-            preset_default = current_initials if current_initials in preset_initials else "Other"
-            initials_pick = st.selectbox(
-                "Initials (required)",
-                options=preset_initials,
-                index=preset_initials.index(preset_default),
-                key="shorts_initials_select",
-            )
-            custom_initials = ""
-            if initials_pick == "Other":
-                custom_initials = st.text_input(
-                    "Custom initials",
-                    value=current_initials if current_initials not in preset_initials else "",
-                    max_chars=5,
-                    key="shorts_initials_custom",
-                )
-            initials = custom_initials if initials_pick == "Other" else initials_pick
+            initials = _current_actor_name()
+            st.caption(f"Saved by (logged in): {initials}")
 
             hist = st.session_state.shorts_initials_history.get(t, [])
             if hist:
                 initials_list = ", ".join([str(h.get("initials", "")).strip() for h in hist if str(h.get("initials", "")).strip()])
                 if initials_list:
-                    st.caption(f"All initials: {initials_list}")
+                    st.caption(f"Saved by history: {initials_list}")
 
             c1, c2 = st.columns([1, 3])
             with c1:

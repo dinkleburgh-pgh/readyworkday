@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.5.0 - 2026-03-10
+
+Ordered list of final changes included in this release:
+
+1. Promoted `app_unloadv1.5.py` as the primary app entry file while retaining `app_unloadv1.4.py` as the prior release file.
+2. Updated app metadata release date to **20260310** with app version **1.5**.
+3. In Progress and Load layouts now stack for mobile to prevent clipped side-by-side rendering.
+4. Added state-history load-day metadata fields to archived JSON payloads (`history_run_date_key`, `history_ship_date`, `history_load_day_num`, `history_load_day_label`).
+5. Management (Supervisor) screen top statistics strip was removed for a cleaner admin view.
+6. User Management now shows a green confirmation dialog after **Create user** and **Save user changes**.
+7. User picker labels now include role before enabled state (`username (Role • Enabled/Disabled)`).
+8. Updated runner/container defaults to v1.5 (`run_streamlit.sh`, `docker-entrypoint.sh`, `Dockerfile`, `docker-compose.yml`, `docker-compose.portainer.yml`).
+9. Updated README release docs and command examples to v1.5 defaults.
+10. Refreshed `requirements.txt` for v1.5 release baseline.
+
 ## v1.4.0 - 2026-03-09
 
 Ordered list of final changes included in this release:

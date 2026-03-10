@@ -2,9 +2,17 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.4.0**
+Current release: **v1.5.0**
 
-## Recent updates (v1.4.0)
+## Recent updates (v1.5.0)
+
+- Added user-management success confirmation dialogs for **Create user** and **Save user changes**.
+- User picker labels now show role before enabled state (for example: `username (Loader • Enabled)`).
+- Management (Supervisor) tab was simplified by removing the top statistics strip.
+- In Progress + Load layouts now stack properly on mobile to prevent clipped side-by-side columns.
+- State-history archives now include load-day metadata (`history_load_day_num`, `history_load_day_label`, and run/ship date keys).
+
+## Prior updates (v1.4.0)
 
 - In Progress page now uses a centered desktop layout (aligned with other status pages) while preserving a prominent timer card for display screens.
 - Daily Notes card on In Progress now renders note lines as bullets with larger, bolder text.
@@ -53,7 +61,7 @@ Current release: **v1.4.0**
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-streamlit run app_unloadv1.4.py
+streamlit run app_unloadv1.5.py
 ```
 
 Then open: `http://localhost:8501`
@@ -68,7 +76,7 @@ chmod +x run_streamlit.sh
 Notes:
 - `run_streamlit.sh` starts Streamlit in the background.
 - Script log output goes to `.data/streamlit.log`.
-- The script runs `app_unloadv1.4.py` by default.
+- The script runs `app_unloadv1.5.py` by default.
 
 ## Containerized run (Docker)
 
@@ -93,14 +101,14 @@ docker compose up --build -d
 PowerShell:
 
 ```powershell
-$env:APP_FILE="app_unloadv1.4.py"
+$env:APP_FILE="app_unloadv1.5.py"
 docker compose up --build
 ```
 
 Bash:
 
 ```bash
-APP_FILE=app_unloadv1.4.py docker compose up --build
+APP_FILE=app_unloadv1.5.py docker compose up --build
 ```
 
 ## Deploy with Portainer
@@ -112,7 +120,7 @@ Use a **Git-based Stack** in Portainer.
 1. Push this workspace to GitHub/GitLab.
 2. In Portainer, open **Stacks → Add stack → Repository**.
 3. Set repository URL/branch and compose path to `docker-compose.yml`.
-4. Set env var `APP_FILE=app_unloadv1.4.py`.
+4. Set env var `APP_FILE=app_unloadv1.5.py`.
 5. Deploy.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
@@ -121,7 +129,7 @@ Use a **Git-based Stack** in Portainer.
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:latest`
-	- `APP_FILE=app_unloadv1.4.py`
+	- `APP_FILE=app_unloadv1.5.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
@@ -145,9 +153,9 @@ docker compose down
 
 ## Key project files
 
-- Main app (latest): `app_unloadv1.4.py`
-- Previous release snapshot: `backups/v1.3/app_unloadv1.3.py`
-- Legacy snapshots: `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`
+- Main app (latest): `app_unloadv1.5.py`
+- Previous release snapshot: `backups/v1.4/app_unloadv1.4.py`
+- Legacy snapshots: `backups/v1.3/`, `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`
 - Fleet config: `truck_fleet.json`
 - Load duration history: `load_durations.json`
 - State snapshots: `state_history/`

@@ -2,9 +2,20 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.5.0**
+Current release: **v1.6.0**
 
-## Recent updates (v1.5.0)
+## Recent updates (v1.6.0)
+
+- Promoted `app_unloadv1.6.py` as the primary app entry file for this release.
+- Route badges were stabilized and expanded: swap/spare/OOS load-on badges now render consistently across views, with badge chips layered above OOS indicators.
+- Pace calculations now show **time impact** (instead of truck count deltas), always account for a 30-minute break (7h30 effective shift), and live-update like the time card.
+- Added **Last Truck (#)** pace tile showing added/saved time with color-coded +/- indicators.
+- `STATUS_LOADED` statistics were redesigned into richer visual metric tiles, including route/source and pace impact context.
+- Fleet swap flow now supports one-way route assignment and a clear-assignment action.
+- Login popup behavior on navigation/back was reduced with improved silent re-auth handling.
+- Default repo state/fleet baseline was aligned to the approved current configuration (`.truck_state.json`, `truck_fleet.json`, `off_schedule_defaults.json`).
+
+## Prior updates (v1.5.0)
 
 - Added user-management success confirmation dialogs for **Create user** and **Save user changes**.
 - User picker labels now show role before enabled state (for example: `username (Loader • Enabled)`).
@@ -61,7 +72,7 @@ Current release: **v1.5.0**
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-streamlit run app_unloadv1.5.py
+streamlit run app_unloadv1.6.py
 ```
 
 Then open: `http://localhost:8501`
@@ -76,7 +87,7 @@ chmod +x run_streamlit.sh
 Notes:
 - `run_streamlit.sh` starts Streamlit in the background.
 - Script log output goes to `.data/streamlit.log`.
-- The script runs `app_unloadv1.5.py` by default.
+- The script runs `app_unloadv1.6.py` by default.
 
 ## Containerized run (Docker)
 
@@ -101,14 +112,14 @@ docker compose up --build -d
 PowerShell:
 
 ```powershell
-$env:APP_FILE="app_unloadv1.5.py"
+$env:APP_FILE="app_unloadv1.6.py"
 docker compose up --build
 ```
 
 Bash:
 
 ```bash
-APP_FILE=app_unloadv1.5.py docker compose up --build
+APP_FILE=app_unloadv1.6.py docker compose up --build
 ```
 
 ## Deploy with Portainer
@@ -120,7 +131,7 @@ Use a **Git-based Stack** in Portainer.
 1. Push this workspace to GitHub/GitLab.
 2. In Portainer, open **Stacks → Add stack → Repository**.
 3. Set repository URL/branch and compose path to `docker-compose.yml`.
-4. Set env var `APP_FILE=app_unloadv1.5.py`.
+4. Set env var `APP_FILE=app_unloadv1.6.py`.
 5. Deploy.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
@@ -129,7 +140,7 @@ Use a **Git-based Stack** in Portainer.
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:latest`
-	- `APP_FILE=app_unloadv1.5.py`
+	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
@@ -153,7 +164,8 @@ docker compose down
 
 ## Key project files
 
-- Main app (latest): `app_unloadv1.5.py`
+- Main app (latest): `app_unloadv1.6.py`
+- Previous release entry file: `app_unloadv1.5.py`
 - Previous release snapshot: `backups/v1.4/app_unloadv1.4.py`
 - Legacy snapshots: `backups/v1.3/`, `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`
 - Fleet config: `truck_fleet.json`

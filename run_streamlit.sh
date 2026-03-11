@@ -6,7 +6,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-APP_FILE="${APP_FILE:-app_unloadv1.5.py}"
+APP_FILE="${APP_FILE:-app_unloadv1.6.py}"
 VENV_DIR="${VENV_DIR:-venv}"
 LOG_DIR="${LOG_DIR:-.data}"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/streamlit.log}"

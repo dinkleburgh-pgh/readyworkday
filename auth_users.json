@@ -1,0 +1,34 @@
+{
+  "users": {
+    "ready": {
+      "name": "ready",
+      "password": "$2b$12$ihb6CjewaEe0nuf/2DAFPOAud6El9lBpsZF0Kj2Z2io9KQOST6Yzy",
+      "role": "fleet",
+      "enabled": true
+    },
+    "Nate": {
+      "name": "Nate",
+      "password": "$2b$12$NE7fxJJ/l.WOm/WfeLsFOOGrBMz3LcnuuPNk4ICWMav35cqHeVeZW",
+      "role": "loader",
+      "enabled": true
+    },
+    "Ethan": {
+      "name": "Ethan",
+      "password": "$2b$12$FLZypBkZPoOCOrLATrq/COuSDP5IfmPaR.0etT.5iuUHu3jgHQBzO",
+      "role": "fleet",
+      "enabled": true
+    },
+    "Crystal": {
+      "name": "Crystal",
+      "password": "$2b$12$k.n8W9QLTZYxXL8LeAHFD.lIfmu4rchuGuczu5HGpZFxySs5uZMae",
+      "role": "fleet",
+      "enabled": true
+    },
+    "Pat": {
+      "name": "Pat",
+      "password": "$2b$12$L/1LMap.6HQU4xID/qC4hO7jm12irVkVzlHpJ/kubwhbcQx5wDVey",
+      "role": "loader",
+      "enabled": true
+    }
+  }
+}

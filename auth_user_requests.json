@@ -1,0 +1,15 @@
+{
+  "requests": {
+    "test": {
+      "username": "test",
+      "name": "test",
+      "password": "$2b$12$WLXEHNqr9/PdzO8T5MeEAuh5u5ME1muglCOt9F//Lt2YTbjajrlEy",
+      "requested_role": "viewer",
+      "status": "approved",
+      "requested_at": "2026-03-10T06:01:53.081208",
+      "reviewed_at": "2026-03-10T06:06:48.372916",
+      "reviewed_by": "ready",
+      "notes": "test"
+    }
+  }
+}

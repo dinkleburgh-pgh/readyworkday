@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.6.0 - 2026-03-11
+
+Ordered list of final changes included in this release:
+
+1. Promoted `app_unloadv1.6.py` as the primary app entry file while retaining `app_unloadv1.5.py` as the prior release entry file.
+2. Updated app metadata release date to **20260311** with app version **1.6**.
+3. Route badge rendering was stabilized across pages with in-button chips, improved scope/refresh behavior, and badge layering above OOS indicators.
+4. Added OOS load-on badge visibility so OOS routes show the truck loading for them (including Fleet and route-badge views).
+5. Updated pace math and wording to be time-based (instead of truck deltas) with 30-minute break-adjusted shift calculations (7h30 effective).
+6. Main Load pace card now live-updates client-side and includes the new **Last Truck (#)** tile with added/saved time indicators.
+7. `STATUS_LOADED` metrics were redesigned into richer visual tiles with additional operational context (route/source, pace impact, averages, finish age, and load order data).
+8. Started/Finished timestamps were moved into loaded-truck card tiles and removed from plain text blocks on TRUCK/SHORTS pages.
+9. Fleet route assignment tools now support one-way assignment and clear-assignment actions while preserving two-way swap.
+10. Authentication UX was refined to reduce login popup interruptions on navigation/back using improved silent cookie re-auth handling.
+11. Updated default persisted fleet/state baseline files to match the approved current configuration (`.truck_state.json`, `truck_fleet.json`, `off_schedule_defaults.json`).
+12. Updated runner/container defaults to v1.6 (`run_streamlit.sh`, `docker-entrypoint.sh`, `Dockerfile`, `docker-compose.yml`, `docker-compose.portainer.yml`).
+13. Updated README release docs and command examples to v1.6 defaults.
+
 ## v1.5.0 - 2026-03-10
 
 Ordered list of final changes included in this release:

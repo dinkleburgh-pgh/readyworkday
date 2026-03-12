@@ -27,8 +27,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.6"
-_APP_DATE = "20260311"  
+_APP_VERSION = "1.6.1"
+_APP_DATE = "20260312"  
 
 # Setup logging
 logging.basicConfig(

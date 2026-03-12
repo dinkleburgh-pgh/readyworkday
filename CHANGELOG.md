@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.6.1 - 2026-03-12
+
+Ordered list of final changes included in this release:
+
+1. `STATUS_LOADED` selected-truck panel was de-duplicated by removing repeated stats/details under the overview card.
+2. Finishing load from In Progress now auto-selects that truck on `STATUS_LOADED` so the overview card appears immediately.
+3. Fixed `STATUS_LOADED` card refresh-on-click by syncing loaded-truck bubble selection with URL query params.
+4. Route swap badges were enlarged and repositioned for improved readability near the upper-right of truck buttons.
+5. Route/assignment badges now render outside button bounds without clipping by correcting overflow handling on host wrappers.
+6. Admin role display wording was updated from **Management** to **Fleet** for role labels and related helper text.
+7. Route Card swap rows now use a consistent route-side **SWAP** tag while still showing the assigned truck’s live status on the truck side.
+8. Route Card was added to Fleet and moved to left-panel placement on desktop, including matching left/main column structure on Unloaded.
+9. Route Card collapse UI was redesigned to match the Load-page pace-card interaction pattern (header toggle, chevron, animated collapse, persisted state).
+10. Route Card row/chip sizing and wrapping were tuned to prevent status-tag edge clipping (including long tags such as **LOADED**).
+
 ## v1.6.0 - 2026-03-11
 
 Ordered list of final changes included in this release:

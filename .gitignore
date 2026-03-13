@@ -34,6 +34,17 @@ env/
 *.parquet
 *.pdf
 
+# --- TruckApp runtime state ---
+.truck_state.json
+load_durations.json
+truckapp.log
+auth_users.json
+auth_user_requests.json
+communications_chat.json
+chat_censor_words.json
+state_history/env
+state_history/state_*.json
+
 # --- Secrets ---
 .env
 *.key

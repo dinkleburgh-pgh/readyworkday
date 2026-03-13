@@ -18,6 +18,7 @@ import json
 import html
 import os
 import re
+import hashlib
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -36,7 +37,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-import streamlit.components.v1 as components
 try:
     from zoneinfo import ZoneInfo
 except Exception:
@@ -1459,6 +1459,22 @@ def _auth_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def _normalize_auth_cookie_key(raw_key: str) -> str:
+    key = str(raw_key or "").strip()
+    if not key:
+        key = "truckapp_cookie_key_change_me_please_override_in_env"
+    try:
+        if len(key.encode("utf-8")) >= 32:
+            return key
+    except Exception:
+        if len(key) >= 32:
+            return key
+    try:
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    except Exception:
+        return "truckapp_cookie_key_fallback_value_please_set_env_var"
+
+
 def _build_authenticator():
     if stauth is None:
         return None, {}
@@ -1468,7 +1484,10 @@ def _build_authenticator():
     password_value = str(password_env if password_env is not None else "ready")
     default_role = _normalize_auth_role(os.getenv("TRUCKAPP_AUTH_ROLE", AUTH_ROLE_ADMIN))
     cookie_name = str(os.getenv("TRUCKAPP_AUTH_COOKIE_NAME", "truckapp_auth")).strip() or "truckapp_auth"
-    cookie_key = str(os.getenv("TRUCKAPP_AUTH_COOKIE_KEY", "truckapp_cookie_key_change_me")).strip() or "truckapp_cookie_key_change_me"
+    cookie_key_env = str(os.getenv("TRUCKAPP_AUTH_COOKIE_KEY", "truckapp_cookie_key_change_me_please_override_in_env")).strip() or "truckapp_cookie_key_change_me_please_override_in_env"
+    cookie_key = _normalize_auth_cookie_key(cookie_key_env)
+    if cookie_key != cookie_key_env:
+        logging.warning("TRUCKAPP_AUTH_COOKIE_KEY is shorter than 32 bytes; using SHA-256 derived key to satisfy RFC 7518 guidance.")
     try:
         cookie_days = float(os.getenv("TRUCKAPP_AUTH_COOKIE_DAYS", "7"))
     except Exception:
@@ -3603,6 +3622,14 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                 const cellWidth = {cell_width_json};
 
                 const normalize = (value) => String(value || '').replace(/\u2063/g, '').trim();
+                const canonicalLabel = (value) => {{
+                    const label = normalize(value);
+                    if (!label) return '';
+                    if (expected.has(label)) return label;
+                    const numeric = label.match(/^(\\d+)/);
+                    if (numeric && expected.has(numeric[1])) return numeric[1];
+                    return label;
+                }};
                 const isMobileViewport = () => {{
                     try {{
                         return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
@@ -3644,7 +3671,7 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                     const mobile = isMobileViewport();
                     const buttons = Array.from(root.querySelectorAll(selector));
                     const matched = buttons.filter((btn) => {{
-                        const label = normalize(btn.innerText || btn.textContent || '');
+                        const label = canonicalLabel(btn.innerText || btn.textContent || '');
                         return !!label && expected.has(label);
                     }});
                     if (!matched.length) return;
@@ -3866,7 +3893,7 @@ def render_numeric_truck_buttons(
                     const buttons = root.querySelectorAll('button[kind="primary"]');
                     buttons.forEach((btn) => {
                         const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                        const match = raw.match(/^(\d+)/);
+                        const match = raw.match(/^(\\d+)/);
                         if (!match) return;
 
                         [
@@ -3957,7 +3984,7 @@ def render_numeric_truck_buttons(
                         const buttons = root.querySelectorAll('button[kind="primary"]');
                         buttons.forEach((btn) => {{
                             const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                            const match = raw.match(/^(\d+)/);
+                            const match = raw.match(/^(\\d+)/);
                             if (!match) {{
                                 if (trailingLabels.has(raw)) {{
                                     btn.style.setProperty('display', 'flex', 'important');
@@ -4072,7 +4099,7 @@ def render_numeric_truck_buttons(
                         const buttons = root.querySelectorAll('button[kind="primary"]');
                         buttons.forEach((btn) => {{
                             const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                            const match = raw.match(/^(\d+)/);
+                            const match = raw.match(/^(\\d+)/);
                             if (!match) return;
                             const truckLabel = match[1];
                             if (outlinedSet.has(truckLabel)) {{
@@ -4154,28 +4181,32 @@ def render_numeric_truck_buttons(
                         styleEl.textContent = `
                         button[kind="primary"].truck-oos-x {{
                             position: relative !important;
-                            overflow: hidden !important;
-                        }}
-                        button[kind="primary"].truck-oos-x::before,
-                        button[kind="primary"].truck-oos-x::after {{
-                            content: '' !important;
-                            position: absolute !important;
-                            left: -10%;
-                            top: 50%;
-                            width: 120%;
-                            height: 2px;
-                            border-radius: 999px;
-                            background: rgba(220, 38, 38, 0.95);
-                            box-shadow: 0 0 3px rgba(255,255,255,0.65);
-                            pointer-events: none !important;
-                            z-index: 9 !important;
-                            transform-origin: center !important;
                         }}
                         button[kind="primary"].truck-oos-x::before {{
-                            transform: translateY(-50%) rotate(33deg) !important;
+                            content: '' !important;
+                            position: absolute !important;
+                            inset: 0 !important;
+                            border-radius: inherit !important;
+                            pointer-events: none !important;
+                            z-index: 9 !important;
+                            background-image:
+                                linear-gradient(33deg,
+                                    transparent calc(50% - 1.4px),
+                                    rgba(220, 38, 38, 0.95) calc(50% - 1.4px),
+                                    rgba(220, 38, 38, 0.95) calc(50% + 1.4px),
+                                    transparent calc(50% + 1.4px)
+                                ),
+                                linear-gradient(-33deg,
+                                    transparent calc(50% - 1.4px),
+                                    rgba(220, 38, 38, 0.95) calc(50% - 1.4px),
+                                    rgba(220, 38, 38, 0.95) calc(50% + 1.4px),
+                                    transparent calc(50% + 1.4px)
+                                );
+                            background-repeat: no-repeat !important;
+                            filter: drop-shadow(0 0 2px rgba(255,255,255,0.55));
                         }}
                         button[kind="primary"].truck-oos-x::after {{
-                            transform: translateY(-50%) rotate(-33deg) !important;
+                            content: none !important;
                         }}
                         button[kind="primary"].truck-oos-x p,
                         button[kind="primary"].truck-oos-x span {{
@@ -4189,7 +4220,7 @@ def render_numeric_truck_buttons(
                         const buttons = root.querySelectorAll('button[kind="primary"]');
                         buttons.forEach((btn) => {{
                             const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                            const match = raw.match(/^(\d+)/);
+                            const match = raw.match(/^(\\d+)/);
                             if (!match) {{
                                 btn.classList.remove('truck-oos-x');
                                 return;
@@ -4253,7 +4284,7 @@ def render_numeric_truck_buttons(
                     const buttons = root.querySelectorAll('button[kind="primary"]');
                     buttons.forEach((btn) => {{
                         const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                        const match = raw.match(/^(\d+)/);
+                        const match = raw.match(/^(\\d+)/);
                         if (!match) return;
                         const truckLabel = match[1];
                         if (flashSet.has(truckLabel)) {{
@@ -4347,7 +4378,7 @@ def render_numeric_truck_buttons(
                             btn.classList.remove('truck-route-badge-host');
 
                             const raw = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                            const match = raw.match(/^(\d+)/);
+                            const match = raw.match(/^(\\d+)/);
                             if (!match) return;
                             const truckLabel = match[1];
                             const badgeLabel = badgeMap[truckLabel];
@@ -6971,7 +7002,7 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
                     root.head.appendChild(styleEl);
                 }}
 
-                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\s+/g, ' ').trim();
+                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
                 const rawMap = {dot_map_json};
                 const colorMap = new Map(Object.entries(rawMap).map(([k, v]) => [normalize(k), v]));
 
@@ -7066,7 +7097,7 @@ def _apply_sidebar_nav_outline(
                     root.head.appendChild(styleEl);
                 }}
 
-                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\s+/g, ' ').trim();
+                const normalize = (s) => (s || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
                 const navLabels = new Set([
                     'Unload', 'Load', 'Fleet', 'Communications', 'On Break', 'Management',
                     'Dirty', 'Shop', 'In Progress', 'Unloaded', 'Loaded', 'OFF', 'OOS/SPARE'

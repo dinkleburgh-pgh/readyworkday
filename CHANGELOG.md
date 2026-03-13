@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.2 - 2026-03-13
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.6.2** with release date **20260313**.
+2. Fleet Step 2 now includes an **Assign** option when a selected truck requires route assignment.
+3. OOS spare-assignment flow on `STATUS_CLEANED` now includes route dropdown selection with OFF routes first, then In Service routes.
+4. OOS route dropdown placement was adjusted to render below spare buttons and above the clear/cancel bar, with helper label text removed.
+5. Added guardrails preventing unloaded persistent spares from starting load until they have an assigned route.
+6. Guardrails were applied consistently across start paths (Status Cleaned confirm, Next Up start, break auto-start, load-page start, and URL start).
+7. Sidebar Live Status for Guest role now shows all status badges while only **In Progress** remains accessible.
+8. Fleet truck buttons now display **OFF** clip badges for OOS and scheduled-off trucks.
+9. Fleet OOS red-X rendering was stabilized when badges are present, with thinner stroke width for cleaner readability.
+10. Truck-button badge rendering/positioning was hardened so badge chips stay top-right without displacing centered truck numbers.
+11. Increased truck-number font sizing on numeric truck buttons for better visibility.
+12. Added a new **Development** section in Management with download actions for `load_durations.json` and current-day state-history JSON.
+
 ## v1.6.1 - 2026-03-12
 
 Ordered list of final changes included in this release:

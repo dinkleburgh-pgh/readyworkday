@@ -2,18 +2,16 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.6.0**
+Current release: **v1.6.2**
 
-## Recent updates (v1.6.0)
+## Recent updates (v1.6.2)
 
-- Promoted `app_unloadv1.6.py` as the primary app entry file for this release.
-- Route badges were stabilized and expanded: swap/spare/OOS load-on badges now render consistently across views, with badge chips layered above OOS indicators.
-- Pace calculations now show **time impact** (instead of truck count deltas), always account for a 30-minute break (7h30 effective shift), and live-update like the time card.
-- Added **Last Truck (#)** pace tile showing added/saved time with color-coded +/- indicators.
-- `STATUS_LOADED` statistics were redesigned into richer visual metric tiles, including route/source and pace impact context.
-- Fleet swap flow now supports one-way route assignment and a clear-assignment action.
-- Login popup behavior on navigation/back was reduced with improved silent re-auth handling.
-- Default repo state/fleet baseline was aligned to the approved current configuration (`.truck_state.json`, `truck_fleet.json`, `off_schedule_defaults.json`).
+- Updated release metadata to **v1.6.2** (`20260313`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Added Fleet and OOS assignment UX updates: new Fleet **Assign** action, route selection dropdown ordering/placement improvements, and OFF badge clips on fleet buttons.
+- Added loading guardrails to block starting unloaded persistent spares until a route assignment exists.
+- Guest users now see all sidebar live-status badges while only **In Progress** remains accessible.
+- Improved truck-button visuals: larger truck number text, thinner OOS red-X stroke, and badge rendering that stays top-right without shifting centered numbers.
+- Added a new **Development** section in Management with downloads for `load_durations.json` and current-day state-history JSON.
 
 ## Prior updates (v1.5.0)
 

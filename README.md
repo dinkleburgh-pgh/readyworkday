@@ -142,6 +142,7 @@ Use a **Git-based Stack** in Portainer.
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
+- Portainer Git-stack deploys may not honor repository `.env` defaults for compose substitution; set stack variables in the Portainer **Environment variables** section.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 

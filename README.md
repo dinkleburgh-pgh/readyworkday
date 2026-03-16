@@ -2,16 +2,17 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.6.2**
+Current release: **v1.6.5**
 
-## Recent updates (v1.6.2)
+## Recent updates (v1.6.5)
 
-- Updated release metadata to **v1.6.2** (`20260313`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
-- Added Fleet and OOS assignment UX updates: new Fleet **Assign** action, route selection dropdown ordering/placement improvements, and OFF badge clips on fleet buttons.
-- Added loading guardrails to block starting unloaded persistent spares until a route assignment exists.
-- Guest users now see all sidebar live-status badges while only **In Progress** remains accessible.
-- Improved truck-button visuals: larger truck number text, thinner OOS red-X stroke, and badge rendering that stays top-right without shifting centered numbers.
-- Added a new **Development** section in Management with downloads for `load_durations.json` and current-day state-history JSON.
+- Updated app release metadata to **v1.6.5** (`20260316`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Added `STATUS_LOADED` signed **Time Saved** metrics (+ green / - red) against average load duration.
+- Expanded LOAD pace controls with shift-based view selection and in-card dropdown placement.
+- Updated pace estimate behavior to keep retrospective finish projections for shifts that already ended.
+- Reworked LOAD next-up/start layout: **Set Next Up** dialog flow, removed bottom queue, and moved start controls above pace.
+- Applied stability/performance hardening for rerun churn and heavy UI scripts, plus cache reuse for load-duration history and batch-card PDFs.
+- Updated SHORTS overview card spacing to fill evenly and removed long helper text under Save & Done.
 
 ## Prior updates (v1.5.0)
 
@@ -134,10 +135,10 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:latest` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.5` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
-	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:latest`
+	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.5`
 	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 

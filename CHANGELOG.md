@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.5 - 2026-03-16
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.6.5** with release date **20260316**.
+2. Added signed **Time Saved** metrics (+ green / - red) to the `STATUS_LOADED` overview card based on average load-time comparison.
+3. Added LOAD pace **shift-view** controls (`Current`, `1st Shift`, `2nd Shift`, `3rd Shift`) with selector placement inside the pace card.
+4. Pace card estimate behavior now shows a retrospective finish projection even after a selected shift has ended.
+5. Reworked LOAD next-up flow by removing the bottom queue panel and adding a **Set Next Up** dialog with ready-truck dropdown.
+6. Moved LOAD **Start loading** controls above the pace card for faster access during active operations.
+7. LOAD Off Day schedule expander now defaults to collapsed on mobile devices.
+8. Hardened rerun behavior by skipping no-op query-param writes to reduce unnecessary app rerenders.
+9. Reduced client-side UI script load by trimming persistent observers/timers and skipping mobile-only grid enforcement on desktop.
+10. Added session-level cache/invalidation for load-duration history reads and writes.
+11. Added reusable batch-card PDF byte caching to avoid expensive regeneration on repeated reruns.
+12. Updated SHORTS overview layout for even card fill and removed long helper text under the Save & Done area.
+
 ## v1.6.2 - 2026-03-13
 
 Ordered list of final changes included in this release:

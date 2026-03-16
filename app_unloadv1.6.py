@@ -31,6 +31,21 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 _APP_VERSION = "1.6.5"
 _APP_DATE = "20260316"  
 
+
+def _emit_startup_version_banner_once():
+    """Print the running app version once per server process."""
+    try:
+        app_key = f"{_APP_VERSION}|{_APP_DATE}|{os.path.basename(__file__)}"
+        if os.environ.get("TRUCKAPP_VERSION_BANNER_PRINTED") == app_key:
+            return
+        os.environ["TRUCKAPP_VERSION_BANNER_PRINTED"] = app_key
+        print(f"[TruckApp] Running app version v{_APP_VERSION} ({_APP_DATE})", flush=True)
+    except Exception:
+        pass
+
+
+_emit_startup_version_banner_once()
+
 # Setup logging
 logging.basicConfig(
     filename="truckapp.log",
@@ -1707,7 +1722,7 @@ def load_state() -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        logging.info(f"Loaded state from {path}")
+        logging.debug(f"Loaded state from {path}")
     except Exception as e:
         logging.error(f"Failed to load state from {path}: {e}")
         return {}
@@ -4640,7 +4655,7 @@ def _apply_primary_button_color_for_labels(expected_labels: list[str], bg_hex: s
                     const label = normalize(value);
                     if (!label) return '';
                     if (expected.has(label)) return label;
-                    const numeric = label.match(/^(\d+)/);
+                    const numeric = label.match(/^(\\d+)/);
                     if (numeric && expected.has(numeric[1])) return numeric[1];
                     return label;
                 }};
@@ -13156,7 +13171,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                             const normalize = (value) =>
                                 String(value || '')
                                     .replace(/\u2063/g, '')
-                                    .replace(/\s+/g, ' ')
+                                    .replace(/\\s+/g, ' ')
                                     .trim()
                                     .toLowerCase();
 

@@ -13,6 +13,7 @@ LOG_FILE="${LOG_FILE:-$LOG_DIR/streamlit.log}"
 PID_FILE="${PID_FILE:-$LOG_DIR/streamlit.pid}"
 STREAMLIT_PORT="${STREAMLIT_PORT:-8501}"
 STREAMLIT_HOST="${STREAMLIT_HOST:-0.0.0.0}"
+APP_VERSION_LABEL="unknown"
 
 info() {
   printf '[INFO] %s\n' "$*"
@@ -80,6 +81,30 @@ find_latest_app_file() {
   printf '%s' "$latest"
 }
 
+extract_app_version_label() {
+  local app_path="$1"
+  local version
+  local build_date
+
+  if [ ! -f "$app_path" ]; then
+    printf 'unknown'
+    return 0
+  fi
+
+  version="$(grep -m1 -E '^[[:space:]]*_APP_VERSION[[:space:]]*=' "$app_path" | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+  build_date="$(grep -m1 -E '^[[:space:]]*_APP_DATE[[:space:]]*=' "$app_path" | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+
+  if [ -n "$version" ] && [ -n "$build_date" ]; then
+    printf 'v%s (%s)' "$version" "$build_date"
+    return 0
+  fi
+  if [ -n "$version" ]; then
+    printf 'v%s' "$version"
+    return 0
+  fi
+  printf 'unknown'
+}
+
 is_running_streamlit_pid() {
   local pid="$1"
   if [ -z "$pid" ]; then
@@ -110,6 +135,8 @@ if [ ! -f "$APP_FILE" ]; then
     exit 1
   fi
 fi
+
+APP_VERSION_LABEL="$(extract_app_version_label "$APP_FILE")"
 
 if ! PYTHON_BIN="$(resolve_python_bin)"; then
   if ! auto_install_python_stack; then
@@ -168,6 +195,7 @@ if [ -f "$PID_FILE" ]; then
   if is_running_streamlit_pid "$EXISTING_PID"; then
     info "Streamlit already running (PID $EXISTING_PID)."
     info "URL: http://localhost:$STREAMLIT_PORT"
+    info "Version: $APP_VERSION_LABEL"
     info "Log: $LOG_FILE"
     exit 0
   fi
@@ -190,6 +218,7 @@ sleep 2
 if kill -0 "$NEW_PID" >/dev/null 2>&1; then
   info "Streamlit started (PID $NEW_PID)."
   info "URL: http://localhost:$STREAMLIT_PORT"
+  info "Version: $APP_VERSION_LABEL"
   info "Log: $LOG_FILE"
   # Auto-open browser
   STREAMLIT_URL="http://localhost:$STREAMLIT_PORT"

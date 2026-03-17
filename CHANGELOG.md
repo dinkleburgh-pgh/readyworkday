@@ -10,6 +10,7 @@ Ordered list of final changes included in this release:
 4. Added an **Archive Calendar** under Configure Load Day that only lists dates with saved `state_history` snapshots and opens that archived day directly.
 5. Restyled the sidebar **Signed In** identity area into a clearer visual card with name and role presentation.
 6. Pinned compose image/version settings to **v1.6.6** in tracked deployment files to prevent stale launches from external `latest` or older env overrides.
+7. Updated GitHub Docker publish workflow to also push a versioned image tag (`vX.Y.Z`) from app metadata so compose releases pinned to `v1.6.6` can be deployed directly.
 
 ## v1.6.5 - 2026-03-16
 

@@ -9,6 +9,7 @@ Ordered list of final changes included in this release:
 3. Fixed previous-load-day OFF auto-pull reliability so day changes immediately move eligible trucks to **Unloaded** while excluding trucks used for route coverage or OOS spare assignments.
 4. Added an **Archive Calendar** under Configure Load Day that only lists dates with saved `state_history` snapshots and opens that archived day directly.
 5. Restyled the sidebar **Signed In** identity area into a clearer visual card with name and role presentation.
+6. Pinned compose image/version settings to **v1.6.6** in tracked deployment files to prevent stale launches from external `latest` or older env overrides.
 
 ## v1.6.5 - 2026-03-16
 

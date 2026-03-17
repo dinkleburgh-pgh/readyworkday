@@ -136,12 +136,11 @@ Use a **Git-based Stack** in Portainer.
 1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.6` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
-	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.6`
 	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
-- Portainer Git-stack deploys may not honor repository `.env` defaults for compose substitution; set stack variables in the Portainer **Environment variables** section.
+- The Portainer compose file is pinned to image tag `v1.6.6` to avoid stale `latest` pulls.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 

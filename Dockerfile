@@ -9,11 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
     STREAMLIT_SERVER_PORT=8501 \
     APP_FILE=app_unloadv1.6.py \
-    APP_VERSION=1.6.5
+        APP_VERSION=1.6.6
 
 LABEL org.opencontainers.image.title="readyworkday" \
-      org.opencontainers.image.version="1.6.5" \
-      org.opencontainers.image.created="2026-03-16"
+            org.opencontainers.image.version="1.6.6" \
+            org.opencontainers.image.created="2026-03-17"
 
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt

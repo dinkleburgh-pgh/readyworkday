@@ -2,17 +2,15 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.6.5**
+Current release: **v1.6.6**
 
-## Recent updates (v1.6.5)
+## Recent updates (v1.6.6)
 
-- Updated app release metadata to **v1.6.5** (`20260316`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
-- Added `STATUS_LOADED` signed **Time Saved** metrics (+ green / - red) against average load duration.
-- Expanded LOAD pace controls with shift-based view selection and in-card dropdown placement.
-- Updated pace estimate behavior to keep retrospective finish projections for shifts that already ended.
-- Reworked LOAD next-up/start layout: **Set Next Up** dialog flow, removed bottom queue, and moved start controls above pace.
-- Applied stability/performance hardening for rerun churn and heavy UI scripts, plus cache reuse for load-duration history and batch-card PDFs.
-- Updated SHORTS overview card spacing to fill evenly and removed long helper text under Save & Done.
+- Updated app release metadata to **v1.6.6** (`20260317`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Hardened manual pace override migration so legacy `60`-second overrides convert once to the 10-minute default.
+- Fixed load-day rollover autopull so prior-day OFF trucks immediately return to **Unloaded** unless used for route or OOS coverage.
+- Added an archive-date picker under **Configure load day** that only lists dates with saved state-history files and opens the selected archive directly.
+- Restyled the sidebar **Signed In** section into a cleaner identity card.
 
 ## Prior updates (v1.5.0)
 
@@ -135,10 +133,10 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.5` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.6` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
-	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.5`
+	- `IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.6`
 	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 

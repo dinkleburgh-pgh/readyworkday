@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.6.6 - 2026-03-17
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.6.6** with release date **20260317**.
+2. Added migration hardening so legacy manual pace overrides (`60` seconds) are normalized once to the current 10-minute default and tracked by migration version.
+3. Fixed previous-load-day OFF auto-pull reliability so day changes immediately move eligible trucks to **Unloaded** while excluding trucks used for route coverage or OOS spare assignments.
+4. Added an **Archive Calendar** under Configure Load Day that only lists dates with saved `state_history` snapshots and opens that archived day directly.
+5. Restyled the sidebar **Signed In** identity area into a clearer visual card with name and role presentation.
+
 ## v1.6.5 - 2026-03-16
 
 Ordered list of final changes included in this release:
@@ -16,6 +26,47 @@ Ordered list of final changes included in this release:
 10. Added session-level cache/invalidation for load-duration history reads and writes.
 11. Added reusable batch-card PDF byte caching to avoid expensive regeneration on repeated reruns.
 12. Updated SHORTS overview layout for even card fill and removed long helper text under the Save & Done area.
+13. Hardened frontend overlay/observer behavior to reduce occasional blank-page incidents (safer notice host mounting, throttled resize handling, and auto-expiring sidebar/dropdown MutationObservers).
+14. Disabled custom top-overlay Shop notices in favor of native Streamlit Notices rendering for improved page stability under reruns/navigation.
+15. Added a global stability mode that disables nonessential parent-DOM enhancement scripts and forced popstate reloads to prioritize page-render reliability.
+16. Added a guarded blank-page watchdog that detects prolonged empty-main render stalls, performs limited auto-recovery reloads, and shows a manual hard-refresh hint if recovery limit is reached.
+17. Restored live fleet/status truck-button colors by separating color-styling scripts from the broader DOM-enhancement stability toggle.
+18. Restored Live Status sidebar visuals and truck decoration features via targeted toggles, while keeping higher-risk mobile grid and dropdown-lock DOM hooks disabled.
+19. Set Dust Clothes controls now hide after garments are marked set for the current load day (Load + Management views), preventing redundant re-prompting.
+20. Replaced date-only rollover banner with shift/day dialogs: 2nd-shift day-start prompt (Continue Load Day or Start Load Day), 3rd-shift handoff prompt (Continue Load Day or Start Next Load Day), and all-loaded End-of-Day prompt (Download End Of Day PDF, Snooze Day Change 1hr, Start Next Load Day).
+21. Updated LOAD pace-card "Ahead/Behind by" math so non-Current shift views are based on that full shift's work-hour capacity instead of live time-left.
+22. Restored the top overlay Notices bar as default behavior so shop notice collapse/expand and flash acknowledgment run in the original overlay workflow again.
+23. Reorganized Management page flow into clearer section headers (Operations, Access and Preferences, Reporting, Advanced and Reset) to improve scanability.
+24. Moved Management **Set Dust Clothes** into a dedicated dialog workflow while keeping day-scoped completion behavior intact.
+25. Refined **Communication Settings** by flattening nested dropdowns and moving message-history review into a dedicated dialog.
+26. Converted Management PDF downloads into a focused report-download dialog with grouped load/shortages, batch-cards, and end-of-day actions.
+27. Added a Fleet-specific lightweight mode for sidebar Live Status button decorations (dots/corner badges/nav outlines): styling stays on, but observer/retry work is reduced while on Fleet to cut UI hangs.
+28. Optimized truck-button styling scripts by reducing Fleet retry passes, short-circuiting repeated style writes, and avoiding redundant badge re-creation when content is unchanged.
+29. Expanded lightweight styling mode to include UNLOAD/BATCH pages so Live Status and truck-button visuals stay enabled while reducing observer/retry pressure where hangs were also observed.
+30. Further reduced UNLOAD/FLEET DOM pressure by trimming heavy-page truck-button retry passes, disabling heavy-page resize restyling, and simplifying lightweight sidebar re-apply behavior to a single delayed pass.
+31. Added emergency heavy-page stabilization: disabled soft auto-refresh on Fleet/Unload/Batch and turned off expensive truck-decoration DOM scripts on those pages while keeping button color styling and sidebar Live Status styling active.
+32. Styled **Ran Special** notices in the Notices dropdown/overlay with an accent highlight (pink + bold) so they are no longer rendered as plain white text.
+33. Made **Ran Special** chips in the UNLOAD Route Card clickable to open the truck directly into batch/unload flow from the watch panel.
+34. Updated Fleet truck buttons so **Shop** trucks render in a light red style and automatically show a **SHOP** chip badge.
+35. Expanded the UNLOAD Route Card interaction so the entire **Ran Special** row is clickable, and standardized Shop truck buttons across all numeric-button pages to gray with white text plus a light-red **SHOP** chip.
+36. Updated **Special** truck buttons to use the same base styling as Dirty on all numeric-button pages, and added a purple **SPECIAL** clip badge for clear visibility.
+37. Updated unload completion behavior so trucks marked **Special** are cleared from the Route Card watch list after they are unloaded.
+38. Restored **Shop** truck button and live-status color styling to purple (with white text on Shop buttons) while retaining the SHOP clip badge behavior.
+39. Restored missing **OOS** truck indicators on button pages by re-enabling OOS/OFF clip rendering in lightweight mode and restoring the OOS red-X overlay.
+40. Added Development import tools to upload archived `load_durations` JSON (append or replace) and upload one-or-many `state_history` JSON files with optional overwrite for matching dates.
+41. Added a one-file **History Backup Package** workflow in Development to export/import both `load_durations` and archived `state_history` together for easier app-version migrations.
+42. Applied route clip badges to OFF-route cover trucks on **Unloaded** so spare/cover trucks assigned to a route show their `R#` clip in the bubble grid.
+43. Updated LOAD Dust Clothes control to stay visible after set and switch button text to **Edit Dust Garments** instead of disappearing.
+44. Removed the LOAD caption text **"Dust Clothes set for this load day."** while keeping the Dust Garments button behavior unchanged.
+45. Fixed a LOAD dialog-state bug where **Edit Dust Garments** could immediately close; the button now consistently opens the Dust Clothes editor for updates.
+46. Improved Dust Clothes truck selection ergonomics for mobile/fat-finger use by enlarging checkbox tap targets and reducing selection grid density in both LOAD and Management dialogs.
+47. Fixed Dust Clothes dialog mobile layout collapsing to one column by forcing a two-column checkbox grid on phone widths in both LOAD and Management dialogs.
+48. Removed Dust Clothes helper captions from LOAD and Management, kept the Dust Clothes button always visible as **Set Dust Clothes / Edit Dust Garments**, and moved the Management Dust button directly below **Open Shift Handoff**.
+49. Removed the Configure Load Day summary text block above **Open Shift Handoff** in Management for a cleaner top-of-section layout.
+50. Added a flashing blue outline prompt to LOAD **Set Next Up** when no Next Up truck is set but ready/unloaded trucks are available.
+51. Reworked IN_PROGRESS layout so **Current Truck** renders at the top-left column, while **Elapsed Time**, **Finish Loading**, and **Next Up** controls render in the right column.
+52. Refined IN_PROGRESS column presentation by centering the **Current Truck** label/number stack above Daily Notes and adding desktop equal-height balancing so left/right columns match height.
+53. Fixed Fleet status-apply reliability: previous-day off auto-promote to **Unloaded** now runs once per load day (not on every edit), and status feedback now reports the truck’s final applied status after normalization.
 
 ## v1.6.2 - 2026-03-13
 

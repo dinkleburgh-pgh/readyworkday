@@ -28,8 +28,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.6.6"
-_APP_DATE = "20260317"  
+_APP_VERSION = "1.6.7"
+_APP_DATE = "20260318"  
 
 
 def _emit_startup_version_banner_once():
@@ -139,6 +139,8 @@ PACE_ESTIMATE_PERCENT_BUFFER = 0.08
 PACE_OVERRIDE_DEFAULT_SECONDS = 10 * 60
 PACE_OVERRIDE_MIGRATION_VERSION = 1
 PACE_HISTORY_LOOKBACK_DAYS = 30
+PACE_LOADER_BASELINE_DEFAULT_COUNT = 2
+PACE_LOADER_ACTIVE_DEFAULT_COUNT = 2
 
 DEFAULT_SHORT_ITEMS = [
     "None",
@@ -815,16 +817,64 @@ def _pace_recent_average_seconds(
 def _pace_avg_seconds_for_cards() -> int | None:
     override_seconds = _manual_pace_avg_override_seconds()
     if override_seconds is not None:
-        return int(override_seconds)
+        avg_sec = int(override_seconds)
+    else:
+        avg_sec = _pace_recent_average_seconds([], lookback_days=PACE_HISTORY_LOOKBACK_DAYS)
 
-    avg_sec = _pace_recent_average_seconds([], lookback_days=PACE_HISTORY_LOOKBACK_DAYS)
-    return int(avg_sec) if (avg_sec is not None and int(avg_sec) > 0) else None
+    if avg_sec is None or int(avg_sec) <= 0:
+        return None
+
+    _, _, loader_multiplier = _pace_loader_settings()
+    adjusted_avg_sec = int(round(int(avg_sec) * float(loader_multiplier)))
+    return max(1, adjusted_avg_sec)
+
+
+def _normalize_pace_loader_count(value) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = PACE_LOADER_ACTIVE_DEFAULT_COUNT
+    return max(1, min(12, parsed))
+
+
+def _pace_loader_settings() -> tuple[int, int, float]:
+    baseline_loader_count = _normalize_pace_loader_count(
+        st.session_state.get("pace_loader_baseline_count", PACE_LOADER_BASELINE_DEFAULT_COUNT)
+    )
+    active_loader_count = _normalize_pace_loader_count(
+        st.session_state.get("pace_loader_active_count", baseline_loader_count)
+    )
+    loader_multiplier = float(baseline_loader_count) / float(active_loader_count)
+    return baseline_loader_count, active_loader_count, loader_multiplier
+
+
+def _pace_loader_display_line() -> str:
+    baseline_loader_count, active_loader_count, loader_multiplier = _pace_loader_settings()
+    if int(active_loader_count) == int(baseline_loader_count):
+        return f"Loaders {active_loader_count} active"
+    return (
+        f"Loaders {active_loader_count} active / {baseline_loader_count} base "
+        f"(x{loader_multiplier:.2f})"
+    )
+
+
+def _pace_loader_multiplier_caption(loader_multiplier: float) -> str:
+    if float(loader_multiplier) < 1.0:
+        return f"{(1.0 - float(loader_multiplier)) * 100.0:.0f}% faster"
+    if float(loader_multiplier) > 1.0:
+        return f"{(float(loader_multiplier) - 1.0) * 100.0:.0f}% slower"
+    return "no pace adjustment"
 
 
 def _pace_avg_source_label() -> str:
     if _manual_pace_avg_override_seconds() is not None:
-        return "Manual Override"
-    return f"Historical Average ({int(PACE_HISTORY_LOOKBACK_DAYS)}d)"
+        source_label = "Manual Override"
+    else:
+        source_label = f"Historical Average ({int(PACE_HISTORY_LOOKBACK_DAYS)}d)"
+    baseline_loader_count, active_loader_count, _ = _pace_loader_settings()
+    if int(active_loader_count) != int(baseline_loader_count):
+        return f"{source_label} + Loader Adj"
+    return source_label
 
 
 def _current_shift_window(now_local: datetime | None = None) -> tuple[str, datetime, datetime, str]:
@@ -887,23 +937,11 @@ def _load_pace_shift_window(
     now_local: datetime | None = None,
 ) -> tuple[str, datetime, datetime, str, bool]:
     now_value = now_local if isinstance(now_local, datetime) else _now_local()
-
-    if _load_day_has_started_for_pacing():
-        shift_name, shift_start, shift_end, shift_window_label = _current_shift_window(now_value)
-        return shift_name, shift_start, shift_end, shift_window_label, True
-
-    run_day = st.session_state.get("run_date")
-    anchor_day = run_day if isinstance(run_day, date) else now_value.date()
-    shift_tz = now_value.tzinfo
-    shift_name = "2nd Shift"
-    shift_window_label = "2:00 PM - 10:00 PM"
-    shift_start = datetime(anchor_day.year, anchor_day.month, anchor_day.day, 14, 0, 0, tzinfo=shift_tz)
-    shift_end = datetime(anchor_day.year, anchor_day.month, anchor_day.day, 22, 0, 0, tzinfo=shift_tz)
-    return shift_name, shift_start, shift_end, shift_window_label, False
+    shift_name, shift_start, shift_end, shift_window_label = _current_shift_window(now_value)
+    return shift_name, shift_start, shift_end, shift_window_label, _load_day_has_started_for_pacing()
 
 
 LOAD_PACE_SHIFT_VIEW_OPTIONS = (
-    "Current",
     "1st Shift",
     "2nd Shift",
     "3rd Shift",
@@ -915,8 +953,8 @@ def _load_day_shift_window_for_view(
     now_local: datetime | None = None,
 ) -> tuple[str, datetime, datetime, str, bool]:
     now_value = now_local if isinstance(now_local, datetime) else _now_local()
-    selected_view = str(shift_view or "Current").strip()
-    if selected_view == "Current":
+    selected_view = str(shift_view or "").strip()
+    if (not selected_view) or selected_view == "Current":
         return _load_pace_shift_window(now_value)
 
     run_day = st.session_state.get("run_date")
@@ -942,6 +980,52 @@ def _load_day_shift_window_for_view(
         shift_end = datetime(end_day.year, end_day.month, end_day.day, 6, 0, 0, tzinfo=shift_tz)
 
     return shift_name, shift_start, shift_end, shift_window_label, load_day_started
+
+
+def _resolve_pace_shift_selection(
+    select_key: str,
+    last_auto_key: str,
+    now_local: datetime | None = None,
+    label: str = "Pace Shift View",
+    use_sidebar: bool = False,
+) -> tuple[str, str, datetime, datetime, str, bool]:
+    now_value = now_local if isinstance(now_local, datetime) else _now_local()
+    auto_shift_name, _auto_shift_start, _auto_shift_end, _auto_shift_window_label, _auto_load_started = _load_pace_shift_window(
+        now_value
+    )
+
+    saved_pace_shift_view = str(st.session_state.get(select_key) or "").strip()
+    last_auto_pace_shift = str(st.session_state.get(last_auto_key) or "").strip()
+    if saved_pace_shift_view not in LOAD_PACE_SHIFT_VIEW_OPTIONS:
+        st.session_state[select_key] = str(auto_shift_name)
+    elif (
+        last_auto_pace_shift
+        and saved_pace_shift_view == last_auto_pace_shift
+        and saved_pace_shift_view != str(auto_shift_name)
+    ):
+        st.session_state[select_key] = str(auto_shift_name)
+    st.session_state[last_auto_key] = str(auto_shift_name)
+
+    if use_sidebar:
+        selected_view = st.sidebar.selectbox(
+            label,
+            options=LOAD_PACE_SHIFT_VIEW_OPTIONS,
+            key=select_key,
+            label_visibility="collapsed",
+        )
+    else:
+        selected_view = st.selectbox(
+            label,
+            options=LOAD_PACE_SHIFT_VIEW_OPTIONS,
+            key=select_key,
+            label_visibility="collapsed",
+        )
+
+    shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_day_shift_window_for_view(
+        selected_view,
+        now_value,
+    )
+    return str(selected_view), shift_name, shift_start, shift_end, shift_window_label, bool(load_day_started)
 
 
 def _normalize_pace_buffer_base_seconds(value) -> int:
@@ -1006,7 +1090,13 @@ def _render_guest_live_status_pace_card():
     remaining_count = len(completion.get("remaining") or [])
 
     now_local = _now_local()
-    shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_pace_shift_window(now_local)
+    _pace_shift_view, shift_name, shift_start, shift_end, shift_window_label, load_day_started = _resolve_pace_shift_selection(
+        select_key="sidebar_mini_pace_shift_view",
+        last_auto_key="sidebar_mini_pace_shift_last_auto",
+        now_local=now_local,
+        label="Mini Pace Shift View",
+        use_sidebar=True,
+    )
     shift_total_seconds = int((shift_end - shift_start).total_seconds())
     break_duration_seconds = 30 * 60
     effective_shift_seconds = max(0, shift_total_seconds - break_duration_seconds)
@@ -1017,6 +1107,7 @@ def _render_guest_live_status_pace_card():
 
     avg_per_truck_seconds = _pace_avg_seconds_for_cards()
     pace_avg_source_name = _pace_avg_source_label()
+    pace_loader_line = _pace_loader_display_line()
     manual_pace_override_active = _manual_pace_avg_override_seconds() is not None
 
     pace_shift_floor_avg_seconds = None
@@ -1070,20 +1161,52 @@ def _render_guest_live_status_pace_card():
 
     st.sidebar.markdown(
         (
-            "<div style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
-            "<div style='display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
+            "<style>"
+            ".mini-pace-shift-host{display:flex;align-items:center;}"
+            ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view{width:min(140px,100%);margin:0 !important;}"
+            ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view [data-testid='stSelectbox'] > div{margin-bottom:0 !important;}"
+            ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view [data-baseweb='select'] > div{min-height:30px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:9px !important;}"
+            ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
+            "</style>"
+            "<div data-mini-pace-card='sidebar' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
+            "<div style='display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
             "<div style='font-size:0.74rem; letter-spacing:0.1em; text-transform:uppercase; opacity:0.84; font-weight:900;'>Mini Pace</div>"
+            "<div style='display:flex; align-items:center; gap:8px;'>"
+            "<span class='mini-pace-shift-host' data-mini-pace-shift-host='sidebar'></span>"
             f"<div style='font-size:0.63rem; opacity:0.74; text-align:right;'>{html.escape(f'{shift_name} ({shift_window_label})')}</div>"
+            "</div>"
             "</div>"
             f"<div style='font-size:1.18rem; font-weight:900; color:{pace_value_color}; line-height:1.12; margin-top:2px;'>{pace_header_value}</div>"
             f"<div style='font-size:0.75rem; opacity:0.84; margin-top:2px;'>{pace_status_line}</div>"
             f"<div style='font-size:0.69rem; opacity:0.74; margin-top:3px;'>Avg {seconds_to_mmss(pace_used_avg_seconds) if pace_used_avg_seconds is not None else 'N/A'} ({html.escape(pace_used_avg_source)})</div>"
+            f"<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>{html.escape(pace_loader_line)}</div>"
             f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} • Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
             f"{awaiting_first_load_html}"
             f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text)}</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
+    )
+    components.html(
+        """
+        <script>
+        (function(){
+            try {
+                const root = window.parent.document;
+                const cards = root.querySelectorAll('[data-mini-pace-card="sidebar"]');
+                if (!cards || !cards.length) return;
+                const card = cards[cards.length - 1];
+                const shiftHost = card.querySelector('[data-mini-pace-shift-host="sidebar"]');
+                const shiftControl = root.querySelector('.st-key-sidebar_mini_pace_shift_view');
+                if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
+                    shiftHost.appendChild(shiftControl);
+                }
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
@@ -1093,7 +1216,13 @@ def _render_inprog_mini_pace_card():
     remaining_count = len(completion.get("remaining") or [])
 
     now_local = _now_local()
-    shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_pace_shift_window(now_local)
+    _pace_shift_view, shift_name, shift_start, shift_end, shift_window_label, load_day_started = _resolve_pace_shift_selection(
+        select_key="inprog_mini_pace_shift_view",
+        last_auto_key="inprog_mini_pace_shift_last_auto",
+        now_local=now_local,
+        label="Mini Pace Shift View",
+        use_sidebar=False,
+    )
     shift_total_seconds = int((shift_end - shift_start).total_seconds())
     break_duration_seconds = 30 * 60
     effective_shift_seconds = max(0, shift_total_seconds - break_duration_seconds)
@@ -1104,6 +1233,7 @@ def _render_inprog_mini_pace_card():
 
     avg_per_truck_seconds = _pace_avg_seconds_for_cards()
     pace_avg_source_name = _pace_avg_source_label()
+    pace_loader_line = _pace_loader_display_line()
     manual_pace_override_active = _manual_pace_avg_override_seconds() is not None
 
     pace_shift_floor_avg_seconds = None
@@ -1157,20 +1287,52 @@ def _render_inprog_mini_pace_card():
 
     st.markdown(
         (
-            "<div style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
-            "<div style='display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
+            "<style>"
+            ".mini-pace-shift-host{display:flex;align-items:center;}"
+            ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view{width:min(140px,100%);margin:0 !important;}"
+            ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view [data-testid='stSelectbox'] > div{margin-bottom:0 !important;}"
+            ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view [data-baseweb='select'] > div{min-height:30px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:9px !important;}"
+            ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
+            "</style>"
+            "<div data-mini-pace-card='inprog' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
+            "<div style='display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
             "<div style='font-size:0.74rem; letter-spacing:0.1em; text-transform:uppercase; opacity:0.84; font-weight:900;'>Mini Pace</div>"
+            "<div style='display:flex; align-items:center; gap:8px;'>"
+            "<span class='mini-pace-shift-host' data-mini-pace-shift-host='inprog'></span>"
             f"<div style='font-size:0.63rem; opacity:0.74; text-align:right;'>{html.escape(f'{shift_name} ({shift_window_label})')}</div>"
+            "</div>"
             "</div>"
             f"<div style='font-size:1.18rem; font-weight:900; color:{pace_value_color}; line-height:1.12; margin-top:2px;'>{pace_header_value}</div>"
             f"<div style='font-size:0.75rem; opacity:0.84; margin-top:2px;'>{pace_status_line}</div>"
             f"<div style='font-size:0.69rem; opacity:0.74; margin-top:3px;'>Avg {seconds_to_mmss(pace_used_avg_seconds) if pace_used_avg_seconds is not None else 'N/A'} ({html.escape(pace_used_avg_source)})</div>"
+            f"<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>{html.escape(pace_loader_line)}</div>"
             f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} • Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
             f"{awaiting_first_load_html}"
             f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text)}</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
+    )
+    components.html(
+        """
+        <script>
+        (function(){
+            try {
+                const root = window.parent.document;
+                const cards = root.querySelectorAll('[data-mini-pace-card="inprog"]');
+                if (!cards || !cards.length) return;
+                const card = cards[cards.length - 1];
+                const shiftHost = card.querySelector('[data-mini-pace-shift-host="inprog"]');
+                const shiftControl = root.querySelector('.st-key-inprog_mini_pace_shift_view');
+                if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
+                    shiftHost.appendChild(shiftControl);
+                }
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
@@ -1991,6 +2153,8 @@ def _sync_next_up_from_state_file(force: bool = False):
         "pace_buffer_base_seconds",
         "pace_buffer_per_truck_seconds",
         "pace_buffer_percent",
+        "pace_loader_baseline_count",
+        "pace_loader_active_count",
     )
     changed = False
     for key in sync_keys:
@@ -3028,6 +3192,8 @@ def _restore_day_state_from_archive(archived_state: dict, run_date: date, ship_d
         "pace_buffer_base_seconds",
         "pace_buffer_per_truck_seconds",
         "pace_buffer_percent",
+        "pace_loader_baseline_count",
+        "pace_loader_active_count",
         "extra_fleet",
         "removed_fleet",
     }
@@ -3167,6 +3333,12 @@ loaded["pace_buffer_per_truck_seconds"] = _normalize_pace_buffer_per_truck_secon
 loaded["pace_buffer_percent"] = _normalize_pace_buffer_percent(
     loaded.get("pace_buffer_percent", PACE_ESTIMATE_PERCENT_BUFFER)
 )
+loaded["pace_loader_baseline_count"] = _normalize_pace_loader_count(
+    loaded.get("pace_loader_baseline_count", PACE_LOADER_BASELINE_DEFAULT_COUNT)
+)
+loaded["pace_loader_active_count"] = _normalize_pace_loader_count(
+    loaded.get("pace_loader_active_count", loaded.get("pace_loader_baseline_count", PACE_LOADER_ACTIVE_DEFAULT_COUNT))
+)
 
 loaded_off_schedule = (
     _normalize_off_schedule(loaded.get("off_schedule") or {})
@@ -3280,6 +3452,8 @@ defaults = {
     "pace_buffer_base_seconds": PACE_ESTIMATE_BASE_BUFFER_SECONDS,
     "pace_buffer_per_truck_seconds": PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS,
     "pace_buffer_percent": PACE_ESTIMATE_PERCENT_BUFFER,
+    "pace_loader_baseline_count": PACE_LOADER_BASELINE_DEFAULT_COUNT,
+    "pace_loader_active_count": PACE_LOADER_ACTIVE_DEFAULT_COUNT,
 
     # timezone
     "timezone_key": "America/New_York",
@@ -3349,6 +3523,12 @@ if (
         st.session_state["pace_avg_override_seconds"] = int(PACE_OVERRIDE_DEFAULT_SECONDS)
 st.session_state["pace_avg_override_legacy_checked"] = True
 st.session_state["pace_avg_override_migration_version"] = int(PACE_OVERRIDE_MIGRATION_VERSION)
+st.session_state["pace_loader_baseline_count"] = _normalize_pace_loader_count(
+    st.session_state.get("pace_loader_baseline_count", PACE_LOADER_BASELINE_DEFAULT_COUNT)
+)
+st.session_state["pace_loader_active_count"] = _normalize_pace_loader_count(
+    st.session_state.get("pace_loader_active_count", st.session_state.get("pace_loader_baseline_count", PACE_LOADER_ACTIVE_DEFAULT_COUNT))
+)
 
 if not st.session_state.get("_persistent_spares_seeded"):
     persistent_spares = {int(t) for t in PERSISTENT_SPARE_TRUCKS}
@@ -4285,11 +4465,37 @@ def _get_rollover_snooze_seconds() -> int:
 
 def _recommended_run_date_for_shift(now_local: datetime | None = None) -> date:
     now_value = now_local if isinstance(now_local, datetime) else _now_local()
-    cutoff_hour = _get_rollover_prompt_hour()
+    cutoff_hour = int(ROLLOVER_PROMPT_HOUR)
     base_date = now_value.date()
     if now_value.hour < int(cutoff_hour):
         return base_date - timedelta(days=1)
     return base_date
+
+
+def _next_shift_start_epoch(now_local: datetime | None = None) -> float:
+    now_value = now_local if isinstance(now_local, datetime) else _now_local()
+    _shift_name, _shift_start, shift_end, _shift_window = _current_shift_window(now_value)
+    try:
+        shift_end_epoch = float(shift_end.timestamp())
+    except Exception:
+        shift_end_epoch = 0.0
+    now_epoch = time.time()
+    if shift_end_epoch <= now_epoch:
+        return now_epoch + float(EOD_DAY_CHANGE_SNOOZE_SECONDS)
+    return shift_end_epoch
+
+
+def _first_shift_day_rollover_due(now_local: datetime | None = None) -> bool:
+    if not st.session_state.get("setup_done"):
+        return False
+    run_date = st.session_state.get("run_date")
+    if not isinstance(run_date, date):
+        return False
+
+    now_value = now_local if isinstance(now_local, datetime) else _now_local()
+    if now_value.hour < int(ROLLOVER_PROMPT_HOUR):
+        return False
+    return run_date < now_value.date()
 
 
 def _ensure_run_day_initialized() -> bool:
@@ -4434,7 +4640,7 @@ def _start_next_load_day_now():
     apply_run_config(next_run_date, [next_run_date + timedelta(days=1)])
     st.session_state.rollover_prompt_snooze_until = 0.0
     st.session_state.end_of_day_prompt_snooze_until = 0.0
-    st.session_state.shift_handoff_last_handled_key = _current_shift_handoff_key()
+    st.session_state.shift_handoff_last_handled_key = ""
     st.session_state.active_screen = "UNLOAD"
 
 
@@ -4446,25 +4652,35 @@ def render_rollover_prompt_if_needed():
     if not isinstance(run_date, date):
         return
 
+    now_local = _now_local()
+    if _first_shift_day_rollover_due(now_local):
+        start_today_date = now_local.date()
+        apply_run_config(start_today_date, [start_today_date + timedelta(days=1)])
+        st.session_state.rollover_prompt_snooze_until = 0.0
+        st.session_state.end_of_day_prompt_snooze_until = 0.0
+        st.session_state.shift_handoff_last_handled_key = ""
+        st.session_state.active_screen = "UNLOAD"
+        _mark_and_save()
+        st.rerun()
+        return
+
     completion = current_load_day_completion()
     scheduled_total = int(completion.get("scheduled_total", 0) or 0)
     loaded_count = int(completion.get("loaded_count", 0) or 0)
-    remaining = completion.get("remaining") or []
-    remaining_list = [int(t) for t in remaining]
 
     if _end_of_day_prompt_due():
         def _dismiss_end_of_day_prompt():
-            st.session_state.end_of_day_prompt_snooze_until = time.time() + EOD_DAY_CHANGE_SNOOZE_SECONDS
+            st.session_state.end_of_day_prompt_snooze_until = _next_shift_start_epoch(now_local)
 
         @st.dialog("Load Day Complete", width="medium", on_dismiss=_dismiss_end_of_day_prompt)
         def _render_end_of_day_prompt_dialog():
             st.success(
                 f"Load day {run_date.isoformat()} is complete ({loaded_count}/{scheduled_total} scheduled loaded)."
             )
-            st.caption("Download the End Of Day PDF, snooze the day-change prompt for one hour, or start the next load day now.")
+            st.caption("Download EOD shift summary, snooze until next shift, or go to the next load day now.")
 
             st.download_button(
-                "Download End Of Day PDF",
+                "Download EOD Shift Summary",
                 data=generate_end_of_day_pdf_bytes(),
                 file_name=f"end_of_day_{run_date.isoformat()}.pdf",
                 mime="application/pdf",
@@ -4475,18 +4691,18 @@ def render_rollover_prompt_if_needed():
             snooze_col, start_col = st.columns(2)
             with snooze_col:
                 if st.button(
-                    "Snooze Day Change 1hr",
-                    key="rollover_dialog_snooze_one_hour",
+                    "Snooze Until Next Shift",
+                    key="rollover_dialog_snooze_until_next_shift",
                     use_container_width=True,
                 ):
-                    snooze_until = time.time() + EOD_DAY_CHANGE_SNOOZE_SECONDS
+                    snooze_until = _next_shift_start_epoch(now_local)
                     st.session_state.end_of_day_prompt_snooze_until = snooze_until
                     st.session_state.rollover_prompt_snooze_until = snooze_until
                     _mark_and_save()
                     st.rerun()
             with start_col:
                 if st.button(
-                    "Start Next Load Day",
+                    "Go To Next Load Day",
                     key="rollover_dialog_start_next_day_from_eod",
                     use_container_width=True,
                 ):
@@ -4496,95 +4712,6 @@ def render_rollover_prompt_if_needed():
 
         _render_end_of_day_prompt_dialog()
         return
-
-    now_local = _now_local()
-    if _second_shift_start_prompt_due(now_local):
-        shift_key = _current_shift_handoff_key(now_local)
-        start_today_date = now_local.date()
-
-        def _dismiss_second_shift_start_prompt():
-            st.session_state.rollover_prompt_snooze_until = time.time() + _get_rollover_snooze_seconds()
-
-        @st.dialog("Start Load Day", width="small", on_dismiss=_dismiss_second_shift_start_prompt)
-        def _render_second_shift_start_prompt_dialog():
-            st.warning(
-                f"2nd Shift started. Current load day is {run_date.isoformat()}, but today is {start_today_date.isoformat()}."
-            )
-            st.caption("Use Start Load Day to begin today, or Continue Load Day to keep the current day for now.")
-
-            continue_col, start_col = st.columns(2)
-            with continue_col:
-                if st.button(
-                    "Continue Load Day",
-                    key="rollover_dialog_continue_load_day_second_shift",
-                    use_container_width=True,
-                ):
-                    st.session_state.shift_handoff_last_handled_key = shift_key
-                    st.session_state.rollover_prompt_snooze_until = 0.0
-                    _mark_and_save()
-                    st.rerun()
-            with start_col:
-                if st.button(
-                    "Start Load Day",
-                    key="rollover_dialog_start_today_second_shift",
-                    use_container_width=True,
-                ):
-                    st.session_state.shift_handoff_last_handled_key = shift_key
-                    apply_run_config(start_today_date, [start_today_date + timedelta(days=1)])
-                    st.session_state.rollover_prompt_snooze_until = 0.0
-                    st.session_state.end_of_day_prompt_snooze_until = 0.0
-                    st.session_state.active_screen = "UNLOAD"
-                    _mark_and_save()
-                    st.rerun()
-
-        _render_second_shift_start_prompt_dialog()
-        return
-
-    if not _third_shift_handoff_prompt_due(now_local):
-        return
-
-    shift_name, _shift_start, _shift_end, shift_window = _current_shift_window(now_local)
-    shift_key = _current_shift_handoff_key(now_local)
-
-    def _dismiss_shift_handoff_prompt():
-        st.session_state.rollover_prompt_snooze_until = time.time() + _get_rollover_snooze_seconds()
-
-    @st.dialog("Shift Handoff", width="small", on_dismiss=_dismiss_shift_handoff_prompt)
-    def _render_shift_handoff_prompt_dialog():
-        st.warning(f"{shift_name} started ({shift_window}).")
-        st.caption(f"Current load day: {run_date.isoformat()}.")
-
-        if remaining_list:
-            preview = ", ".join(f"#{int(t)}" for t in remaining_list[:12])
-            extra = len(remaining_list) - min(len(remaining_list), 12)
-            suffix = f", +{extra} more" if extra > 0 else ""
-            st.caption(f"Remaining routes: {preview}{suffix}")
-        else:
-            st.caption("All scheduled routes are currently loaded.")
-
-        continue_col, start_col = st.columns(2)
-        with continue_col:
-            if st.button(
-                "Continue Load Day",
-                key="rollover_dialog_continue_load_day",
-                use_container_width=True,
-            ):
-                st.session_state.shift_handoff_last_handled_key = shift_key
-                st.session_state.rollover_prompt_snooze_until = 0.0
-                _mark_and_save()
-                st.rerun()
-        with start_col:
-            if st.button(
-                "Start Next Load Day",
-                key="rollover_dialog_start_next_day_from_shift",
-                use_container_width=True,
-            ):
-                st.session_state.shift_handoff_last_handled_key = shift_key
-                _start_next_load_day_now()
-                _mark_and_save()
-                st.rerun()
-
-    _render_shift_handoff_prompt_dialog()
 
 
 def is_duplicate_notice(truck: int, notice_type: str) -> bool:
@@ -5727,7 +5854,9 @@ def render_numeric_truck_buttons(
                 corner_badge_map[truck_label] = badge_label[:6]
 
     shop_set_now = {int(t) for t in (st.session_state.get("shop_set") or set())}
+    oos_set_now = {int(t) for t in (st.session_state.get("off_set") or set())}
     shop_labels = {str(int(t)) for t in ordered if int(t) in shop_set_now}
+    oos_labels = {str(int(t)) for t in ordered if int(t) in oos_set_now}
     special_labels = {
         str(int(t))
         for t in ordered
@@ -5735,6 +5864,8 @@ def render_numeric_truck_buttons(
     }
     for truck_label in shop_labels:
         badge_map[truck_label] = "SHOP"
+    for truck_label in oos_labels:
+        badge_map.setdefault(truck_label, "OOS")
     for truck_label in special_labels:
         badge_map.setdefault(truck_label, "SPECIAL")
 
@@ -6496,7 +6627,6 @@ def _apply_truck_status_change(
             pending_return.discard(t)
             st.session_state.spares_needing_return = pending_return
         st.session_state.off_set.add(t)
-        st.session_state.cleaned_set.add(t)
     elif status_label == "Spare":
         pending_return = _spares_needing_return_set()
         if t in pending_return:
@@ -6581,7 +6711,6 @@ def _return_truck_from_shop(truck: int) -> tuple[bool, str | None]:
         start_loading_truck(t)
     elif prev == "Out Of Service":
         st.session_state.off_set.add(t)
-        st.session_state.cleaned_set.add(t)
     elif prev == "Spare":
         st.session_state.spare_set.add(t)
     elif prev == "Special":
@@ -7958,11 +8087,39 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
     if load_on_num in loaded_set:
         return False, f"Truck {load_on_num} is already Loaded and cannot be used for Load On."
 
+    prior_swap_raw = _active_route_swap_assignments().get(int(route_num))
+    try:
+        prior_swap_num = int(prior_swap_raw) if prior_swap_raw is not None else None
+    except Exception:
+        prior_swap_num = None
+
     _set_shop_load_on_route_assignment(route_num, str(load_on_num))
     swaps_now = _active_route_swap_assignments()
     if route_num == load_on_num:
+        if route_num in shop_set and prior_swap_num is not None:
+            push_shop_notice(
+                f"Shop route #{route_num} Load On cleared (was Truck #{int(prior_swap_num)}).",
+                kind="shop",
+                notice_type="shop_load_on",
+                truck=int(route_num),
+            )
         return True, f"Route {route_num} reset to Truck {route_num}."
     if int(swaps_now.get(route_num, -1)) == int(load_on_num):
+        if route_num in shop_set:
+            if prior_swap_num is None:
+                push_shop_notice(
+                    f"Shop route #{route_num} Load On set to Truck #{int(load_on_num)}.",
+                    kind="shop",
+                    notice_type="shop_load_on",
+                    truck=int(route_num),
+                )
+            elif int(prior_swap_num) != int(load_on_num):
+                push_shop_notice(
+                    f"Shop route #{route_num} Load On updated: Truck #{int(prior_swap_num)} -> Truck #{int(load_on_num)}.",
+                    kind="shop",
+                    notice_type="shop_load_on",
+                    truck=int(route_num),
+                )
         return True, f"Route {route_num} now loads on Truck {load_on_num}."
 
     return False, (
@@ -8015,9 +8172,6 @@ def _off_day_trucks_blocked_from_loading() -> set[int]:
 def _ensure_cover_truck_ready_for_loading(truck: int):
     t = int(truck)
     spare_set_now = {int(x) for x in (st.session_state.get("spare_set") or set())}
-    off_today_set = {int(x) for x in (off_trucks_for_today() or [])}
-    if t not in spare_set_now and t not in off_today_set:
-        return
 
     if t in spare_set_now:
         st.session_state.spare_set.discard(t)
@@ -8026,6 +8180,7 @@ def _ensure_cover_truck_ready_for_loading(truck: int):
             pending_return.discard(t)
             st.session_state.spares_needing_return = pending_return
 
+    # Any truck selected to cover an OOS route should be immediately ready in Unloaded.
     st.session_state.cleaned_set.add(t)
     st.session_state.loaded_set.discard(t)
     st.session_state.inprog_set.discard(t)
@@ -8199,6 +8354,8 @@ def _assign_truck_to_oos_route(route_num: int, selected_truck: int) -> tuple[boo
         return False, f"Truck {chosen_truck} is Out Of Service and cannot cover route {route}."
     if chosen_truck in shop_set:
         return False, f"Truck {chosen_truck} is in Shop and cannot cover route {route}."
+    if chosen_truck in inprog_set:
+        return False, f"Truck {chosen_truck} is In Progress and cannot cover route {route}."
     if chosen_truck in loaded_set:
         return False, f"Truck {chosen_truck} is already Loaded and cannot cover route {route}."
     assignments_raw = st.session_state.get("oos_spare_assignments") or {}
@@ -8239,6 +8396,23 @@ def _assign_truck_to_oos_route(route_num: int, selected_truck: int) -> tuple[boo
     if assigned_now is None or int(assigned_now) != int(chosen_truck):
         return False, f"Could not assign Truck {chosen_truck} to route {route}."
 
+    if prior_truck is None:
+        push_shop_notice(
+            f"OOS route #{int(route)} Load On set to Truck #{int(chosen_truck)}.",
+            kind="shop",
+            notice_type="oos_load_on",
+            truck=int(route),
+        )
+        save_state()
+    elif int(prior_truck) != int(chosen_truck):
+        push_shop_notice(
+            f"OOS route #{int(route)} Load On updated: Truck #{int(prior_truck)} -> Truck #{int(chosen_truck)}.",
+            kind="shop",
+            notice_type="oos_load_on",
+            truck=int(route),
+        )
+        save_state()
+
     return True, f"Truck {chosen_truck} assigned to route {route}."
 
 
@@ -8264,6 +8438,13 @@ def _assign_truck_to_shop_route(route_num: int, selected_truck: int) -> tuple[bo
         return False, f"Truck {chosen_truck} is in Shop and cannot cover route {route}."
     if chosen_truck in loaded_set:
         return False, f"Truck {chosen_truck} is already Loaded and cannot cover route {route}."
+
+    prior_swap_raw = _active_route_swap_assignments().get(int(route))
+    try:
+        prior_swap_num = int(prior_swap_raw) if prior_swap_raw is not None else None
+    except Exception:
+        prior_swap_num = None
+
     _set_shop_load_on_route_assignment(int(route), str(int(chosen_truck)))
     st.session_state.shop_spares[int(route)] = str(int(chosen_truck))
     _mark_and_save()
@@ -8271,6 +8452,23 @@ def _assign_truck_to_shop_route(route_num: int, selected_truck: int) -> tuple[bo
     assigned_now = _active_route_swap_assignments().get(int(route))
     if assigned_now is None or int(assigned_now) != int(chosen_truck):
         return False, f"Could not assign Truck {chosen_truck} to route {route}."
+
+    if prior_swap_num is None:
+        push_shop_notice(
+            f"Shop route #{int(route)} Load On set to Truck #{int(chosen_truck)}.",
+            kind="shop",
+            notice_type="shop_load_on",
+            truck=int(route),
+        )
+        save_state()
+    elif int(prior_swap_num) != int(chosen_truck):
+        push_shop_notice(
+            f"Shop route #{int(route)} Load On updated: Truck #{int(prior_swap_num)} -> Truck #{int(chosen_truck)}.",
+            kind="shop",
+            notice_type="shop_load_on",
+            truck=int(route),
+        )
+        save_state()
 
     return True, f"Truck {chosen_truck} assigned to cover route {route} while Truck {route} is in Shop."
 
@@ -11865,7 +12063,7 @@ dirty_trucks = sorted(
 )
 cleaned_effective_set = (
     set(st.session_state.cleaned_set)
-) - set(st.session_state.get("spare_set", set())) - set(st.session_state.loaded_set) - set(st.session_state.inprog_set) - set(st.session_state.shop_set)
+) - set(st.session_state.get("spare_set", set())) - set(st.session_state.loaded_set) - set(st.session_state.inprog_set) - set(st.session_state.shop_set) - set(st.session_state.off_set)
 cleaned_list = sorted(cleaned_effective_set)
 cleaned_ready_to_load = sorted(set(cleaned_list) - off_today_blocked)
 
@@ -11879,12 +12077,7 @@ for route_raw, spare_raw in (st.session_state.get("oos_spare_assignments") or {}
     if route_num in st.session_state.off_set:
         active_oos_assignments[route_num] = spare_num
 
-oos_routes_needing_spare = sorted(
-    set(st.session_state.off_set)
-    - off_today_set
-    - set(active_oos_assignments.keys())
-)
-status_cleaned_trucks = sorted(set(cleaned_ready_to_load) | set(oos_routes_needing_spare))
+status_cleaned_trucks = sorted(set(cleaned_ready_to_load))
 
 loaded_list = sorted(st.session_state.loaded_set)
 shop_list = sorted(st.session_state.shop_set)
@@ -13273,6 +13466,20 @@ if st.session_state.active_screen.startswith("STATUS_"):
 
                             assignments[int(selected_route)] = chosen_spare
                             st.session_state.oos_spare_assignments = assignments
+                            if existing_spare is None:
+                                push_shop_notice(
+                                    f"OOS route #{int(selected_route)} Load On set to Truck #{int(chosen_spare)}.",
+                                    kind="shop",
+                                    notice_type="oos_load_on",
+                                    truck=int(selected_route),
+                                )
+                            elif int(existing_spare) != int(chosen_spare):
+                                push_shop_notice(
+                                    f"OOS route #{int(selected_route)} Load On updated: Truck #{int(existing_spare)} -> Truck #{int(chosen_spare)}.",
+                                    kind="shop",
+                                    notice_type="oos_load_on",
+                                    truck=int(selected_route),
+                                )
                             st.session_state.pending_oos_route = None
                             st.session_state.pending_start_truck = None
                             st.session_state.selected_truck = chosen_spare
@@ -13319,8 +13526,13 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             ):
                                 st.session_state.cleaned_set.discard(cleared_spare)
                                 st.session_state.spare_set.add(cleared_spare)
-                            if int(selected_route) in st.session_state.off_set:
-                                st.session_state.cleaned_set.add(int(selected_route))
+                            if cleared_spare is not None:
+                                push_shop_notice(
+                                    f"OOS route #{int(selected_route)} Load On cleared (was Truck #{int(cleared_spare)}).",
+                                    kind="shop",
+                                    notice_type="oos_load_on_clear",
+                                    truck=int(selected_route),
+                                )
                             st.session_state.oos_spare_assignments = assignments
                             st.session_state.pending_oos_route = None
                             _mark_and_save()
@@ -14848,157 +15060,34 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
     st.markdown("#### Operations")
     with st.expander("Configure load day", expanded=False):
-        if "sup_shift_handoff_dialog_open" not in st.session_state:
-            st.session_state["sup_shift_handoff_dialog_open"] = False
         if "sup_dust_clothes_dialog_open" not in st.session_state:
             st.session_state["sup_dust_clothes_dialog_open"] = False
 
-        now_local = _now_local()
-        recommended_run_date = _recommended_run_date_for_shift(now_local)
         current_run_date_raw = st.session_state.get("run_date")
-        current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else recommended_run_date
-        current_ship_dates = list(st.session_state.get("ship_dates") or [current_run_date + timedelta(days=1)])
-        current_ship_date = current_ship_dates[0] if current_ship_dates else (current_run_date + timedelta(days=1))
-        current_load_day_num = ship_day_number(current_ship_date) if isinstance(current_ship_date, date) else None
-        completion = current_load_day_completion()
-        remaining_routes = [int(t) for t in (completion.get("remaining") or [])]
+        current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
 
-        def _apply_shift_handoff_day(target_run_date: date, success_message: str):
-            apply_run_config(target_run_date, [target_run_date + timedelta(days=1)])
-            st.session_state["sup_shift_handoff_dialog_open"] = False
+        st.write("#### Load Date")
+        selected_load_date = st.date_input(
+            "Pick load date",
+            value=current_run_date,
+            key="sup_configure_load_date_pick",
+        )
+        if not isinstance(selected_load_date, date):
+            selected_load_date = current_run_date
+
+        st.caption(f"Ship date will be {(selected_load_date + timedelta(days=1)).isoformat()}.")
+        if st.button("Apply load date", use_container_width=True, key="sup_apply_load_date_btn"):
+            apply_run_config(selected_load_date, [selected_load_date + timedelta(days=1)])
             st.session_state.active_screen = "UNLOAD"
             _mark_and_save()
-            st.success(success_message)
+            st.success(f"Load date set to {selected_load_date.isoformat()}.")
             st.rerun()
-
-        if st.button("Open Shift Handoff", use_container_width=True, key="sup_open_shift_handoff_dialog"):
-            st.session_state["sup_shift_handoff_dialog_open"] = True
-            st.rerun()
-
-        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
-        st.write("#### Archive Calendar")
-        st.caption("Choose a saved history date to open that archived workday snapshot.")
-
-        archive_dates = _available_state_history_run_dates()
-        archive_picker_key = "sup_archive_run_date_pick"
-        if archive_dates:
-            default_archive_date = current_run_date if current_run_date in archive_dates else archive_dates[-1]
-            selected_archive_date = st.session_state.get(archive_picker_key)
-            if not isinstance(selected_archive_date, date) or selected_archive_date not in archive_dates:
-                st.session_state[archive_picker_key] = default_archive_date
-
-            selected_archive_date = st.selectbox(
-                "Saved workdays",
-                options=archive_dates,
-                key=archive_picker_key,
-                format_func=lambda d: f"{fmt_long_date(d)} ({d.isoformat()})",
-            )
-
-            if st.button("Open archived day", use_container_width=True, key="sup_open_archive_day_btn"):
-                target_date = selected_archive_date if isinstance(selected_archive_date, date) else default_archive_date
-                apply_run_config(target_date, [target_date + timedelta(days=1)])
-                st.session_state.active_screen = "UNLOAD"
-                _mark_and_save()
-                st.success(f"Opened archived day {target_date.isoformat()}.")
-                st.rerun()
-        else:
-            st.caption("No saved state history files found yet.")
 
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
         sup_dust_button_label = "Edit Dust Garments" if sup_dust_clothes_set_today else "Set Dust Clothes"
         if st.button(sup_dust_button_label, use_container_width=True, key="sup_open_dust_clothes_dialog"):
             st.session_state["sup_dust_clothes_dialog_open"] = True
             st.rerun()
-
-        if st.session_state.get("sup_shift_handoff_dialog_open"):
-            @st.dialog("Shift Handoff")
-            def _render_sup_shift_handoff_dialog():
-                def _load_day_hint_for_run_date(run_date_value: date) -> str:
-                    load_day_num = ship_day_number(run_date_value + timedelta(days=1))
-                    return f"Load Day {int(load_day_num)}" if load_day_num else "Load Day N/A"
-
-                if remaining_routes:
-                    preview_routes_dialog = ", ".join(f"#{int(t)}" for t in remaining_routes[:12])
-                    extra_routes_dialog = len(remaining_routes) - min(len(remaining_routes), 12)
-                    dialog_suffix = f", +{extra_routes_dialog} more" if extra_routes_dialog > 0 else ""
-                    st.warning(
-                        f"Still remaining on current day: {preview_routes_dialog}{dialog_suffix}"
-                    )
-                else:
-                    st.success("Current day has no remaining routes.")
-
-                next_run_date = current_run_date + timedelta(days=1)
-                if _is_mobile_client():
-                    st.caption(_load_day_hint_for_run_date(current_run_date))
-                    if st.button("Keep Current Day", use_container_width=True, key="sup_shift_handoff_keep_current"):
-                        st.session_state.rollover_prompt_snooze_until = time.time() + _get_rollover_snooze_seconds()
-                        st.session_state["sup_shift_handoff_dialog_open"] = False
-                        st.rerun()
-
-                    st.caption(_load_day_hint_for_run_date(recommended_run_date))
-                    if st.button(
-                        "Use Recommended",
-                        use_container_width=True,
-                        key="sup_shift_handoff_use_recommended",
-                        disabled=bool(recommended_run_date == current_run_date),
-                    ):
-                        _apply_shift_handoff_day(
-                            recommended_run_date,
-                            f"Workday switched to {recommended_run_date.isoformat()}.",
-                        )
-
-                    st.caption(_load_day_hint_for_run_date(next_run_date))
-                    if st.button(
-                        "Start Next Day",
-                        use_container_width=True,
-                        key="sup_shift_handoff_start_next_day",
-                    ):
-                        _apply_shift_handoff_day(
-                            next_run_date,
-                            f"Started next workday {next_run_date.isoformat()}.",
-                        )
-                else:
-                    info_current_col, info_recommended_col, info_next_col = st.columns([1.05, 1.15, 1.0], gap="small")
-                    with info_current_col:
-                        st.caption(_load_day_hint_for_run_date(current_run_date))
-                    with info_recommended_col:
-                        st.caption(_load_day_hint_for_run_date(recommended_run_date))
-                    with info_next_col:
-                        st.caption(_load_day_hint_for_run_date(next_run_date))
-
-                    stay_col, recommended_col, next_col = st.columns([1.05, 1.15, 1.0], gap="small")
-                    with stay_col:
-                        if st.button("Keep Current Day", use_container_width=True, key="sup_shift_handoff_keep_current"):
-                            st.session_state.rollover_prompt_snooze_until = time.time() + _get_rollover_snooze_seconds()
-                            st.session_state["sup_shift_handoff_dialog_open"] = False
-                            st.rerun()
-                    with recommended_col:
-                        if st.button(
-                            "Use Recommended",
-                            use_container_width=True,
-                            key="sup_shift_handoff_use_recommended",
-                            disabled=bool(recommended_run_date == current_run_date),
-                        ):
-                            _apply_shift_handoff_day(
-                                recommended_run_date,
-                                f"Workday switched to {recommended_run_date.isoformat()}.",
-                            )
-                    with next_col:
-                        if st.button(
-                            "Start Next Day",
-                            use_container_width=True,
-                            key="sup_shift_handoff_start_next_day",
-                        ):
-                            _apply_shift_handoff_day(
-                                next_run_date,
-                                f"Started next workday {next_run_date.isoformat()}.",
-                            )
-
-                if st.button("Close", use_container_width=True, key="sup_shift_handoff_close"):
-                    st.session_state["sup_shift_handoff_dialog_open"] = False
-                    st.rerun()
-
-            _render_sup_shift_handoff_dialog()
 
         if st.session_state.get("sup_dust_clothes_dialog_open"):
             @st.dialog("Set Dust Clothes")
@@ -15349,445 +15438,704 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
     st.markdown("#### Advanced and Reset")
     with st.expander("Development", expanded=False):
-        st.caption("Developer exports for troubleshooting and analysis.")
+        st.caption("Developer tools are condensed into nested sections and import dialogs.")
 
-        st.write("### Management controls")
-        warn_min = st.number_input(
-            "Auto-warning threshold (minutes)",
-            min_value=1,
-            max_value=240,
-            value=max(1, int(st.session_state.warn_seconds // 60)),
-            step=1,
-            key="sup_warn_minutes",
-        )
-        roll_c1, roll_c2 = st.columns(2)
-        with roll_c1:
-            rollover_prompt_hour = st.number_input(
-                "Rollover prompt hour (24h)",
-                min_value=0,
-                max_value=23,
-                value=int(_get_rollover_prompt_hour()),
-                step=1,
-                key="sup_rollover_prompt_hour",
+        if "mgmt_dev_backup_import_dialog_open" not in st.session_state:
+            st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+        if "mgmt_dev_direct_import_dialog_open" not in st.session_state:
+            st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+
+        with st.expander("1) Daily controls", expanded=False):
+            current_shorts_mode = st.session_state.get("shorts_mode")
+            if not current_shorts_mode:
+                current_shorts_mode = SHORTS_MODE_DISABLE if st.session_state.get("shorts_disabled") else SHORTS_MODE_BUTTONS
+            mode_index = SHORTS_MODE_OPTIONS.index(current_shorts_mode) if current_shorts_mode in SHORTS_MODE_OPTIONS else 0
+            shorts_mode = st.selectbox(
+                "Shortages entry method",
+                options=SHORTS_MODE_OPTIONS,
+                index=mode_index,
+                key="sup_shorts_mode",
             )
-        with roll_c2:
-            rollover_snooze_minutes = st.number_input(
-                "Rollover snooze (minutes)",
-                min_value=1,
-                max_value=240,
-                value=int(_get_rollover_snooze_minutes()),
-                step=1,
-                key="sup_rollover_snooze_minutes",
+            disable_batching = st.checkbox(
+                "Disable batching for today (handled manually)",
+                value=bool(st.session_state.get("batching_disabled")),
+                key="sup_disable_batching",
             )
 
-        current_shorts_mode = st.session_state.get("shorts_mode")
-        if not current_shorts_mode:
-            current_shorts_mode = SHORTS_MODE_DISABLE if st.session_state.get("shorts_disabled") else SHORTS_MODE_BUTTONS
-        mode_index = SHORTS_MODE_OPTIONS.index(current_shorts_mode) if current_shorts_mode in SHORTS_MODE_OPTIONS else 0
-        shorts_mode = st.selectbox(
-            "Shortages entry method",
-            options=SHORTS_MODE_OPTIONS,
-            index=mode_index,
-            key="sup_shorts_mode",
-        )
-        disable_batching = st.checkbox(
-            "Disable batching for today (handled manually)",
-            value=bool(st.session_state.get("batching_disabled")),
-            key="sup_disable_batching",
-        )
+            with st.expander("Off schedule (Day 1-5)", expanded=False):
+                st.markdown("""
+                **Day Mapping:**
+                - Day 1 = Monday
+                - Day 2 = Tuesday
+                - Day 3 = Wednesday
+                - Day 4 = Thursday
+                - Day 5 = Friday
+                """)
+                sched_day = st.selectbox("Schedule day", options=[1, 2, 3, 4, 5], key="sup_sched_day")
+                current_sched = st.session_state.off_schedule.get(int(sched_day), []) if st.session_state.off_schedule else []
+                if st.session_state.get("sup_sched_day_last") != sched_day:
+                    st.session_state["sup_sched_pick"] = [int(x) for x in current_sched] if current_sched else []
+                    st.session_state["sup_sched_day_last"] = sched_day
+                sched_pick = st.multiselect(
+                    "Trucks scheduled Off",
+                    options=FLEET,
+                    default=[int(x) for x in current_sched] if current_sched else [],
+                    key="sup_sched_pick",
+                )
 
-        with st.expander("Off schedule (Day 1-5)", expanded=False):
-            st.markdown("""
-            **Day Mapping:**  
-            - Day 1 = Monday  
-            - Day 2 = Tuesday  
-            - Day 3 = Wednesday  
-            - Day 4 = Thursday  
-            - Day 5 = Friday
-            """)
-            sched_day = st.selectbox("Schedule day", options=[1, 2, 3, 4, 5], key="sup_sched_day")
-            current_sched = st.session_state.off_schedule.get(int(sched_day), []) if st.session_state.off_schedule else []
-            if st.session_state.get("sup_sched_day_last") != sched_day:
-                st.session_state["sup_sched_pick"] = [int(x) for x in current_sched] if current_sched else []
-                st.session_state["sup_sched_day_last"] = sched_day
-            sched_pick = st.multiselect(
-                "Trucks scheduled Off",
-                options=FLEET,
-                default=[int(x) for x in current_sched] if current_sched else [],
-                key="sup_sched_pick",
-            )
+            with st.expander("Archive calendar", expanded=False):
+                st.caption("Choose a saved history date to open that archived workday snapshot.")
 
-        if st.button("Apply management settings", use_container_width=True, key="sup_apply_management_settings_dev"):
-            if "sup_sched_day" in st.session_state:
-                sd = int(st.session_state.get("sup_sched_day"))
-                pick = st.session_state.get("sup_sched_pick") or []
-                st.session_state.off_schedule[sd] = sorted({int(x) for x in pick})
-            st.session_state.warn_seconds = int(warn_min) * 60
-            st.session_state.rollover_prompt_hour = int(rollover_prompt_hour)
-            st.session_state.rollover_prompt_snooze_minutes = int(rollover_snooze_minutes)
-            st.session_state.shorts_mode = shorts_mode
-            st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
-            st.session_state.batching_disabled = bool(disable_batching)
-            apply_run_config(run_date, ship_dates)
-            if not _holiday_mode_active():
-                apply_off_schedule(_previous_ship_day_num(_current_ship_day_num()))
-            normalize_states()
-            _mark_and_save()
-            st.success("Management settings saved.")
-            st.rerun()
+                archive_dates = _available_state_history_run_dates()
+                archive_picker_key = "sup_archive_run_date_pick"
+                if archive_dates:
+                    default_archive_date = run_date if run_date in archive_dates else archive_dates[-1]
+                    selected_archive_date = st.session_state.get(archive_picker_key)
+                    if not isinstance(selected_archive_date, date) or selected_archive_date not in archive_dates:
+                        st.session_state[archive_picker_key] = default_archive_date
 
-        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+                    selected_archive_date = st.selectbox(
+                        "Saved workdays",
+                        options=archive_dates,
+                        key=archive_picker_key,
+                        format_func=lambda d: f"{fmt_long_date(d)} ({d.isoformat()})",
+                    )
 
-        st.write("### Pace card testing")
-        st.caption("Override average per truck used by Mini Pace, Historical Pace, and Load Pace cards.")
+                    if st.button("Open archived day", use_container_width=True, key="sup_open_archive_day_btn"):
+                        target_date = selected_archive_date if isinstance(selected_archive_date, date) else default_archive_date
+                        apply_run_config(target_date, [target_date + timedelta(days=1)])
+                        st.session_state.active_screen = "UNLOAD"
+                        _mark_and_save()
+                        st.success(f"Opened archived day {target_date.isoformat()}.")
+                        st.rerun()
+                else:
+                    st.caption("No saved state history files found yet.")
 
-        ui_override_enabled_key = "mgmt_dev_pace_avg_override_enabled"
-        ui_override_seconds_key = "mgmt_dev_pace_avg_override_seconds"
-        override_enabled_pending_key = "mgmt_dev_pace_avg_override_enabled_pending"
-
-        persisted_override_enabled = _to_bool(st.session_state.get("pace_avg_override_enabled"), False)
-        try:
-            persisted_override_seconds = int(
-                st.session_state.get("pace_avg_override_seconds") or PACE_OVERRIDE_DEFAULT_SECONDS
-            )
-        except Exception:
-            persisted_override_seconds = PACE_OVERRIDE_DEFAULT_SECONDS
-        persisted_override_seconds = max(60, min(3600, persisted_override_seconds))
-
-        pending_override_enabled = st.session_state.pop(override_enabled_pending_key, None)
-        if pending_override_enabled is not None:
-            st.session_state[ui_override_enabled_key] = bool(pending_override_enabled)
-
-        if ui_override_enabled_key not in st.session_state:
-            st.session_state[ui_override_enabled_key] = bool(persisted_override_enabled)
-        if ui_override_seconds_key not in st.session_state:
-            st.session_state[ui_override_seconds_key] = int(persisted_override_seconds)
-
-        override_enabled = st.checkbox(
-            "Use manual average per truck",
-            key=ui_override_enabled_key,
-            help="When enabled, pace cards use the manual seconds value instead of historical averages.",
-        )
-        override_seconds = int(
-            st.number_input(
-                "Manual average per truck (seconds)",
-                min_value=60,
-                max_value=3600,
-                step=5,
-                key=ui_override_seconds_key,
-            )
-        )
-        normalized_override_seconds = max(60, min(3600, int(override_seconds)))
-        auto_enable_from_value_change = (
-            int(normalized_override_seconds) != int(persisted_override_seconds)
-            and not bool(override_enabled)
-        )
-        effective_override_enabled = bool(override_enabled) or auto_enable_from_value_change
-        if auto_enable_from_value_change:
-            st.session_state[override_enabled_pending_key] = True
-
-        st.caption(
-            f"Current pace average input: {seconds_to_mmss(normalized_override_seconds)} "
-            f"({'Manual Override' if effective_override_enabled else 'Historical Average'})"
-        )
-        if effective_override_enabled:
-            if st.button("Disable manual override", key="mgmt_dev_disable_pace_override"):
-                st.session_state[override_enabled_pending_key] = False
-                st.session_state["pace_avg_override_enabled"] = False
+            if st.button("Apply management settings", use_container_width=True, key="sup_apply_management_settings_dev"):
+                if "sup_sched_day" in st.session_state:
+                    sd = int(st.session_state.get("sup_sched_day"))
+                    pick = st.session_state.get("sup_sched_pick") or []
+                    st.session_state.off_schedule[sd] = sorted({int(x) for x in pick})
+                st.session_state.shorts_mode = shorts_mode
+                st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
+                st.session_state.batching_disabled = bool(disable_batching)
+                apply_run_config(run_date, ship_dates)
+                if not _holiday_mode_active():
+                    apply_off_schedule(_previous_ship_day_num(_current_ship_day_num()))
+                normalize_states()
                 _mark_and_save()
+                st.success("Management settings saved.")
                 st.rerun()
 
-        if (
-            bool(effective_override_enabled) != bool(persisted_override_enabled)
-            or int(normalized_override_seconds) != int(persisted_override_seconds)
-        ):
-            st.session_state["pace_avg_override_enabled"] = bool(effective_override_enabled)
-            st.session_state["pace_avg_override_seconds"] = int(normalized_override_seconds)
-            _mark_and_save()
-            st.rerun()
+        with st.expander("2) Pace controls", expanded=False):
+            st.caption("Manual override, loader scaling, and conservative buffers are grouped below.")
 
-        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
-        st.write("### Pace buffer tuning")
-        st.caption("Tune conservative leeway for pace cards. Applied buffer = max(Base, Remaining x Per-truck, Baseline x Percent).")
+            with st.expander("Manual pace average", expanded=False):
+                st.caption("Override average per truck used by Mini Pace, Historical Pace, and Load Pace cards.")
 
-        ui_base_key = "mgmt_dev_pace_buffer_base_seconds"
-        ui_per_truck_key = "mgmt_dev_pace_buffer_per_truck_seconds"
-        ui_percent_key = "mgmt_dev_pace_buffer_percent"
-        reset_pace_buffers_pending_key = "mgmt_dev_reset_pace_buffers_pending"
+                ui_override_enabled_key = "mgmt_dev_pace_avg_override_enabled"
+                ui_override_seconds_key = "mgmt_dev_pace_avg_override_seconds"
+                override_enabled_pending_key = "mgmt_dev_pace_avg_override_enabled_pending"
 
-        if st.session_state.pop(reset_pace_buffers_pending_key, False):
-            st.session_state["pace_buffer_base_seconds"] = int(PACE_ESTIMATE_BASE_BUFFER_SECONDS)
-            st.session_state["pace_buffer_per_truck_seconds"] = int(PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
-            st.session_state["pace_buffer_percent"] = float(PACE_ESTIMATE_PERCENT_BUFFER)
-            st.session_state[ui_base_key] = int(PACE_ESTIMATE_BASE_BUFFER_SECONDS)
-            st.session_state[ui_per_truck_key] = int(PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
-            st.session_state[ui_percent_key] = float(PACE_ESTIMATE_PERCENT_BUFFER * 100.0)
-            _mark_and_save()
+                persisted_override_enabled = _to_bool(st.session_state.get("pace_avg_override_enabled"), False)
+                try:
+                    persisted_override_seconds = int(
+                        st.session_state.get("pace_avg_override_seconds") or PACE_OVERRIDE_DEFAULT_SECONDS
+                    )
+                except Exception:
+                    persisted_override_seconds = PACE_OVERRIDE_DEFAULT_SECONDS
+                persisted_override_seconds = max(60, min(3600, persisted_override_seconds))
 
-        persisted_base_seconds = _normalize_pace_buffer_base_seconds(
-            st.session_state.get("pace_buffer_base_seconds", PACE_ESTIMATE_BASE_BUFFER_SECONDS)
-        )
-        persisted_per_truck_seconds = _normalize_pace_buffer_per_truck_seconds(
-            st.session_state.get("pace_buffer_per_truck_seconds", PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
-        )
-        persisted_percent_ratio = _normalize_pace_buffer_percent(
-            st.session_state.get("pace_buffer_percent", PACE_ESTIMATE_PERCENT_BUFFER)
-        )
-        persisted_percent_value = round(persisted_percent_ratio * 100.0, 2)
+                pending_override_enabled = st.session_state.pop(override_enabled_pending_key, None)
+                if pending_override_enabled is not None:
+                    st.session_state[ui_override_enabled_key] = bool(pending_override_enabled)
 
-        if ui_base_key not in st.session_state:
-            st.session_state[ui_base_key] = int(persisted_base_seconds)
-        if ui_per_truck_key not in st.session_state:
-            st.session_state[ui_per_truck_key] = int(persisted_per_truck_seconds)
-        if ui_percent_key not in st.session_state:
-            st.session_state[ui_percent_key] = float(persisted_percent_value)
+                if ui_override_enabled_key not in st.session_state:
+                    st.session_state[ui_override_enabled_key] = bool(persisted_override_enabled)
+                if ui_override_seconds_key not in st.session_state:
+                    st.session_state[ui_override_seconds_key] = int(persisted_override_seconds)
 
-        tuned_base_seconds = int(
-            st.slider(
-                "Base buffer (seconds)",
-                min_value=0,
-                max_value=1800,
-                step=15,
-                key=ui_base_key,
-            )
-        )
-        tuned_per_truck_seconds = int(
-            st.slider(
-                "Per-truck buffer (seconds)",
-                min_value=0,
-                max_value=180,
-                step=5,
-                key=ui_per_truck_key,
-            )
-        )
-        tuned_percent_value = float(
-            st.slider(
-                "Percent buffer (%)",
-                min_value=0.0,
-                max_value=40.0,
-                step=0.5,
-                key=ui_percent_key,
-            )
-        )
+                override_enabled = st.checkbox(
+                    "Use manual average per truck",
+                    key=ui_override_enabled_key,
+                    help="When enabled, pace cards use the manual seconds value instead of historical averages.",
+                )
+                override_seconds = int(
+                    st.number_input(
+                        "Manual average per truck (seconds)",
+                        min_value=60,
+                        max_value=3600,
+                        step=5,
+                        key=ui_override_seconds_key,
+                    )
+                )
+                normalized_override_seconds = max(60, min(3600, int(override_seconds)))
+                auto_enable_from_value_change = (
+                    int(normalized_override_seconds) != int(persisted_override_seconds)
+                    and not bool(override_enabled)
+                )
+                effective_override_enabled = bool(override_enabled) or auto_enable_from_value_change
+                if auto_enable_from_value_change:
+                    st.session_state[override_enabled_pending_key] = True
 
-        tuned_base_seconds = _normalize_pace_buffer_base_seconds(tuned_base_seconds)
-        tuned_per_truck_seconds = _normalize_pace_buffer_per_truck_seconds(tuned_per_truck_seconds)
-        tuned_percent_ratio = _normalize_pace_buffer_percent(tuned_percent_value / 100.0)
+                st.caption(
+                    f"Current pace average input: {seconds_to_mmss(normalized_override_seconds)} "
+                    f"({'Manual Override' if effective_override_enabled else 'Historical Average'})"
+                )
+                if effective_override_enabled:
+                    if st.button("Disable manual override", key="mgmt_dev_disable_pace_override"):
+                        st.session_state[override_enabled_pending_key] = False
+                        st.session_state["pace_avg_override_enabled"] = False
+                        _mark_and_save()
+                        st.rerun()
 
-        st.caption(
-            f"Current tuning: Base {seconds_to_mmss(tuned_base_seconds)} • "
-            f"Per-truck {seconds_to_mmss(tuned_per_truck_seconds)} • "
-            f"Percent {tuned_percent_ratio * 100.0:.1f}%"
-        )
+                if (
+                    bool(effective_override_enabled) != bool(persisted_override_enabled)
+                    or int(normalized_override_seconds) != int(persisted_override_seconds)
+                ):
+                    st.session_state["pace_avg_override_enabled"] = bool(effective_override_enabled)
+                    st.session_state["pace_avg_override_seconds"] = int(normalized_override_seconds)
+                    _mark_and_save()
+                    st.rerun()
 
-        c_reset, _ = st.columns([1, 3])
-        with c_reset:
-            if st.button("Reset buffers", key="mgmt_dev_reset_pace_buffers", use_container_width=True):
-                st.session_state[reset_pace_buffers_pending_key] = True
-                st.rerun()
+            with st.expander("Loader scaling", expanded=False):
+                st.caption(
+                    "Scale pace estimates by staffing. Adjusted avg per truck = Base avg x (Baseline loaders / Active loaders)."
+                )
 
-        if (
-            int(tuned_base_seconds) != int(persisted_base_seconds)
-            or int(tuned_per_truck_seconds) != int(persisted_per_truck_seconds)
-            or abs(float(tuned_percent_ratio) - float(persisted_percent_ratio)) >= 0.0001
-        ):
-            st.session_state["pace_buffer_base_seconds"] = int(tuned_base_seconds)
-            st.session_state["pace_buffer_per_truck_seconds"] = int(tuned_per_truck_seconds)
-            st.session_state["pace_buffer_percent"] = float(round(tuned_percent_ratio, 4))
-            _mark_and_save()
-            st.rerun()
+                ui_loader_active_key = "mgmt_dev_pace_loader_active_count"
+                ui_loader_baseline_key = "mgmt_dev_pace_loader_baseline_count"
 
-        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+                persisted_loader_baseline = _normalize_pace_loader_count(
+                    st.session_state.get("pace_loader_baseline_count", PACE_LOADER_BASELINE_DEFAULT_COUNT)
+                )
+                persisted_loader_active = _normalize_pace_loader_count(
+                    st.session_state.get("pace_loader_active_count", persisted_loader_baseline)
+                )
 
-        durations_download_bytes = b"[]\n"
-        durations_path = _durations_path()
-        if os.path.exists(durations_path):
-            try:
-                with open(durations_path, "rb") as f:
-                    durations_download_bytes = f.read()
-            except Exception:
+                if ui_loader_baseline_key not in st.session_state:
+                    st.session_state[ui_loader_baseline_key] = int(persisted_loader_baseline)
+                if ui_loader_active_key not in st.session_state:
+                    st.session_state[ui_loader_active_key] = int(persisted_loader_active)
+
+                loader_c1, loader_c2 = st.columns(2)
+                with loader_c1:
+                    tuned_loader_active = int(
+                        st.number_input(
+                            "Active loaders on shift",
+                            min_value=1,
+                            max_value=12,
+                            step=1,
+                            key=ui_loader_active_key,
+                        )
+                    )
+                with loader_c2:
+                    tuned_loader_baseline = int(
+                        st.number_input(
+                            "Baseline loaders in pace history",
+                            min_value=1,
+                            max_value=12,
+                            step=1,
+                            key=ui_loader_baseline_key,
+                        )
+                    )
+
+                tuned_loader_active = _normalize_pace_loader_count(tuned_loader_active)
+                tuned_loader_baseline = _normalize_pace_loader_count(tuned_loader_baseline)
+                tuned_loader_multiplier = float(tuned_loader_baseline) / float(tuned_loader_active)
+
+                st.caption(
+                    f"Current multiplier: {tuned_loader_baseline}/{tuned_loader_active} = x{tuned_loader_multiplier:.2f} "
+                    f"({_pace_loader_multiplier_caption(tuned_loader_multiplier)})."
+                )
+
+                if (
+                    int(tuned_loader_active) != int(persisted_loader_active)
+                    or int(tuned_loader_baseline) != int(persisted_loader_baseline)
+                ):
+                    st.session_state["pace_loader_active_count"] = int(tuned_loader_active)
+                    st.session_state["pace_loader_baseline_count"] = int(tuned_loader_baseline)
+                    _mark_and_save()
+                    st.rerun()
+
+            with st.expander("Conservative buffer", expanded=False):
+                st.caption("Tune conservative leeway for pace cards. Applied buffer = max(Base, Remaining x Per-truck, Baseline x Percent).")
+
+                ui_base_key = "mgmt_dev_pace_buffer_base_seconds"
+                ui_per_truck_key = "mgmt_dev_pace_buffer_per_truck_seconds"
+                ui_percent_key = "mgmt_dev_pace_buffer_percent"
+                reset_pace_buffers_pending_key = "mgmt_dev_reset_pace_buffers_pending"
+
+                if st.session_state.pop(reset_pace_buffers_pending_key, False):
+                    st.session_state["pace_buffer_base_seconds"] = int(PACE_ESTIMATE_BASE_BUFFER_SECONDS)
+                    st.session_state["pace_buffer_per_truck_seconds"] = int(PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
+                    st.session_state["pace_buffer_percent"] = float(PACE_ESTIMATE_PERCENT_BUFFER)
+                    st.session_state[ui_base_key] = int(PACE_ESTIMATE_BASE_BUFFER_SECONDS)
+                    st.session_state[ui_per_truck_key] = int(PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
+                    st.session_state[ui_percent_key] = float(PACE_ESTIMATE_PERCENT_BUFFER * 100.0)
+                    _mark_and_save()
+
+                persisted_base_seconds = _normalize_pace_buffer_base_seconds(
+                    st.session_state.get("pace_buffer_base_seconds", PACE_ESTIMATE_BASE_BUFFER_SECONDS)
+                )
+                persisted_per_truck_seconds = _normalize_pace_buffer_per_truck_seconds(
+                    st.session_state.get("pace_buffer_per_truck_seconds", PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS)
+                )
+                persisted_percent_ratio = _normalize_pace_buffer_percent(
+                    st.session_state.get("pace_buffer_percent", PACE_ESTIMATE_PERCENT_BUFFER)
+                )
+                persisted_percent_value = round(persisted_percent_ratio * 100.0, 2)
+
+                if ui_base_key not in st.session_state:
+                    st.session_state[ui_base_key] = int(persisted_base_seconds)
+                if ui_per_truck_key not in st.session_state:
+                    st.session_state[ui_per_truck_key] = int(persisted_per_truck_seconds)
+                if ui_percent_key not in st.session_state:
+                    st.session_state[ui_percent_key] = float(persisted_percent_value)
+
+                tuned_base_seconds = int(
+                    st.slider(
+                        "Base buffer (seconds)",
+                        min_value=0,
+                        max_value=1800,
+                        step=15,
+                        key=ui_base_key,
+                    )
+                )
+                tuned_per_truck_seconds = int(
+                    st.slider(
+                        "Per-truck buffer (seconds)",
+                        min_value=0,
+                        max_value=180,
+                        step=5,
+                        key=ui_per_truck_key,
+                    )
+                )
+                tuned_percent_value = float(
+                    st.slider(
+                        "Percent buffer (%)",
+                        min_value=0.0,
+                        max_value=40.0,
+                        step=0.5,
+                        key=ui_percent_key,
+                    )
+                )
+
+                tuned_base_seconds = _normalize_pace_buffer_base_seconds(tuned_base_seconds)
+                tuned_per_truck_seconds = _normalize_pace_buffer_per_truck_seconds(tuned_per_truck_seconds)
+                tuned_percent_ratio = _normalize_pace_buffer_percent(tuned_percent_value / 100.0)
+
+                st.caption(
+                    f"Current tuning: Base {seconds_to_mmss(tuned_base_seconds)} • "
+                    f"Per-truck {seconds_to_mmss(tuned_per_truck_seconds)} • "
+                    f"Percent {tuned_percent_ratio * 100.0:.1f}%"
+                )
+
+                c_reset, _ = st.columns([1, 3])
+                with c_reset:
+                    if st.button("Reset buffers", key="mgmt_dev_reset_pace_buffers", use_container_width=True):
+                        st.session_state[reset_pace_buffers_pending_key] = True
+                        st.rerun()
+
+                if (
+                    int(tuned_base_seconds) != int(persisted_base_seconds)
+                    or int(tuned_per_truck_seconds) != int(persisted_per_truck_seconds)
+                    or abs(float(tuned_percent_ratio) - float(persisted_percent_ratio)) >= 0.0001
+                ):
+                    st.session_state["pace_buffer_base_seconds"] = int(tuned_base_seconds)
+                    st.session_state["pace_buffer_per_truck_seconds"] = int(tuned_per_truck_seconds)
+                    st.session_state["pace_buffer_percent"] = float(round(tuned_percent_ratio, 4))
+                    _mark_and_save()
+                    st.rerun()
+
+        with st.expander("3) Export and import", expanded=False):
+            durations_download_bytes = b"[]\n"
+            durations_path = _durations_path()
+            if os.path.exists(durations_path):
+                try:
+                    with open(durations_path, "rb") as f:
+                        durations_download_bytes = f.read()
+                except Exception:
+                    durations_download_bytes = json.dumps(
+                        load_duration_history(),
+                        ensure_ascii=False,
+                        indent=2,
+                    ).encode("utf-8")
+            else:
                 durations_download_bytes = json.dumps(
                     load_duration_history(),
                     ensure_ascii=False,
                     indent=2,
                 ).encode("utf-8")
-        else:
-            durations_download_bytes = json.dumps(
-                load_duration_history(),
-                ensure_ascii=False,
-                indent=2,
-            ).encode("utf-8")
 
-        st.download_button(
-            "Download load_durations.json",
-            data=durations_download_bytes,
-            file_name="load_durations.json",
-            mime="application/json",
-            use_container_width=True,
-            key="mgmt_dev_download_load_durations",
-        )
-
-        current_history_key = _current_run_date_key() or date.today().isoformat()
-        current_history_path = _history_state_path(current_history_key)
-        state_history_download_bytes = None
-        state_history_source_caption = ""
-        if os.path.exists(current_history_path):
-            try:
-                with open(current_history_path, "rb") as f:
-                    state_history_download_bytes = f.read()
-                state_history_source_caption = "Source: archived current-day history file."
-            except Exception:
-                state_history_download_bytes = None
-
-        if state_history_download_bytes is None:
-            state_history_payload = _build_state_history_payload(current_history_key)
-            state_history_download_bytes = json.dumps(
-                state_history_payload,
-                ensure_ascii=False,
-                indent=2,
-            ).encode("utf-8")
-            state_history_source_caption = "Source: generated from current live state (no archived file found)."
-
-        st.caption(state_history_source_caption)
-        st.download_button(
-            "Download current-day state history JSON",
-            data=state_history_download_bytes,
-            file_name=f"state_{current_history_key}.json",
-            mime="application/json",
-            use_container_width=True,
-            key="mgmt_dev_download_state_history",
-        )
-
-        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
-        st.write("### One-file history backup")
-        st.caption("Recommended for app updates: export once, then import into the new app build.")
-
-        history_items: list[dict] = []
-        history_keys: set[str] = set()
-        history_dir = _history_dir_path()
-        history_file_names: list[str] = []
-        if os.path.isdir(history_dir):
-            try:
-                history_file_names = sorted(os.listdir(history_dir))
-            except Exception:
-                history_file_names = []
-
-        for history_file_name in history_file_names:
-            history_match = re.match(r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$", str(history_file_name).strip())
-            if not history_match:
-                continue
-
-            run_date_key = str(history_match.group(1))
-            history_path = os.path.join(history_dir, history_file_name)
-            try:
-                with open(history_path, "r", encoding="utf-8") as f:
-                    history_payload = json.load(f)
-            except Exception:
-                continue
-            if not isinstance(history_payload, dict):
-                continue
-
-            history_items.append(
-                {
-                    "run_date_key": run_date_key,
-                    "file_name": f"state_{run_date_key}.json",
-                    "payload": _build_state_history_payload(run_date_key, source_state=history_payload),
-                }
-            )
-            history_keys.add(run_date_key)
-
-        if current_history_key not in history_keys:
-            history_items.append(
-                {
-                    "run_date_key": current_history_key,
-                    "file_name": f"state_{current_history_key}.json",
-                    "payload": _build_state_history_payload(current_history_key),
-                }
-            )
-
-        history_items = sorted(history_items, key=lambda item: str(item.get("run_date_key") or ""))
-        durations_for_backup = load_duration_history()
-        history_backup_payload = {
-            "backup_type": "truckapp_history_backup",
-            "backup_version": 1,
-            "exported_at": datetime.now().isoformat(),
-            "app_version": _APP_VERSION,
-            "app_date": _APP_DATE,
-            "load_durations": durations_for_backup,
-            "state_history": history_items,
-        }
-        history_backup_bytes = json.dumps(
-            history_backup_payload,
-            ensure_ascii=False,
-            indent=2,
-        ).encode("utf-8")
-
-        st.caption(
-            f"Backup contents: {len(history_items)} state history file(s) + {len(durations_for_backup)} load duration row(s)."
-        )
-        st.download_button(
-            "Download history backup package",
-            data=history_backup_bytes,
-            file_name=f"truckapp_history_backup_{date.today().isoformat()}.json",
-            mime="application/json",
-            use_container_width=True,
-            key="mgmt_dev_download_history_backup_package",
-        )
-
-        backup_duration_import_mode = st.radio(
-            "Backup import mode for load_durations",
-            options=["Append", "Replace"],
-            horizontal=True,
-            key="mgmt_dev_backup_duration_import_mode",
-        )
-        backup_overwrite_history = st.checkbox(
-            "Backup import: overwrite matching state history dates",
-            value=False,
-            key="mgmt_dev_backup_overwrite_history",
-        )
-        uploaded_history_backup_package = st.file_uploader(
-            "Upload history backup package",
-            type=["json"],
-            key="mgmt_dev_upload_history_backup_package",
-        )
-        if st.button(
-            "Import history backup package",
-            use_container_width=True,
-            key="mgmt_dev_import_history_backup_package_btn",
-        ):
-            if uploaded_history_backup_package is None:
-                st.warning("Choose a history backup package JSON file first.")
-            else:
+            current_history_key = _current_run_date_key() or date.today().isoformat()
+            current_history_path = _history_state_path(current_history_key)
+            state_history_download_bytes = None
+            state_history_source_caption = ""
+            if os.path.exists(current_history_path):
                 try:
-                    package_raw = json.loads(uploaded_history_backup_package.getvalue().decode("utf-8"))
+                    with open(current_history_path, "rb") as f:
+                        state_history_download_bytes = f.read()
+                    state_history_source_caption = "Source: archived current-day history file."
                 except Exception:
-                    package_raw = None
+                    state_history_download_bytes = None
 
-                if not isinstance(package_raw, dict):
-                    st.error("Invalid backup package. Expected a JSON object.")
-                else:
-                    package_type = str(package_raw.get("backup_type") or "").strip().lower()
-                    if package_type != "truckapp_history_backup":
-                        st.error("Invalid backup package type. Expected truckapp_history_backup.")
+            if state_history_download_bytes is None:
+                state_history_payload = _build_state_history_payload(current_history_key)
+                state_history_download_bytes = json.dumps(
+                    state_history_payload,
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8")
+                state_history_source_caption = "Source: generated from current live state (no archived file found)."
+
+            st.write("#### Quick exports")
+            export_col_1, export_col_2 = st.columns(2)
+            with export_col_1:
+                st.download_button(
+                    "Download load_durations.json",
+                    data=durations_download_bytes,
+                    file_name="load_durations.json",
+                    mime="application/json",
+                    use_container_width=True,
+                    key="mgmt_dev_download_load_durations",
+                )
+            with export_col_2:
+                st.caption(state_history_source_caption)
+                st.download_button(
+                    "Download current-day state history JSON",
+                    data=state_history_download_bytes,
+                    file_name=f"state_{current_history_key}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                    key="mgmt_dev_download_state_history",
+                )
+
+            st.write("#### Backup package")
+            st.caption("Recommended for app updates: export once, then import into the new app build.")
+
+            history_items: list[dict] = []
+            history_keys: set[str] = set()
+            history_dir = _history_dir_path()
+            history_file_names: list[str] = []
+            if os.path.isdir(history_dir):
+                try:
+                    history_file_names = sorted(os.listdir(history_dir))
+                except Exception:
+                    history_file_names = []
+
+            for history_file_name in history_file_names:
+                history_match = re.match(r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$", str(history_file_name).strip())
+                if not history_match:
+                    continue
+
+                run_date_key = str(history_match.group(1))
+                history_path = os.path.join(history_dir, history_file_name)
+                try:
+                    with open(history_path, "r", encoding="utf-8") as f:
+                        history_payload = json.load(f)
+                except Exception:
+                    continue
+                if not isinstance(history_payload, dict):
+                    continue
+
+                history_items.append(
+                    {
+                        "run_date_key": run_date_key,
+                        "file_name": f"state_{run_date_key}.json",
+                        "payload": _build_state_history_payload(run_date_key, source_state=history_payload),
+                    }
+                )
+                history_keys.add(run_date_key)
+
+            if current_history_key not in history_keys:
+                history_items.append(
+                    {
+                        "run_date_key": current_history_key,
+                        "file_name": f"state_{current_history_key}.json",
+                        "payload": _build_state_history_payload(current_history_key),
+                    }
+                )
+
+            history_items = sorted(history_items, key=lambda item: str(item.get("run_date_key") or ""))
+            durations_for_backup = load_duration_history()
+            history_backup_payload = {
+                "backup_type": "truckapp_history_backup",
+                "backup_version": 1,
+                "exported_at": datetime.now().isoformat(),
+                "app_version": _APP_VERSION,
+                "app_date": _APP_DATE,
+                "load_durations": durations_for_backup,
+                "state_history": history_items,
+            }
+            history_backup_bytes = json.dumps(
+                history_backup_payload,
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+
+            st.caption(
+                f"Backup contents: {len(history_items)} state history file(s) + {len(durations_for_backup)} load duration row(s)."
+            )
+            st.download_button(
+                "Download history backup package",
+                data=history_backup_bytes,
+                file_name=f"truckapp_history_backup_{date.today().isoformat()}.json",
+                mime="application/json",
+                use_container_width=True,
+                key="mgmt_dev_download_history_backup_package",
+            )
+
+            st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+            st.write("#### Import tools")
+            st.caption("Open focused dialogs for import workflows.")
+            import_c1, import_c2 = st.columns(2)
+            with import_c1:
+                if st.button(
+                    "Open backup package import",
+                    key="mgmt_dev_open_backup_import_dialog",
+                    use_container_width=True,
+                ):
+                    st.session_state["mgmt_dev_backup_import_dialog_open"] = True
+                    st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+                    st.rerun()
+            with import_c2:
+                if st.button(
+                    "Open direct JSON imports",
+                    key="mgmt_dev_open_direct_import_dialog",
+                    use_container_width=True,
+                ):
+                    st.session_state["mgmt_dev_direct_import_dialog_open"] = True
+                    st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+                    st.rerun()
+
+        if st.session_state.get("mgmt_dev_backup_import_dialog_open"):
+            def _dismiss_mgmt_dev_backup_import_dialog():
+                st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+
+            @st.dialog("Import history backup package", width="large", on_dismiss=_dismiss_mgmt_dev_backup_import_dialog)
+            def _render_mgmt_dev_backup_import_dialog():
+                backup_duration_import_mode = st.radio(
+                    "Backup import mode for load_durations",
+                    options=["Append", "Replace"],
+                    horizontal=True,
+                    key="mgmt_dev_backup_duration_import_mode",
+                )
+                backup_overwrite_history = st.checkbox(
+                    "Backup import: overwrite matching state history dates",
+                    value=False,
+                    key="mgmt_dev_backup_overwrite_history",
+                )
+                uploaded_history_backup_package = st.file_uploader(
+                    "Upload history backup package",
+                    type=["json"],
+                    key="mgmt_dev_upload_history_backup_package",
+                )
+
+                if st.button(
+                    "Import history backup package",
+                    use_container_width=True,
+                    key="mgmt_dev_import_history_backup_package_btn",
+                ):
+                    if uploaded_history_backup_package is None:
+                        st.warning("Choose a history backup package JSON file first.")
                     else:
-                        durations_raw = package_raw.get("load_durations")
-                        durations_imported_rows: list[dict] = []
-                        durations_skipped_rows = 0
-                        if isinstance(durations_raw, list):
-                            for item in durations_raw:
+                        try:
+                            package_raw = json.loads(uploaded_history_backup_package.getvalue().decode("utf-8"))
+                        except Exception:
+                            package_raw = None
+
+                        if not isinstance(package_raw, dict):
+                            st.error("Invalid backup package. Expected a JSON object.")
+                        else:
+                            package_type = str(package_raw.get("backup_type") or "").strip().lower()
+                            if package_type != "truckapp_history_backup":
+                                st.error("Invalid backup package type. Expected truckapp_history_backup.")
+                            else:
+                                durations_raw = package_raw.get("load_durations")
+                                durations_imported_rows: list[dict] = []
+                                durations_skipped_rows = 0
+                                if isinstance(durations_raw, list):
+                                    for item in durations_raw:
+                                        if not isinstance(item, dict):
+                                            durations_skipped_rows += 1
+                                            continue
+
+                                        try:
+                                            truck_num = int(item.get("truck"))
+                                            seconds_num = int(item.get("seconds"))
+                                        except Exception:
+                                            durations_skipped_rows += 1
+                                            continue
+
+                                        if seconds_num < 0:
+                                            durations_skipped_rows += 1
+                                            continue
+
+                                        try:
+                                            ts_num = float(item.get("ts", time.time()))
+                                        except Exception:
+                                            ts_num = float(time.time())
+
+                                        run_date_val = item.get("run_date")
+                                        run_date_text = str(run_date_val).strip() if run_date_val is not None else None
+                                        if run_date_text == "":
+                                            run_date_text = None
+
+                                        durations_imported_rows.append(
+                                            {
+                                                "ts": ts_num,
+                                                "run_date": run_date_text,
+                                                "truck": truck_num,
+                                                "seconds": seconds_num,
+                                            }
+                                        )
+
+                                state_history_raw = package_raw.get("state_history")
+                                state_imported_count = 0
+                                state_overwritten_count = 0
+                                state_skipped_existing_count = 0
+                                state_invalid_count = 0
+                                state_failed_count = 0
+                                if isinstance(state_history_raw, list):
+                                    for state_item in state_history_raw:
+                                        if not isinstance(state_item, dict):
+                                            state_invalid_count += 1
+                                            continue
+
+                                        run_date_key = str(state_item.get("run_date_key") or "").strip()
+                                        state_payload = state_item.get("payload")
+
+                                        if not run_date_key:
+                                            file_name = str(state_item.get("file_name") or "").strip()
+                                            name_match = re.match(
+                                                r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$",
+                                                os.path.basename(file_name),
+                                            )
+                                            run_date_key = name_match.group(1) if name_match else ""
+
+                                        if not run_date_key and isinstance(state_payload, dict):
+                                            for candidate in (
+                                                state_payload.get("history_run_date_key"),
+                                                state_payload.get("run_date_key"),
+                                                state_payload.get("run_date"),
+                                            ):
+                                                candidate_text = str(candidate or "").strip()
+                                                if not candidate_text:
+                                                    continue
+                                                try:
+                                                    run_date_key = date.fromisoformat(candidate_text).isoformat()
+                                                    break
+                                                except Exception:
+                                                    continue
+
+                                        if not run_date_key or not isinstance(state_payload, dict):
+                                            state_invalid_count += 1
+                                            continue
+
+                                        destination_path = _history_state_path(run_date_key)
+                                        destination_exists = os.path.exists(destination_path)
+                                        if destination_exists and not backup_overwrite_history:
+                                            state_skipped_existing_count += 1
+                                            continue
+
+                                        payload_to_save = _build_state_history_payload(
+                                            run_date_key,
+                                            source_state=state_payload,
+                                        )
+                                        try:
+                                            os.makedirs(_history_dir_path(), exist_ok=True)
+                                            with open(destination_path, "w", encoding="utf-8") as f:
+                                                json.dump(payload_to_save, f, ensure_ascii=False, indent=2)
+                                            state_imported_count += 1
+                                            if destination_exists:
+                                                state_overwritten_count += 1
+                                        except Exception:
+                                            state_failed_count += 1
+
+                                if durations_imported_rows:
+                                    durations_existing = (
+                                        load_duration_history()
+                                        if backup_duration_import_mode == "Append"
+                                        else []
+                                    )
+                                    durations_merged = (list(durations_existing) + durations_imported_rows)[-2000:]
+                                    try:
+                                        with open(_durations_path(), "w", encoding="utf-8") as f:
+                                            json.dump(durations_merged, f, ensure_ascii=False, indent=2)
+                                        _invalidate_load_duration_history_cache()
+                                    except Exception:
+                                        st.error("Failed to save load_durations during backup import.")
+
+                                log_action(
+                                    "Imported history backup package "
+                                    f"(durations={len(durations_imported_rows)}, durations_skipped={durations_skipped_rows}, "
+                                    f"state_imported={state_imported_count}, state_overwritten={state_overwritten_count}, "
+                                    f"state_skipped_existing={state_skipped_existing_count}, state_invalid={state_invalid_count}, "
+                                    f"state_failed={state_failed_count})."
+                                )
+                                st.success(
+                                    "Backup import complete: "
+                                    f"load_durations imported {len(durations_imported_rows)} (skipped {durations_skipped_rows}); "
+                                    f"state_history imported {state_imported_count}, overwritten {state_overwritten_count}, "
+                                    f"skipped existing {state_skipped_existing_count}, invalid {state_invalid_count}, failed {state_failed_count}."
+                                )
+
+                if st.button("Close", use_container_width=True, key="mgmt_dev_backup_import_dialog_close"):
+                    st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+                    st.rerun()
+
+            _render_mgmt_dev_backup_import_dialog()
+
+        if st.session_state.get("mgmt_dev_direct_import_dialog_open"):
+            def _dismiss_mgmt_dev_direct_import_dialog():
+                st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+
+            @st.dialog("Direct JSON imports", width="large", on_dismiss=_dismiss_mgmt_dev_direct_import_dialog)
+            def _render_mgmt_dev_direct_import_dialog():
+                import_mode = st.radio(
+                    "load_durations import mode",
+                    options=["Append", "Replace"],
+                    horizontal=True,
+                    key="mgmt_dev_import_durations_mode",
+                )
+                uploaded_durations = st.file_uploader(
+                    "Upload load_durations JSON",
+                    type=["json"],
+                    key="mgmt_dev_upload_load_durations",
+                )
+                if st.button(
+                    "Import load_durations JSON",
+                    use_container_width=True,
+                    key="mgmt_dev_import_load_durations_btn",
+                ):
+                    if uploaded_durations is None:
+                        st.warning("Choose a load_durations JSON file first.")
+                    else:
+                        imported_rows: list[dict] = []
+                        skipped_rows = 0
+                        try:
+                            uploaded_raw = json.loads(uploaded_durations.getvalue().decode("utf-8"))
+                        except Exception:
+                            uploaded_raw = None
+
+                        if not isinstance(uploaded_raw, list):
+                            st.error("Invalid load_durations JSON. Expected a JSON array of duration records.")
+                        else:
+                            for item in uploaded_raw:
                                 if not isinstance(item, dict):
-                                    durations_skipped_rows += 1
+                                    skipped_rows += 1
                                     continue
 
                                 try:
                                     truck_num = int(item.get("truck"))
                                     seconds_num = int(item.get("seconds"))
                                 except Exception:
-                                    durations_skipped_rows += 1
+                                    skipped_rows += 1
                                     continue
 
                                 if seconds_num < 0:
-                                    durations_skipped_rows += 1
+                                    skipped_rows += 1
                                     continue
 
                                 try:
@@ -15800,7 +16148,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                 if run_date_text == "":
                                     run_date_text = None
 
-                                durations_imported_rows.append(
+                                imported_rows.append(
                                     {
                                         "ts": ts_num,
                                         "run_date": run_date_text,
@@ -15809,278 +16157,127 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                     }
                                 )
 
-                        state_history_raw = package_raw.get("state_history")
-                        state_imported_count = 0
-                        state_overwritten_count = 0
-                        state_skipped_existing_count = 0
-                        state_invalid_count = 0
-                        state_failed_count = 0
-                        if isinstance(state_history_raw, list):
-                            for state_item in state_history_raw:
-                                if not isinstance(state_item, dict):
-                                    state_invalid_count += 1
-                                    continue
-
-                                run_date_key = str(state_item.get("run_date_key") or "").strip()
-                                state_payload = state_item.get("payload")
-
-                                if not run_date_key:
-                                    file_name = str(state_item.get("file_name") or "").strip()
-                                    name_match = re.match(
-                                        r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$",
-                                        os.path.basename(file_name),
-                                    )
-                                    run_date_key = name_match.group(1) if name_match else ""
-
-                                if not run_date_key and isinstance(state_payload, dict):
-                                    for candidate in (
-                                        state_payload.get("history_run_date_key"),
-                                        state_payload.get("run_date_key"),
-                                        state_payload.get("run_date"),
-                                    ):
-                                        candidate_text = str(candidate or "").strip()
-                                        if not candidate_text:
-                                            continue
-                                        try:
-                                            run_date_key = date.fromisoformat(candidate_text).isoformat()
-                                            break
-                                        except Exception:
-                                            continue
-
-                                if not run_date_key or not isinstance(state_payload, dict):
-                                    state_invalid_count += 1
-                                    continue
-
-                                destination_path = _history_state_path(run_date_key)
-                                destination_exists = os.path.exists(destination_path)
-                                if destination_exists and not backup_overwrite_history:
-                                    state_skipped_existing_count += 1
-                                    continue
-
-                                payload_to_save = _build_state_history_payload(
-                                    run_date_key,
-                                    source_state=state_payload,
-                                )
+                            if not imported_rows:
+                                st.error("No valid duration rows were found in the uploaded file.")
+                            else:
+                                existing_rows = load_duration_history() if import_mode == "Append" else []
+                                merged_rows = (list(existing_rows) + imported_rows)[-2000:]
                                 try:
-                                    os.makedirs(_history_dir_path(), exist_ok=True)
-                                    with open(destination_path, "w", encoding="utf-8") as f:
-                                        json.dump(payload_to_save, f, ensure_ascii=False, indent=2)
-                                    state_imported_count += 1
-                                    if destination_exists:
-                                        state_overwritten_count += 1
-                                except Exception:
-                                    state_failed_count += 1
+                                    with open(_durations_path(), "w", encoding="utf-8") as f:
+                                        json.dump(merged_rows, f, ensure_ascii=False, indent=2)
+                                    _invalidate_load_duration_history_cache()
+                                    log_action(
+                                        f"Imported load_durations JSON ({len(imported_rows)} rows, mode={import_mode.lower()})."
+                                    )
+                                    if skipped_rows > 0:
+                                        st.success(
+                                            f"Imported {len(imported_rows)} load_durations rows. Skipped {skipped_rows} invalid rows."
+                                        )
+                                    else:
+                                        st.success(f"Imported {len(imported_rows)} load_durations rows.")
+                                except Exception as e:
+                                    st.error(f"Failed to save load_durations JSON: {e}")
 
-                        if durations_imported_rows:
-                            durations_existing = (
-                                load_duration_history()
-                                if backup_duration_import_mode == "Append"
-                                else []
-                            )
-                            durations_merged = (list(durations_existing) + durations_imported_rows)[-2000:]
+                st.caption("Upload one or more state history JSON files (state_YYYY-MM-DD.json).")
+                uploaded_state_history_files = st.file_uploader(
+                    "Upload state history JSON files",
+                    type=["json"],
+                    accept_multiple_files=True,
+                    key="mgmt_dev_upload_state_history_files",
+                )
+                overwrite_history_files = st.checkbox(
+                    "Overwrite existing state history files with matching dates",
+                    value=False,
+                    key="mgmt_dev_import_history_overwrite",
+                )
+                if st.button(
+                    "Import state history JSON files",
+                    use_container_width=True,
+                    key="mgmt_dev_import_state_history_btn",
+                ):
+                    if not uploaded_state_history_files:
+                        st.warning("Choose at least one state history JSON file first.")
+                    else:
+                        imported_count = 0
+                        overwritten_count = 0
+                        skipped_existing_count = 0
+                        invalid_count = 0
+                        failed_count = 0
+
+                        for uploaded_file in uploaded_state_history_files:
                             try:
-                                with open(_durations_path(), "w", encoding="utf-8") as f:
-                                    json.dump(durations_merged, f, ensure_ascii=False, indent=2)
-                                _invalidate_load_duration_history_cache()
+                                payload_raw = json.loads(uploaded_file.getvalue().decode("utf-8"))
                             except Exception:
-                                st.error("Failed to save load_durations during backup import.")
+                                invalid_count += 1
+                                continue
+
+                            if not isinstance(payload_raw, dict):
+                                invalid_count += 1
+                                continue
+
+                            file_name = str(getattr(uploaded_file, "name", "") or "").strip()
+                            name_match = re.match(
+                                r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$",
+                                os.path.basename(file_name),
+                            )
+                            run_date_key = name_match.group(1) if name_match else None
+
+                            if not run_date_key:
+                                candidate_keys = [
+                                    payload_raw.get("history_run_date_key"),
+                                    payload_raw.get("run_date_key"),
+                                    payload_raw.get("run_date"),
+                                ]
+                                for candidate in candidate_keys:
+                                    candidate_text = str(candidate or "").strip()
+                                    if not candidate_text:
+                                        continue
+                                    try:
+                                        run_date_key = date.fromisoformat(candidate_text).isoformat()
+                                        break
+                                    except Exception:
+                                        continue
+
+                            if not run_date_key:
+                                invalid_count += 1
+                                continue
+
+                            destination_path = _history_state_path(run_date_key)
+                            destination_exists = os.path.exists(destination_path)
+                            if destination_exists and not overwrite_history_files:
+                                skipped_existing_count += 1
+                                continue
+
+                            payload_to_save = _build_state_history_payload(
+                                run_date_key,
+                                source_state=payload_raw,
+                            )
+                            try:
+                                os.makedirs(_history_dir_path(), exist_ok=True)
+                                with open(destination_path, "w", encoding="utf-8") as f:
+                                    json.dump(payload_to_save, f, ensure_ascii=False, indent=2)
+                                imported_count += 1
+                                if destination_exists:
+                                    overwritten_count += 1
+                            except Exception:
+                                failed_count += 1
 
                         log_action(
-                            "Imported history backup package "
-                            f"(durations={len(durations_imported_rows)}, durations_skipped={durations_skipped_rows}, "
-                            f"state_imported={state_imported_count}, state_overwritten={state_overwritten_count}, "
-                            f"state_skipped_existing={state_skipped_existing_count}, state_invalid={state_invalid_count}, "
-                            f"state_failed={state_failed_count})."
+                            "Imported state history JSON files "
+                            f"(imported={imported_count}, overwritten={overwritten_count}, "
+                            f"skipped_existing={skipped_existing_count}, invalid={invalid_count}, failed={failed_count})."
                         )
                         st.success(
-                            "Backup import complete: "
-                            f"load_durations imported {len(durations_imported_rows)} (skipped {durations_skipped_rows}); "
-                            f"state_history imported {state_imported_count}, overwritten {state_overwritten_count}, "
-                            f"skipped existing {state_skipped_existing_count}, invalid {state_invalid_count}, failed {state_failed_count}."
+                            "State history import complete: "
+                            f"imported {imported_count}, overwritten {overwritten_count}, "
+                            f"skipped existing {skipped_existing_count}, invalid {invalid_count}, failed {failed_count}."
                         )
 
-        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
-        st.write("### Import archived JSON")
+                if st.button("Close", use_container_width=True, key="mgmt_dev_direct_import_dialog_close"):
+                    st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+                    st.rerun()
 
-        import_mode = st.radio(
-            "load_durations import mode",
-            options=["Append", "Replace"],
-            horizontal=True,
-            key="mgmt_dev_import_durations_mode",
-        )
-        uploaded_durations = st.file_uploader(
-            "Upload load_durations JSON",
-            type=["json"],
-            key="mgmt_dev_upload_load_durations",
-        )
-        if st.button(
-            "Import load_durations JSON",
-            use_container_width=True,
-            key="mgmt_dev_import_load_durations_btn",
-        ):
-            if uploaded_durations is None:
-                st.warning("Choose a load_durations JSON file first.")
-            else:
-                imported_rows: list[dict] = []
-                skipped_rows = 0
-                try:
-                    uploaded_raw = json.loads(uploaded_durations.getvalue().decode("utf-8"))
-                except Exception:
-                    uploaded_raw = None
-
-                if not isinstance(uploaded_raw, list):
-                    st.error("Invalid load_durations JSON. Expected a JSON array of duration records.")
-                else:
-                    for item in uploaded_raw:
-                        if not isinstance(item, dict):
-                            skipped_rows += 1
-                            continue
-
-                        try:
-                            truck_num = int(item.get("truck"))
-                            seconds_num = int(item.get("seconds"))
-                        except Exception:
-                            skipped_rows += 1
-                            continue
-
-                        if seconds_num < 0:
-                            skipped_rows += 1
-                            continue
-
-                        try:
-                            ts_num = float(item.get("ts", time.time()))
-                        except Exception:
-                            ts_num = float(time.time())
-
-                        run_date_val = item.get("run_date")
-                        run_date_text = str(run_date_val).strip() if run_date_val is not None else None
-                        if run_date_text == "":
-                            run_date_text = None
-
-                        imported_rows.append(
-                            {
-                                "ts": ts_num,
-                                "run_date": run_date_text,
-                                "truck": truck_num,
-                                "seconds": seconds_num,
-                            }
-                        )
-
-                    if not imported_rows:
-                        st.error("No valid duration rows were found in the uploaded file.")
-                    else:
-                        existing_rows = load_duration_history() if import_mode == "Append" else []
-                        merged_rows = (list(existing_rows) + imported_rows)[-2000:]
-                        try:
-                            with open(_durations_path(), "w", encoding="utf-8") as f:
-                                json.dump(merged_rows, f, ensure_ascii=False, indent=2)
-                            _invalidate_load_duration_history_cache()
-                            log_action(
-                                f"Imported load_durations JSON ({len(imported_rows)} rows, mode={import_mode.lower()})."
-                            )
-                            if skipped_rows > 0:
-                                st.success(
-                                    f"Imported {len(imported_rows)} load_durations rows. Skipped {skipped_rows} invalid rows."
-                                )
-                            else:
-                                st.success(f"Imported {len(imported_rows)} load_durations rows.")
-                        except Exception as e:
-                            st.error(f"Failed to save load_durations JSON: {e}")
-
-        st.caption("Upload one or more state history JSON files (state_YYYY-MM-DD.json).")
-        uploaded_state_history_files = st.file_uploader(
-            "Upload state history JSON files",
-            type=["json"],
-            accept_multiple_files=True,
-            key="mgmt_dev_upload_state_history_files",
-        )
-        overwrite_history_files = st.checkbox(
-            "Overwrite existing state history files with matching dates",
-            value=False,
-            key="mgmt_dev_import_history_overwrite",
-        )
-        if st.button(
-            "Import state history JSON files",
-            use_container_width=True,
-            key="mgmt_dev_import_state_history_btn",
-        ):
-            if not uploaded_state_history_files:
-                st.warning("Choose at least one state history JSON file first.")
-            else:
-                imported_count = 0
-                overwritten_count = 0
-                skipped_existing_count = 0
-                invalid_count = 0
-                failed_count = 0
-
-                for uploaded_file in uploaded_state_history_files:
-                    try:
-                        payload_raw = json.loads(uploaded_file.getvalue().decode("utf-8"))
-                    except Exception:
-                        invalid_count += 1
-                        continue
-
-                    if not isinstance(payload_raw, dict):
-                        invalid_count += 1
-                        continue
-
-                    file_name = str(getattr(uploaded_file, "name", "") or "").strip()
-                    name_match = re.match(
-                        r"(?i)^state_(\d{4}-\d{2}-\d{2})\.json$",
-                        os.path.basename(file_name),
-                    )
-                    run_date_key = name_match.group(1) if name_match else None
-
-                    if not run_date_key:
-                        candidate_keys = [
-                            payload_raw.get("history_run_date_key"),
-                            payload_raw.get("run_date_key"),
-                            payload_raw.get("run_date"),
-                        ]
-                        for candidate in candidate_keys:
-                            candidate_text = str(candidate or "").strip()
-                            if not candidate_text:
-                                continue
-                            try:
-                                run_date_key = date.fromisoformat(candidate_text).isoformat()
-                                break
-                            except Exception:
-                                continue
-
-                    if not run_date_key:
-                        invalid_count += 1
-                        continue
-
-                    destination_path = _history_state_path(run_date_key)
-                    destination_exists = os.path.exists(destination_path)
-                    if destination_exists and not overwrite_history_files:
-                        skipped_existing_count += 1
-                        continue
-
-                    payload_to_save = _build_state_history_payload(
-                        run_date_key,
-                        source_state=payload_raw,
-                    )
-                    try:
-                        os.makedirs(_history_dir_path(), exist_ok=True)
-                        with open(destination_path, "w", encoding="utf-8") as f:
-                            json.dump(payload_to_save, f, ensure_ascii=False, indent=2)
-                        imported_count += 1
-                        if destination_exists:
-                            overwritten_count += 1
-                    except Exception:
-                        failed_count += 1
-
-                log_action(
-                    "Imported state history JSON files "
-                    f"(imported={imported_count}, overwritten={overwritten_count}, "
-                    f"skipped_existing={skipped_existing_count}, invalid={invalid_count}, failed={failed_count})."
-                )
-                st.success(
-                    "State history import complete: "
-                    f"imported {imported_count}, overwritten {overwritten_count}, "
-                    f"skipped existing {skipped_existing_count}, invalid {invalid_count}, failed {failed_count}."
-                )
+            _render_mgmt_dev_direct_import_dialog()
 
     st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
     with st.expander("Activity History", expanded=False):
@@ -17547,21 +17744,20 @@ elif st.session_state.active_screen == "LOAD":
                     st.rerun()
 
         st.divider()
-        pace_shift_view = st.selectbox(
-            "Pace Shift View",
-            options=LOAD_PACE_SHIFT_VIEW_OPTIONS,
-            key="load_pace_shift_view",
-            label_visibility="collapsed",
+        now_local = _now_local()
+        pace_shift_view, shift_name, shift_start, shift_end, shift_window_label, load_day_started = _resolve_pace_shift_selection(
+            select_key="load_pace_shift_view",
+            last_auto_key="load_pace_shift_last_auto",
+            now_local=now_local,
+            label="Pace Shift View",
+            use_sidebar=False,
         )
         avg_per_truck_seconds = _pace_avg_seconds_for_cards()
         pace_avg_source_name = _pace_avg_source_label()
+        pace_loader_baseline_count, pace_loader_active_count, pace_loader_multiplier = _pace_loader_settings()
+        pace_loader_effect_text = _pace_loader_multiplier_caption(pace_loader_multiplier)
+        pace_loader_line = _pace_loader_display_line()
         manual_pace_override_active = _manual_pace_avg_override_seconds() is not None
-
-        now_local = _now_local()
-        shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_day_shift_window_for_view(
-            pace_shift_view,
-            now_local,
-        )
         shift_tz = now_local.tzinfo
         shift_total_seconds = int((shift_end - shift_start).total_seconds())
         break_duration_seconds = 30 * 60
@@ -17647,7 +17843,6 @@ elif st.session_state.active_screen == "LOAD":
         pace_border_style = "1px solid rgba(148,163,184,0.35)"
         pace_header_value = "N/A"
         pace_body_html = ""
-        pace_shift_host_html = "<div class='load-pace-shift-host' data-load-pace-shift-host='1'></div>"
 
         if pace_calc_available:
             pace_used_avg_seconds = max(1, int(avg_per_truck_seconds))
@@ -17661,39 +17856,25 @@ elif st.session_state.active_screen == "LOAD":
                 pace_used_avg_seconds = int(pace_shift_floor_avg_seconds)
                 pace_used_avg_source = f"{pace_avg_source_name} + Shift Floor"
 
-            # For specific shift views, pace delta is based on full shift-hour capacity.
-            # Current view keeps live remaining-time behavior.
-            pace_basis_seconds = (
-                int(effective_shift_seconds)
-                if str(pace_shift_view or "Current").strip() != "Current"
-                else int(shift_time_left_seconds)
-            )
-
             needed_seconds = int(_conservative_needed_load_seconds(remaining_count, pace_used_avg_seconds) or 0)
-            pace_delta_seconds = int(pace_basis_seconds - needed_seconds)
+            # Compare projected finish time against the selected shift's end time.
+            # This keeps each shift view independent instead of sharing one basis.
+            estimate_base_dt = now_local
+            estimate_break_adjustment_seconds = break_adjustment_remaining_seconds
+            estimated_finish_dt = estimate_base_dt + timedelta(
+                seconds=max(0, needed_seconds + estimate_break_adjustment_seconds)
+            )
+            pace_delta_seconds = int((shift_end - estimated_finish_dt).total_seconds())
             ahead = pace_delta_seconds >= 0
             pace_sign = "+" if ahead else "-"
             pace_color = GREEN if ahead else RED
             pace_label = "Ahead" if ahead else "Behind"
             pace_value = seconds_to_mmss(abs(pace_delta_seconds))
-
-            if now_local > shift_end:
-                # For ended shifts, keep showing a retrospective estimate anchored
-                # to the selected shift start using the same average pace model.
-                estimate_base_dt = shift_start
-                estimate_break_adjustment_seconds = max(0, shift_total_seconds - effective_shift_seconds)
-            else:
-                estimate_base_dt = shift_start if now_local < shift_start else now_local
-                estimate_break_adjustment_seconds = break_adjustment_remaining_seconds
-            estimated_finish_dt = estimate_base_dt + timedelta(
-                seconds=max(0, needed_seconds + estimate_break_adjustment_seconds)
-            )
             estimated_finish_text = estimated_finish_dt.strftime("%I:%M %p").lstrip("0")
             pace_header_gradient = "linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26))"
             pace_border_style = "2px solid rgba(34,197,94,0.42)"
             pace_header_value = f"{pace_sign}{pace_value}"
             pace_body_html = (
-                f"{pace_shift_host_html}"
                 "<div style='padding:8px 12px 12px 12px; text-align:center;'>"
                 f"  <div style='font-size:16px; font-weight:800; opacity:0.84; margin-bottom:2px;'>{pace_label} by</div>"
                 f"  <div style='font-size:clamp(2.8rem, 8vw, 4.2rem); font-weight:900; line-height:1.0; color:{pace_color};'>{pace_sign}{pace_value}</div>"
@@ -17701,15 +17882,16 @@ elif st.session_state.active_screen == "LOAD":
                 f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Trucks this shift</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{scheduled_total}</div></div>"
                 f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Remaining</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{remaining_count}</div></div>"
                 f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Avg per truck ({html.escape(pace_used_avg_source)})</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(pace_used_avg_seconds)}</div></div>"
+                f"    <div style='min-width:150px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Loader impact</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{int(pace_loader_active_count)}/{int(pace_loader_baseline_count)}</div><div style='font-size:11px; opacity:0.72;'>{html.escape(pace_loader_effect_text)}</div></div>"
                 f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Work time left</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(work_time_left_display_seconds)}</div></div>"
                 f"    <div style='min-width:200px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45); text-align:left;'><div style='display:flex; align-items:center; justify-content:space-between; gap:10px;'><div style='font-size:12px; opacity:0.75;'>Avg. time between</div><div style='font-size:20px; font-weight:900; line-height:1.1;'>{avg_time_between_text}</div></div><div style='height:1px; margin:6px 0; background:rgba(148,163,184,0.26);'></div><div style='display:flex; align-items:center; justify-content:space-between; gap:10px;'><div style='font-size:12px; opacity:0.75;'>Total time between</div><div style='font-size:20px; font-weight:900; line-height:1.1;'>{total_time_between_text}</div></div></div>"
                 f"    <div style='min-width:150px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Estimated Finish</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{html.escape(estimated_finish_text)}</div></div>"
+                f"    <div style='min-width:260px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Loader settings</div><div style='font-size:16px; font-weight:800; line-height:1.2;'>{html.escape(pace_loader_line)}</div></div>"
                 "  </div>"
                 "</div>"
             )
         else:
             pace_body_html = (
-                f"{pace_shift_host_html}"
                 "<div style='padding:12px 12px 14px 12px; text-align:center; opacity:0.85;'>"
                 "  Need completed load-time history to calculate pace delta."
                 "</div>"
@@ -17722,7 +17904,7 @@ elif st.session_state.active_screen == "LOAD":
         st.markdown(
             (
                 "<style>"
-                ".st-key-load_pace_shift_view{margin:0 0 8px 0;}"
+                ".st-key-load_pace_shift_view{margin:0 !important;}"
                 ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
                 ".load-pace-label{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;text-align:left;cursor:pointer;user-select:none;}"
                 ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;}"
@@ -17730,12 +17912,12 @@ elif st.session_state.active_screen == "LOAD":
                 ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
                 ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
                 ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
-                ".load-pace-shift-host{display:flex;justify-content:flex-end;padding:8px 10px 0 10px;}"
-                ".load-pace-shift-host .st-key-load_pace_shift_view{width:min(240px,100%);margin:0 !important;}"
+                ".load-pace-shift-host{display:flex;align-items:center;}"
+                ".load-pace-shift-host .st-key-load_pace_shift_view{width:min(160px,100%);margin:0 !important;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view [data-testid='stSelectbox'] > div{margin-bottom:0 !important;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view [data-baseweb='select'] > div{min-height:34px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:10px !important;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
-                "@media (max-width: 700px){.load-pace-shift-host{padding:8px 8px 0 8px;}.load-pace-shift-host .st-key-load_pace_shift_view{width:100%;}}"
+                "@media (max-width: 700px){.load-pace-shift-host .st-key-load_pace_shift_view{width:min(132px,46vw);}}"
                 ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
                 ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
                 "</style>"
@@ -17743,6 +17925,7 @@ elif st.session_state.active_screen == "LOAD":
                 f"  <div class='load-pace-label' data-load-pace-header='1' role='button' tabindex='0' style='background:{pace_header_gradient};'>"
                 f"    <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
                 "    <span class='load-pace-head-right'>"
+                "      <span class='load-pace-shift-host' data-load-pace-shift-host='1'></span>"
                 f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
                 "      <span class='load-pace-chevron'>▾</span>"
                 "    </span>"
@@ -17767,6 +17950,13 @@ elif st.session_state.active_screen == "LOAD":
                     const shiftControl = root.querySelector('.st-key-load_pace_shift_view');
                     if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
                         shiftHost.appendChild(shiftControl);
+                    }
+                    if (shiftControl && !shiftControl.dataset.boundLoadPaceShiftStop) {
+                        const stopEvent = (event) => { event.stopPropagation(); };
+                        shiftControl.addEventListener('mousedown', stopEvent);
+                        shiftControl.addEventListener('click', stopEvent);
+                        shiftControl.addEventListener('keydown', stopEvent);
+                        shiftControl.dataset.boundLoadPaceShiftStop = '1';
                     }
 
                     const storage = (() => {

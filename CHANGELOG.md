@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.6.7 - 2026-03-18
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.6.7** with release date **20260318**.
+2. Removed the legacy **Current** pace shift option and standardized pace views to explicit **1st Shift / 2nd Shift / 3rd Shift** selection with live auto-default behavior.
+3. Updated Load Pace **Ahead/Behind** calculations to compare projected finish time against the selected shift end time so each shift view reports independently.
+4. Added a shared pace-shift selection resolver so pace cards auto-follow the live shift by default while preserving manual shift overrides.
+5. Integrated compact shift selectors directly into the header area of sidebar Mini Pace, In Progress Mini Pace, and Load Pace cards.
+
 ## v1.6.6 - 2026-03-17
 
 Ordered list of final changes included in this release:
@@ -11,6 +21,7 @@ Ordered list of final changes included in this release:
 5. Restyled the sidebar **Signed In** identity area into a clearer visual card with name and role presentation.
 6. Pinned compose image/version settings to **v1.6.6** in tracked deployment files to prevent stale launches from external `latest` or older env overrides.
 7. Updated GitHub Docker publish workflow to also push a versioned image tag (`vX.Y.Z`) from app metadata so compose releases pinned to `v1.6.6` can be deployed directly.
+8. Added configurable loader-based pace scaling (active vs baseline loaders) so staffing materially changes Mini Pace, In Progress pace, and Load Pace finish estimates.
 
 ## v1.6.5 - 2026-03-16
 

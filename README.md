@@ -2,15 +2,14 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.6.6**
+Current release: **v1.6.7**
 
-## Recent updates (v1.6.6)
+## Recent updates (v1.6.7)
 
-- Updated app release metadata to **v1.6.6** (`20260317`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
-- Hardened manual pace override migration so legacy `60`-second overrides convert once to the 10-minute default.
-- Fixed load-day rollover autopull so prior-day OFF trucks immediately return to **Unloaded** unless used for route or OOS coverage.
-- Added an archive-date picker under **Configure load day** that only lists dates with saved state-history files and opens the selected archive directly.
-- Restyled the sidebar **Signed In** section into a cleaner identity card.
+- Updated app release metadata to **v1.6.7** (`20260318`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Removed the legacy **Current** pace shift option and standardized shift views to **1st / 2nd / 3rd** across pace cards.
+- Updated Load Pace **Ahead/Behind** math to compare projected finish against the selected shift end, so each shift view reports independently.
+- Integrated compact shift selectors directly into the pace-card headers for Mini Pace and Load Pace while keeping auto-default to the live current shift.
 
 ## Prior updates (v1.5.0)
 
@@ -133,14 +132,14 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.6` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.7` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
-- The Portainer compose file is pinned to image tag `v1.6.6` to avoid stale `latest` pulls.
+- The Portainer compose file is pinned to image tag `v1.6.7` to avoid stale `latest` pulls.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 

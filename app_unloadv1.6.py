@@ -28,8 +28,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.6.7"
-_APP_DATE = "20260318"  
+_APP_VERSION = "1.6.8"
+_APP_DATE = "20260319"  
 
 
 def _emit_startup_version_banner_once():
@@ -128,11 +128,11 @@ UI_DOM_ENHANCEMENTS_ENABLED = False
 BUTTON_COLOR_STYLING_ENABLED = True
 TRUCK_BUTTON_DECORATIONS_ENABLED = True
 SIDEBAR_DECORATIONS_ENABLED = True
-MOBILE_GRID_ENHANCEMENTS_ENABLED = False
+MOBILE_GRID_ENHANCEMENTS_ENABLED = True
 DROPDOWN_LOCK_GUARD_ENABLED = False
 FORCE_POPSTATE_RELOAD_ENABLED = False
 BLANK_PAGE_WATCHDOG_ENABLED = True
-BLANK_PAGE_WATCHDOG_MAX_RELOADS = 2
+BLANK_PAGE_WATCHDOG_MAX_RELOADS = 5
 PACE_ESTIMATE_BASE_BUFFER_SECONDS = 3 * 60
 PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS = 25
 PACE_ESTIMATE_PERCENT_BUFFER = 0.08
@@ -158,6 +158,24 @@ SHORTS_MODE_EXCEL = "Excel Sheet (current)"
 SHORTS_MODE_BUTTONS = "Button Selection"
 SHORTS_MODE_DISABLE = "Disable (manual input)"
 SHORTS_MODE_OPTIONS = [SHORTS_MODE_BUTTONS, SHORTS_MODE_EXCEL, SHORTS_MODE_DISABLE]
+
+INPROG_LAYOUT_CURRENT_LEFT = "Current Left"
+INPROG_LAYOUT_CURRENT_RIGHT = "Current Right"
+INPROG_LAYOUT_ORIGINAL = "Original"
+INPROG_LAYOUT_OPTIONS = [
+    INPROG_LAYOUT_CURRENT_LEFT,
+    INPROG_LAYOUT_CURRENT_RIGHT,
+    INPROG_LAYOUT_ORIGINAL,
+]
+
+
+def _normalize_inprog_layout_style(value) -> str:
+    raw = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    if raw in {"current right", "right", "right current"}:
+        return INPROG_LAYOUT_CURRENT_RIGHT
+    if raw in {"original", "original right", "classic", "legacy"}:
+        return INPROG_LAYOUT_ORIGINAL
+    return INPROG_LAYOUT_CURRENT_LEFT
 
 SHORTS_BUTTON_MAP = {
     "3x10": ["Black", "Onyx", "Copper", "Indigo", "Blue", "Brown"],
@@ -1168,7 +1186,7 @@ def _render_guest_live_status_pace_card():
             ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view [data-baseweb='select'] > div{min-height:30px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:9px !important;}"
             ".mini-pace-shift-host .st-key-sidebar_mini_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
             "</style>"
-            "<div data-mini-pace-card='sidebar' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
+            "<div data-mini-pace-card='sidebar' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); color:#dbeafe; box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
             "<div style='display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
             "<div style='font-size:0.74rem; letter-spacing:0.1em; text-transform:uppercase; opacity:0.84; font-weight:900;'>Mini Pace</div>"
             "<div style='display:flex; align-items:center; gap:8px;'>"
@@ -1193,14 +1211,26 @@ def _render_guest_live_status_pace_card():
         (function(){
             try {
                 const root = window.parent.document;
-                const cards = root.querySelectorAll('[data-mini-pace-card="sidebar"]');
-                if (!cards || !cards.length) return;
-                const card = cards[cards.length - 1];
-                const shiftHost = card.querySelector('[data-mini-pace-shift-host="sidebar"]');
-                const shiftControl = root.querySelector('.st-key-sidebar_mini_pace_shift_view');
-                if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
-                    shiftHost.appendChild(shiftControl);
-                }
+                const hostWin = window.parent;
+                const moveShiftControl = () => {
+                    const cards = root.querySelectorAll('[data-mini-pace-card="sidebar"]');
+                    if (!cards || !cards.length) return false;
+                    const card = cards[cards.length - 1];
+                    const shiftHost = card.querySelector('[data-mini-pace-shift-host="sidebar"]');
+                    const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                    const shiftControls = (sidebar || root).querySelectorAll('.st-key-sidebar_mini_pace_shift_view');
+                    const shiftControl = shiftControls.length ? shiftControls[shiftControls.length - 1] : null;
+                    if (!shiftHost || !shiftControl) return false;
+                    if (shiftControl.parentElement !== shiftHost) {
+                        shiftHost.appendChild(shiftControl);
+                    }
+                    return shiftControl.parentElement === shiftHost;
+                };
+
+                if (moveShiftControl()) return;
+                [60, 140, 260, 420, 700, 1000].forEach((delay) => {
+                    hostWin.setTimeout(moveShiftControl, delay);
+                });
             } catch (e) {}
         })();
         </script>
@@ -1294,7 +1324,7 @@ def _render_inprog_mini_pace_card():
             ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view [data-baseweb='select'] > div{min-height:30px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:9px !important;}"
             ".mini-pace-shift-host .st-key-inprog_mini_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
             "</style>"
-            "<div data-mini-pace-card='inprog' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
+            "<div data-mini-pace-card='inprog' style='margin:8px 0 4px 0; padding:9px 11px; border-radius:12px; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.56); color:#dbeafe; box-shadow:0 8px 20px rgba(0,0,0,0.22);'>"
             "<div style='display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:2px;'>"
             "<div style='font-size:0.74rem; letter-spacing:0.1em; text-transform:uppercase; opacity:0.84; font-weight:900;'>Mini Pace</div>"
             "<div style='display:flex; align-items:center; gap:8px;'>"
@@ -1319,14 +1349,25 @@ def _render_inprog_mini_pace_card():
         (function(){
             try {
                 const root = window.parent.document;
-                const cards = root.querySelectorAll('[data-mini-pace-card="inprog"]');
-                if (!cards || !cards.length) return;
-                const card = cards[cards.length - 1];
-                const shiftHost = card.querySelector('[data-mini-pace-shift-host="inprog"]');
-                const shiftControl = root.querySelector('.st-key-inprog_mini_pace_shift_view');
-                if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
-                    shiftHost.appendChild(shiftControl);
-                }
+                const hostWin = window.parent;
+                const moveShiftControl = () => {
+                    const cards = root.querySelectorAll('[data-mini-pace-card="inprog"]');
+                    if (!cards || !cards.length) return false;
+                    const card = cards[cards.length - 1];
+                    const shiftHost = card.querySelector('[data-mini-pace-shift-host="inprog"]');
+                    const shiftControls = root.querySelectorAll('.st-key-inprog_mini_pace_shift_view');
+                    const shiftControl = shiftControls.length ? shiftControls[shiftControls.length - 1] : null;
+                    if (!shiftHost || !shiftControl) return false;
+                    if (shiftControl.parentElement !== shiftHost) {
+                        shiftHost.appendChild(shiftControl);
+                    }
+                    return shiftControl.parentElement === shiftHost;
+                };
+
+                if (moveShiftControl()) return;
+                [60, 140, 260, 420, 700, 1000].forEach((delay) => {
+                    hostWin.setTimeout(moveShiftControl, delay);
+                });
             } catch (e) {}
         })();
         </script>
@@ -1354,7 +1395,7 @@ def _render_sidebar_load_unload_progress_card():
 
     st.sidebar.markdown(
         (
-            "<div style='margin:8px 0 4px 0; border-radius:12px; overflow:hidden; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.62);'>"
+            "<div style='margin:8px 0 4px 0; border-radius:12px; overflow:hidden; border:1px solid rgba(59,130,246,0.44); background:rgba(15,23,42,0.62); color:#dbeafe;'>"
             "  <div style='display:flex; align-items:center; justify-content:center; padding:7px 9px; font-weight:900; font-size:0.75rem; letter-spacing:0.14em; text-transform:uppercase; "
             "      background:linear-gradient(90deg, rgba(59,130,246,0.28), rgba(16,185,129,0.25));'>"
             "    Load/Unload Progress"
@@ -2104,6 +2145,9 @@ def _write_state_file(path: str, data: dict):
 
 
 def save_state():
+    if bool(st.session_state.get("archive_view_mode")):
+        logging.debug("save_state() skipped: archive view mode is read-only")
+        return
     path = _state_path()
     _write_state_file(path, _serialize_state())
     try:
@@ -2155,6 +2199,7 @@ def _sync_next_up_from_state_file(force: bool = False):
         "pace_buffer_percent",
         "pace_loader_baseline_count",
         "pace_loader_active_count",
+        "inprog_layout_style",
     )
     changed = False
     for key in sync_keys:
@@ -2205,7 +2250,7 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
 
                 const MAX_RELOADS = {int(max_reload_count)};
                 const CHECK_MS = 1200;
-                const STALL_MS = 4500;
+                const STALL_MS = 3800;
                 const WINDOW_MS = 15 * 60 * 1000;
                 const KEY_TS = "truckappBlankWatchdogTs";
                 const KEY_COUNT = "truckappBlankWatchdogCount";
@@ -2236,6 +2281,49 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
                     }} catch (e) {{}}
                 }};
 
+                const isVisibleNode = (node, minWidth = 16, minHeight = 10) => {{
+                    try {{
+                        if (!node || typeof node.getBoundingClientRect !== "function") return false;
+                        const style = hostWin.getComputedStyle ? hostWin.getComputedStyle(node) : null;
+                        if (style) {{
+                            const opacity = Number(style.opacity);
+                            if (style.display === "none" || style.visibility === "hidden" || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
+                                return false;
+                            }}
+                        }}
+                        const rect = node.getBoundingClientRect();
+                        return rect.width >= minWidth && rect.height >= minHeight;
+                    }} catch (e) {{
+                        return false;
+                    }}
+                }};
+
+                const hasVisibleMainContent = (container) => {{
+                    if (!container) return false;
+                    const selectors = [
+                        '[data-testid="stButton"]',
+                        '[data-testid="stSelectbox"]',
+                        '[data-testid="stMultiSelect"]',
+                        '[data-testid="stTextInput"]',
+                        '[data-testid="stNumberInput"]',
+                        '[data-testid="stTextArea"]',
+                        '[data-testid="stTable"]',
+                        '[data-testid="stDataFrame"]',
+                        '[data-testid="stAlert"]',
+                        '[data-testid="stHeading"]',
+                        '[data-testid="stMarkdownContainer"]',
+                        'button',
+                        'input',
+                        'textarea',
+                        'table'
+                    ].join(', ');
+                    const nodes = Array.from(container.querySelectorAll(selectors));
+                    for (const node of nodes) {{
+                        if (isVisibleNode(node)) return true;
+                    }}
+                    return false;
+                }};
+
                 let blankSinceMs = 0;
 
                 const isRenderHealthy = () => {{
@@ -2264,17 +2352,12 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
                         typeof mainContainer.getBoundingClientRect === "function"
                             ? mainContainer.getBoundingClientRect()
                             : {{ width: 0, height: 0 }};
-                    const hasChildren = !!(mainContainer.children && mainContainer.children.length > 0);
-                    const hasVisibleContent = !!mainContainer.querySelector(
-                        '[data-testid="stVerticalBlock"], [data-testid="stMarkdownContainer"], [data-testid="stHeading"], button'
-                    );
-                    const textLen = String(mainContainer.textContent || "").replace(/\s+/g, "").length;
                     const hasArea = rect.width > 80 && rect.height > 60;
+                    const hasMeaningfulContent = hasVisibleMainContent(mainContainer);
 
-                    if (hasChildren || hasVisibleContent || textLen >= 16) {{
-                        return true;
-                    }}
-                    return false;
+                    if (!hasArea) return false;
+                    if (!hasMeaningfulContent) return false;
+                    return true;
                 }};
 
                 const showManualRecoveryHint = () => {{
@@ -2307,6 +2390,11 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
                         return;
                     }}
 
+                    try {{
+                        const overlayHost = root.getElementById('shop-notice-overlay-host');
+                        if (overlayHost) overlayHost.remove();
+                    }} catch (e) {{}}
+
                     if (!blankSinceMs) {{
                         blankSinceMs = nowMs();
                         return;
@@ -2319,6 +2407,11 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
                         showManualRecoveryHint();
                         return;
                     }}
+
+                    try {{
+                        const overlayHost = root.getElementById('shop-notice-overlay-host');
+                        if (overlayHost) overlayHost.remove();
+                    }} catch (e) {{}}
 
                     writeReloadState(state.count + 1);
                     try {{
@@ -3182,6 +3275,7 @@ def _restore_day_state_from_archive(archived_state: dict, run_date: date, ship_d
         "timezone_key",
         "ui_theme",
         "live_button_styling",
+        "inprog_layout_style",
         "warn_seconds",
         "shorts_mode",
         "shorts_disabled",
@@ -3241,7 +3335,7 @@ def apply_run_config(run_date: date, ship_dates: list[date]):
     ship_days_changed = old_ship_keys != new_ship_keys
     archived_state = None
 
-    if old_key and new_key and day_changed:
+    if old_key and new_key and day_changed and (not bool(st.session_state.get("archive_view_mode"))):
         archive_current_state(old_key)
 
     if day_changed and new_key:
@@ -3464,6 +3558,9 @@ defaults = {
     # live truck button styling (status colors + auto-fit text)
     "live_button_styling": True,
 
+    # in-progress page desktop layout style
+    "inprog_layout_style": INPROG_LAYOUT_CURRENT_LEFT,
+
     # sidebar status badge colors
     "status_badge_colors": dict(DEFAULT_STATUS_BADGE_COLORS),
 
@@ -3511,6 +3608,13 @@ for k, v in defaults.items():
         else:
             st.session_state[k] = v
 
+if "archive_view_mode" not in st.session_state:
+    st.session_state["archive_view_mode"] = False
+if "archive_view_date_key" not in st.session_state:
+    st.session_state["archive_view_date_key"] = ""
+if "archive_live_state_snapshot" not in st.session_state:
+    st.session_state["archive_live_state_snapshot"] = None
+
 if (
     int(loaded_override_migration_version) < int(PACE_OVERRIDE_MIGRATION_VERSION)
     and bool(st.session_state.get("pace_avg_override_enabled"))
@@ -3528,6 +3632,9 @@ st.session_state["pace_loader_baseline_count"] = _normalize_pace_loader_count(
 )
 st.session_state["pace_loader_active_count"] = _normalize_pace_loader_count(
     st.session_state.get("pace_loader_active_count", st.session_state.get("pace_loader_baseline_count", PACE_LOADER_ACTIVE_DEFAULT_COUNT))
+)
+st.session_state["inprog_layout_style"] = _normalize_inprog_layout_style(
+    st.session_state.get("inprog_layout_style")
 )
 
 if not st.session_state.get("_persistent_spares_seeded"):
@@ -3738,27 +3845,80 @@ else:
                     }
                     section[data-testid="stSidebar"] {
                         background-color: #0f172a;
+                        color: #e2e8f0 !important;
+                    }
+                    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+                    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] *,
+                    section[data-testid="stSidebar"] .stMarkdown,
+                    section[data-testid="stSidebar"] .stMarkdown *,
+                    section[data-testid="stSidebar"] .stText,
+                    section[data-testid="stSidebar"] .stText *,
+                    section[data-testid="stSidebar"] .stCaption,
+                    section[data-testid="stSidebar"] .stCaption *,
+                    section[data-testid="stSidebar"] .stSubheader,
+                    section[data-testid="stSidebar"] .stSubheader *,
+                    section[data-testid="stSidebar"] label,
+                    section[data-testid="stSidebar"] p,
+                    section[data-testid="stSidebar"] li,
+                    section[data-testid="stSidebar"] h1,
+                    section[data-testid="stSidebar"] h2,
+                    section[data-testid="stSidebar"] h3,
+                    section[data-testid="stSidebar"] h4,
+                    section[data-testid="stSidebar"] h5,
+                    section[data-testid="stSidebar"] h6,
+                    section[data-testid="stSidebar"] small,
+                    section[data-testid="stSidebar"] strong,
+                    section[data-testid="stSidebar"] em {
+                        color: #e2e8f0 !important;
+                        -webkit-text-fill-color: #e2e8f0 !important;
+                    }
+                    section[data-testid="stSidebar"] .stButton > button,
+                    section[data-testid="stSidebar"] .stButton > button * {
+                        color: #f8fafc !important;
+                        -webkit-text-fill-color: #f8fafc !important;
                     }
                     .stButton > button, .stDownloadButton > button {
-                        color: #e2e8f0 !important;
+                        color: #f8fafc !important;
+                        -webkit-text-fill-color: #f8fafc !important;
+                        font-weight: 800 !important;
                         border: 1px solid rgba(148, 163, 184, 0.35) !important;
                         background: rgba(30, 41, 59, 0.85) !important;
+                    }
+                    .stButton > button *, .stDownloadButton > button * {
+                        color: inherit !important;
+                        -webkit-text-fill-color: inherit !important;
                     }
                     .stButton > button:hover, .stDownloadButton > button:hover {
                         border-color: rgba(148, 163, 184, 0.6) !important;
                         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 10px 22px rgba(0,0,0,0.25) !important;
                     }
+                    .stButton > button:disabled, .stDownloadButton > button:disabled {
+                        color: #cbd5e1 !important;
+                        -webkit-text-fill-color: #cbd5e1 !important;
+                        border-color: rgba(148, 163, 184, 0.5) !important;
+                        background: rgba(30, 41, 59, 0.76) !important;
+                        opacity: 0.92 !important;
+                    }
                     .stSelectbox, .stSelectbox label, .stSelectbox div, .stSelectbox span,
+                    .stDateInput, .stDateInput label, .stDateInput div, .stDateInput span,
+                    .stTimeInput, .stTimeInput label, .stTimeInput div, .stTimeInput span,
                     .stTextInput input, .stNumberInput input, .stTextArea textarea,
                     .stRadio div, .stMultiSelect div {
                         color: #e2e8f0 !important;
                     }
                     [data-testid="stSelectbox"] div[role="combobox"],
                     [data-testid="stMultiSelect"] div[role="combobox"],
+                    [data-testid="stDateInput"] div[data-baseweb="input"] > div,
+                    [data-testid="stTimeInput"] div[data-baseweb="input"] > div,
+                    [data-testid="stDateInput"] input,
+                    [data-testid="stTimeInput"] input,
                     [data-testid="stNumberInput"] input,
                     [data-testid="stTextInput"] input,
                     [data-testid="stTextArea"] textarea {
                         background-color: #0f172a !important;
+                        color: #e2e8f0 !important;
+                        -webkit-text-fill-color: #e2e8f0 !important;
+                        caret-color: #e2e8f0 !important;
                         border: 1px solid rgba(148, 163, 184, 0.3) !important;
                     }
                 </style>
@@ -3864,6 +4024,7 @@ st.markdown(
             cursor: pointer;
             font-weight: 800;
             background: rgba(30, 41, 59, 0.96);
+            color: #f8fafc;
             border-bottom: 1px solid rgba(148, 163, 184, 0.25);
             user-select: none;
         }
@@ -3872,12 +4033,14 @@ st.markdown(
             grid-column: 2;
             justify-self: center;
             text-align: center;
+            color: #f8fafc;
         }
         .notice-bar-toggle {
             opacity: 0.9;
             font-size: 0.85rem;
             grid-column: 3;
             justify-self: end;
+            color: #cbd5e1;
         }
         .notice-day-header {
             text-align: center;
@@ -3902,6 +4065,7 @@ st.markdown(
         }
         .notice-item .body {
             flex: 1;
+            color: #e2e8f0;
         }
         .notice-body {
             max-height: min(46vh, 420px);
@@ -4043,6 +4207,171 @@ st.markdown(
     </style>
     """,
     unsafe_allow_html=True,
+)
+
+components.html(
+    """
+    <script>
+    (function() {
+        try {
+            const hostWin = window.parent;
+            const root = hostWin.document;
+            if (!root) return;
+
+            const parseRgb = (value) => {
+                const raw = String(value || '').trim().toLowerCase();
+                if (!raw) return null;
+
+                const rgbaMatch = raw.match(/rgba?\(([^)]+)\)/i);
+                if (rgbaMatch) {
+                    const parts = rgbaMatch[1].split(',').map((part) => Number(String(part || '').trim()));
+                    if (parts.length >= 3) {
+                        return {
+                            rgb: [
+                                Math.max(0, Math.min(255, Number(parts[0]) || 0)),
+                                Math.max(0, Math.min(255, Number(parts[1]) || 0)),
+                                Math.max(0, Math.min(255, Number(parts[2]) || 0)),
+                            ],
+                            alpha: Math.max(0, Math.min(1, parts.length >= 4 ? (Number(parts[3]) || 0) : 1)),
+                        };
+                    }
+                }
+
+                if (raw[0] === '#') {
+                    let hex = raw.slice(1);
+                    if (hex.length === 3 || hex.length === 4) {
+                        hex = hex.split('').map((ch) => ch + ch).join('');
+                    }
+                    if (hex.length === 6 || hex.length === 8) {
+                        const r = parseInt(hex.slice(0, 2), 16);
+                        const g = parseInt(hex.slice(2, 4), 16);
+                        const b = parseInt(hex.slice(4, 6), 16);
+                        const a = hex.length === 8 ? (parseInt(hex.slice(6, 8), 16) / 255) : 1;
+                        return {
+                            rgb: [r, g, b],
+                            alpha: Math.max(0, Math.min(1, a)),
+                        };
+                    }
+                }
+
+                return null;
+            };
+
+            const luminance = (rgb) => {
+                if (!rgb || rgb.length < 3) return 0;
+                const [r, g, b] = rgb.map((v) => Number(v) / 255);
+                return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+            };
+
+            const resolveBackgroundRgb = (node) => {
+                let current = node;
+                while (current && current !== root.documentElement) {
+                    try {
+                        const bg = parseRgb(hostWin.getComputedStyle(current).backgroundColor);
+                        if (bg && Number(bg.alpha) > 0.04) {
+                            return bg.rgb;
+                        }
+                    } catch (e) {}
+                    current = current.parentElement;
+                }
+                return [15, 23, 42];
+            };
+
+            const applyReadableText = (node) => {
+                if (!node) return;
+                const bg = resolveBackgroundRgb(node);
+                const bgLum = luminance(bg);
+                const forceDarkSurface = bgLum >= 0.68;
+                const isSelectedOption = String(node.getAttribute('aria-selected') || '').toLowerCase() === 'true';
+                if (forceDarkSurface) {
+                    const forcedBg = isSelectedOption ? 'rgba(59,130,246,0.32)' : '#0f172a';
+                    node.style.setProperty('background', forcedBg, 'important');
+                    node.style.setProperty('background-color', forcedBg, 'important');
+                    node.style.setProperty('border-color', 'rgba(148,163,184,0.55)', 'important');
+                }
+
+                const fg = forceDarkSurface ? '#e2e8f0' : (bgLum >= 0.57 ? '#0f172a' : '#e2e8f0');
+
+                node.style.setProperty('color', fg, 'important');
+                node.style.setProperty('-webkit-text-fill-color', fg, 'important');
+
+                const textNodes = node.querySelectorAll('div, span, p, input, textarea, label, li, svg');
+                textNodes.forEach((child) => {
+                    child.style.setProperty('color', fg, 'important');
+                    child.style.setProperty('-webkit-text-fill-color', fg, 'important');
+                });
+
+                const vectorNodes = node.querySelectorAll('svg path, svg rect, svg circle, svg polygon, svg polyline, svg line');
+                vectorNodes.forEach((child) => {
+                    child.style.setProperty('fill', fg, 'important');
+                    child.style.setProperty('stroke', fg, 'important');
+                });
+            };
+
+            const applySelectContrast = () => {
+                const controls = root.querySelectorAll(
+                    '[data-testid="stSelectbox"] div[role="combobox"], '
+                    + '[data-testid="stMultiSelect"] div[role="combobox"], '
+                    + 'div[data-baseweb="select"] > div, '
+                    + 'div[data-baseweb="tag"]'
+                );
+                controls.forEach((node) => applyReadableText(node));
+
+                const optionNodes = root.querySelectorAll(
+                    'div[data-baseweb="popover"] [role="listbox"], '
+                    + 'div[data-baseweb="popover"] [role="menu"], '
+                    + 'div[data-baseweb="popover"] [role="option"], '
+                    + 'div[data-baseweb="popover"] li'
+                );
+                optionNodes.forEach((node) => applyReadableText(node));
+            };
+
+            let pendingApply = false;
+            const scheduleApply = () => {
+                if (pendingApply) return;
+                pendingApply = true;
+                const raf = hostWin.requestAnimationFrame
+                    ? hostWin.requestAnimationFrame.bind(hostWin)
+                    : ((fn) => hostWin.setTimeout(fn, 16));
+                raf(() => {
+                    pendingApply = false;
+                    applySelectContrast();
+                });
+            };
+
+            scheduleApply();
+            [80, 220, 420, 700].forEach((delay) => {
+                hostWin.setTimeout(scheduleApply, delay);
+            });
+
+            if (!hostWin.__truckDropdownContrastBound) {
+                hostWin.__truckDropdownContrastBound = true;
+
+                root.addEventListener('pointerdown', () => hostWin.setTimeout(scheduleApply, 24), true);
+                root.addEventListener('click', () => hostWin.setTimeout(scheduleApply, 24), true);
+                root.addEventListener('keydown', () => hostWin.setTimeout(scheduleApply, 24), true);
+                root.addEventListener('focusin', () => hostWin.setTimeout(scheduleApply, 24), true);
+
+                const observerTarget = root.body || root.documentElement;
+                if (observerTarget && hostWin.MutationObserver) {
+                    const observer = new hostWin.MutationObserver(() => {
+                        scheduleApply();
+                    });
+                    observer.observe(observerTarget, {
+                        childList: true,
+                        subtree: true,
+                    });
+                    hostWin.__truckDropdownContrastObserver = observer;
+                }
+            } else {
+                scheduleApply();
+            }
+        } catch (e) {}
+    })();
+    </script>
+    """,
+    height=0,
+    width=0,
 )
 
 # ==========================================================
@@ -4909,6 +5238,60 @@ def render_shop_notice():
                     return;
                 }}
 
+                const mainContainer =
+                    root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                    root.querySelector('[data-testid="stMain"]') ||
+                    root.querySelector('section.main');
+                if (!mainContainer) {{
+                    const staleHost = root.getElementById('shop-notice-overlay-host');
+                    if (staleHost) staleHost.remove();
+                    return;
+                }}
+                const mainRect =
+                    typeof mainContainer.getBoundingClientRect === 'function'
+                        ? mainContainer.getBoundingClientRect()
+                        : {{ width: 0, height: 0 }};
+                const isVisibleNode = (node, minWidth = 16, minHeight = 10) => {{
+                    try {{
+                        if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+                        const style = parentWin.getComputedStyle ? parentWin.getComputedStyle(node) : null;
+                        if (style) {{
+                            const opacity = Number(style.opacity);
+                            if (style.display === 'none' || style.visibility === 'hidden' || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
+                                return false;
+                            }}
+                        }}
+                        const rect = node.getBoundingClientRect();
+                        return rect.width >= minWidth && rect.height >= minHeight;
+                    }} catch (e) {{
+                        return false;
+                    }}
+                }};
+                const selectors = [
+                    '[data-testid="stButton"]',
+                    '[data-testid="stSelectbox"]',
+                    '[data-testid="stMultiSelect"]',
+                    '[data-testid="stTextInput"]',
+                    '[data-testid="stNumberInput"]',
+                    '[data-testid="stTextArea"]',
+                    '[data-testid="stTable"]',
+                    '[data-testid="stDataFrame"]',
+                    '[data-testid="stAlert"]',
+                    '[data-testid="stHeading"]',
+                    '[data-testid="stMarkdownContainer"]',
+                    'button',
+                    'input',
+                    'textarea',
+                    'table'
+                ].join(', ');
+                const mainHasVisibleContent = Array.from(mainContainer.querySelectorAll(selectors)).some((node) => isVisibleNode(node));
+                const mainReady = mainRect.width > 80 && mainRect.height > 60 && mainHasVisibleContent;
+                if (!mainReady) {{
+                    const staleHost = root.getElementById('shop-notice-overlay-host');
+                    if (staleHost) staleHost.remove();
+                    return;
+                }}
+
                 const overlayHostId = 'shop-notice-overlay-host';
                 let overlayHost = root.getElementById(overlayHostId);
                 if (!overlayHost) {{
@@ -4948,6 +5331,46 @@ def render_shop_notice():
                     }} catch (e) {{}}
                 }};
 
+                const isMobileSidebarOpen = (viewportW) => {{
+                    try {{
+                        if (Number(viewportW || 0) > 980) return false;
+                        const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                        if (!sidebar) return false;
+
+                        const style = parentWin.getComputedStyle ? parentWin.getComputedStyle(sidebar) : null;
+                        if (style) {{
+                            const opacity = Number(style.opacity);
+                            if (style.display === 'none' || style.visibility === 'hidden' || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
+                                return false;
+                            }}
+                        }}
+
+                        const rect =
+                            typeof sidebar.getBoundingClientRect === 'function'
+                                ? sidebar.getBoundingClientRect()
+                                : {{ left: -9999, right: -9999, width: 0, height: 0 }};
+                        if (rect.width < 90 || rect.height < 120) return false;
+
+                        const expandedAttr = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase();
+                        if (expandedAttr === 'true') return true;
+
+                        return rect.right > 70 && rect.left < (Number(viewportW || 0) - 20);
+                    }} catch (e) {{
+                        return false;
+                    }}
+                }};
+
+                const syncNoticeInteractivity = (viewportW) => {{
+                    const sidebarOpen = isMobileSidebarOpen(viewportW);
+                    if (sidebarOpen) {{
+                        notice.style.setProperty('pointer-events', 'none', 'important');
+                        notice.style.setProperty('visibility', 'hidden', 'important');
+                    }} else {{
+                        notice.style.setProperty('pointer-events', 'auto', 'important');
+                        notice.style.setProperty('visibility', 'visible', 'important');
+                    }}
+                }};
+
                 const positionNotice = () => {{
                     try {{
                         const viewportW = Math.max(0, parentWin.innerWidth || root.documentElement.clientWidth || 0);
@@ -4985,7 +5408,7 @@ def render_shop_notice():
                         notice.style.setProperty('width', String(widthPx) + 'px', 'important');
                         notice.style.setProperty('max-width', 'calc(100vw - ' + String(edgePad * 2) + 'px)', 'important');
                         notice.style.setProperty('z-index', '1705', 'important');
-                        notice.style.setProperty('pointer-events', 'auto', 'important');
+                        syncNoticeInteractivity(viewportW);
 
                         const body = notice.querySelector('.notice-body');
                         if (body) {{
@@ -5059,6 +5482,22 @@ def render_shop_notice():
                         }} catch (e) {{}}
                     }}, {{ passive: true }});
                     parentWin.__shopNoticeOverlayResizeBound = true;
+                }}
+
+                if (!parentWin.__shopNoticeOverlayInteractionBound) {{
+                    const schedulePositionSync = () => {{
+                        try {{
+                            parentWin.setTimeout(() => {{
+                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {{
+                                    parentWin.__positionShopNoticeOverlay();
+                                }}
+                            }}, 28);
+                        }} catch (e) {{}}
+                    }};
+                    root.addEventListener('pointerdown', schedulePositionSync, true);
+                    root.addEventListener('click', schedulePositionSync, true);
+                    root.addEventListener('keydown', schedulePositionSync, true);
+                    parentWin.__shopNoticeOverlayInteractionBound = true;
                 }}
             }} catch (e) {{}}
         }})();
@@ -5166,11 +5605,14 @@ def _truck_grid_columns(default_cols: int = 8) -> int:
     return base_cols
 
 
-def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, primary_only: bool = False):
+def _force_mobile_button_grid(
+    expected_labels: list[str],
+    mobile_cols: int = 2,
+    primary_only: bool = False,
+    cell_gap_rem: float = 0.62,
+    min_button_height_px: int = 56,
+):
     if not MOBILE_GRID_ENHANCEMENTS_ENABLED:
-        return
-
-    if not _is_mobile_client():
         return
 
     labels = sorted({str(v).strip() for v in (expected_labels or []) if str(v).strip()})
@@ -5178,11 +5620,23 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
     if not labels or cols <= 1:
         return
 
+    try:
+        gap_rem = max(0.18, float(cell_gap_rem))
+    except Exception:
+        gap_rem = 0.36
+    try:
+        min_button_height = max(0, int(min_button_height_px or 0))
+    except Exception:
+        min_button_height = 0
+
     button_selector = 'button[kind="primary"]' if primary_only else 'button'
     labels_json = json.dumps(labels)
     selector_json = json.dumps(button_selector)
-    cell_width = f"calc({100.0 / float(cols):.6f}% - 0.36rem)"
+    gap_css = f"{gap_rem:.3f}rem"
+    cell_width = f"calc({100.0 / float(cols):.6f}% - {gap_css})"
     cell_width_json = json.dumps(cell_width)
+    gap_css_json = json.dumps(gap_css)
+    min_button_height_css_json = json.dumps(f"{min_button_height}px" if min_button_height > 0 else "")
 
     components.html(
         f"""
@@ -5193,6 +5647,8 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                 const expected = new Set({labels_json});
                 const selector = {selector_json};
                 const cellWidth = {cell_width_json};
+                const gapCss = {gap_css_json};
+                const minButtonHeightCss = {min_button_height_css_json};
 
                 const normalize = (value) => String(value || '').replace(/\u2063/g, '').trim();
                 const canonicalLabel = (value) => {{
@@ -5214,6 +5670,7 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                 const resetContainer = (node) => {{
                     if (!node) return;
                     node.style.removeProperty('display');
+                    node.style.removeProperty('flex-direction');
                     node.style.removeProperty('flex-wrap');
                     node.style.removeProperty('align-items');
                     node.style.removeProperty('justify-content');
@@ -5227,6 +5684,12 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                     node.style.removeProperty('width');
                     node.style.removeProperty('max-width');
                 }};
+                const resetButton = (node) => {{
+                    if (!node) return;
+                    node.style.removeProperty('min-height');
+                    node.style.removeProperty('padding');
+                    node.style.removeProperty('line-height');
+                }};
 
                 const isColumnSlot = (node) => {{
                     if (!node || node.nodeType !== 1) return false;
@@ -5237,8 +5700,15 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                 }};
                 const nearestColumnSlot = (btn) => {{
                     let node = btn ? btn.parentElement : null;
-                    for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {{
+                    let prev = btn || null;
+                    for (let depth = 0; node && depth < 14; depth += 1) {{
                         if (isColumnSlot(node)) return node;
+                        if (isHorizontalRow(node)) {{
+                            if (prev && prev.parentElement === node) return prev;
+                            return null;
+                        }}
+                        prev = node;
+                        node = node.parentElement;
                     }}
                     return null;
                 }};
@@ -5287,11 +5757,12 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                         if (mobile) {{
                             const targetWidth = slots.length === 1 ? '100%' : cellWidth;
                             container.style.setProperty('display', 'flex', 'important');
+                            container.style.setProperty('flex-direction', 'row', 'important');
                             container.style.setProperty('flex-wrap', 'wrap', 'important');
                             container.style.setProperty('align-items', 'stretch', 'important');
                             container.style.setProperty('justify-content', 'flex-start', 'important');
-                            container.style.setProperty('column-gap', '0.36rem', 'important');
-                            container.style.setProperty('row-gap', '0.36rem', 'important');
+                            container.style.setProperty('column-gap', gapCss, 'important');
+                            container.style.setProperty('row-gap', gapCss, 'important');
                             slots.forEach((slot) => {{
                                 slot.style.setProperty('min-width', '0', 'important');
                                 slot.style.setProperty('flex', `0 0 ${{targetWidth}}`, 'important');
@@ -5301,10 +5772,16 @@ def _force_mobile_button_grid(expected_labels: list[str], mobile_cols: int = 2, 
                             uniqueButtons.forEach((btn) => {{
                                 btn.style.setProperty('width', '100%', 'important');
                                 btn.style.setProperty('min-width', '0', 'important');
+                                if (minButtonHeightCss) {{
+                                    btn.style.setProperty('min-height', minButtonHeightCss, 'important');
+                                    btn.style.setProperty('padding', '0.24rem 0.34rem', 'important');
+                                    btn.style.setProperty('line-height', '1.08', 'important');
+                                }}
                             }});
                         }} else {{
                             resetContainer(container);
                             rowSlots.forEach((slot) => resetSlot(slot));
+                            uniqueButtons.forEach((btn) => resetButton(btn));
                         }}
                     }});
                 }};
@@ -5437,6 +5914,74 @@ def _apply_loaded_locked_dropdown_guard():
         """,
         height=0,
         width=0,
+    )
+
+
+def _apply_mobile_touch_target_styles(
+    button_min_height_px: int = 56,
+    button_font_px: int = 17,
+    input_min_height_px: int = 54,
+    input_font_px: int = 18,
+    widget_spacing_rem: float = 0.18,
+):
+    if not _is_mobile_client():
+        return
+
+    try:
+        button_min_height = max(46, int(button_min_height_px))
+    except Exception:
+        button_min_height = 56
+    try:
+        button_font = max(14, int(button_font_px))
+    except Exception:
+        button_font = 17
+    try:
+        input_min_height = max(44, int(input_min_height_px))
+    except Exception:
+        input_min_height = 54
+    try:
+        input_font = max(15, int(input_font_px))
+    except Exception:
+        input_font = 18
+    try:
+        spacing_rem = max(0.08, float(widget_spacing_rem))
+    except Exception:
+        spacing_rem = 0.18
+
+    st.markdown(
+        f"""
+        <style>
+            @media (max-width: 980px) {{
+                .stButton > button,
+                .stDownloadButton > button {{
+                    min-height: {button_min_height}px !important;
+                    border-radius: 14px !important;
+                    padding: 0.44rem 0.68rem !important;
+                    font-size: {button_font}px !important;
+                    line-height: 1.1 !important;
+                    touch-action: manipulation !important;
+                }}
+                div[data-testid="stButton"],
+                div[data-testid="stDownloadButton"] {{
+                    margin-bottom: {spacing_rem:.3f}rem !important;
+                }}
+                [data-testid="stTextInput"] input,
+                [data-testid="stNumberInput"] input,
+                [data-testid="stTextArea"] textarea {{
+                    min-height: {input_min_height}px !important;
+                    font-size: {input_font}px !important;
+                }}
+                [data-testid="stSelectbox"] div[role="combobox"],
+                [data-testid="stMultiSelect"] div[role="combobox"],
+                [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+                [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{
+                    min-height: {input_min_height}px !important;
+                    font-size: {button_font}px !important;
+                }}
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -5762,6 +6307,7 @@ def render_numeric_truck_buttons(
     heavy_button_page_mode = active_screen_key in {"FLEET", "UNLOAD", "BATCH"}
     button_style_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [50, 250])
     button_decoration_retry_delays_json = json.dumps([] if heavy_button_page_mode else [80, 240, 520])
+    outline_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
     badge_render_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
     oos_overlay_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
     button_style_use_resize_listener_json = json.dumps(not heavy_button_page_mode)
@@ -6051,7 +6597,7 @@ def render_numeric_truck_buttons(
             width=0,
         )
 
-    if button_decoration_js_enabled and outlined_trucks is not None:
+    if bool(TRUCK_BUTTON_DECORATIONS_ENABLED) and outlined_trucks is not None:
         outlined_labels_json = json.dumps(sorted({str(int(t)) for t in (outlined_trucks or set())}))
         components.html(
             f"""
@@ -6060,7 +6606,7 @@ def render_numeric_truck_buttons(
                 try {{
                     const root = window.parent.document;
                     const outlinedSet = new Set({outlined_labels_json});
-                    const retryDelays = {button_decoration_retry_delays_json};
+                    const retryDelays = {outline_retry_delays_json};
 
                     const applyOutline = () => {{
                         const buttons = root.querySelectorAll('button[kind="primary"]');
@@ -6073,12 +6619,15 @@ def render_numeric_truck_buttons(
                                 btn.style.setProperty('box-shadow', '0 0 0 3px rgba(250, 204, 21, 0.98), 0 0 0 5px rgba(15, 23, 42, 0.92)', 'important');
                                 btn.style.setProperty('outline', '2px solid rgba(250, 204, 21, 1)', 'important');
                                 btn.style.setProperty('outline-offset', '-2px', 'important');
+                                btn.style.setProperty('position', 'relative', 'important');
+                                btn.style.setProperty('z-index', '2', 'important');
                                 btn.dataset.truckSelectedOutline = '1';
                             }} else {{
                                 if (btn.dataset.truckSelectedOutline === '1') {{
                                     btn.style.removeProperty('box-shadow');
                                     btn.style.removeProperty('outline');
                                     btn.style.removeProperty('outline-offset');
+                                    btn.style.removeProperty('z-index');
                                     delete btn.dataset.truckSelectedOutline;
                                 }}
                             }}
@@ -6139,8 +6688,12 @@ def render_numeric_truck_buttons(
                         button[kind="primary"].truck-oos-x::after {{
                             content: none !important;
                         }}
+                        button[kind="primary"].truck-oos-x .truck-route-badge,
+                        button[kind="primary"].truck-oos-x .truck-corner-clip-badge {{
+                            z-index: 24 !important;
+                        }}
                         button[kind="primary"].truck-oos-x p,
-                        button[kind="primary"].truck-oos-x span {{
+                        button[kind="primary"].truck-oos-x span:not(.truck-route-badge):not(.truck-corner-clip-badge) {{
                             position: relative !important;
                             z-index: 1 !important;
                         }}`;
@@ -6280,6 +6833,7 @@ def render_numeric_truck_buttons(
                             border: 1px solid rgba(59,130,246,0.86) !important;
                             background: rgba(30,64,175,0.96) !important;
                             color: #dbeafe !important;
+                            -webkit-text-fill-color: #dbeafe !important;
                             font-size: 10px !important;
                             line-height: 1.1 !important;
                             font-weight: 900 !important;
@@ -6298,21 +6852,25 @@ def render_numeric_truck_buttons(
                             border: 1px solid rgba(248,113,113,0.95) !important;
                             background: rgba(153,27,27,0.96) !important;
                             color: #fee2e2 !important;
+                            -webkit-text-fill-color: #fee2e2 !important;
                         }}
                         button[kind="primary"] .truck-route-badge.truck-route-badge-oos {{
                             border: 1px solid rgba(156,163,175,0.95) !important;
                             background: rgba(55,65,81,0.96) !important;
                             color: #f3f4f6 !important;
+                            -webkit-text-fill-color: #f3f4f6 !important;
                         }}
                         button[kind="primary"] .truck-route-badge.truck-route-badge-shop {{
-                            border: 1px solid rgba(252,165,165,0.95) !important;
-                            background: rgba(254,226,226,0.98) !important;
-                            color: #7f1d1d !important;
+                            border: 1px solid rgba(107,114,128,0.96) !important;
+                            background: rgba(229,231,235,0.98) !important;
+                            color: #b91c1c !important;
+                            -webkit-text-fill-color: #b91c1c !important;
                         }}
                         button[kind="primary"] .truck-route-badge.truck-route-badge-special {{
                             border: 1px solid rgba(196,181,253,0.96) !important;
                             background: rgba(109,40,217,0.95) !important;
                             color: #f3e8ff !important;
+                            -webkit-text-fill-color: #f3e8ff !important;
                         }}`;
                     if (!existingStyleEl) {{
                         root.head.appendChild(styleEl);
@@ -6380,14 +6938,24 @@ def render_numeric_truck_buttons(
                             badge.style.setProperty('text-overflow', 'ellipsis', 'important');
                             badge.style.setProperty('pointer-events', 'none', 'important');
                             const badgeTextUpper = String(badgeLabel || '').trim().toUpperCase();
+                            const applyBadgeFg = (fg) => {{
+                                badge.style.setProperty('color', fg, 'important');
+                                badge.style.setProperty('-webkit-text-fill-color', fg, 'important');
+                            }};
                             if (badgeTextUpper === 'OFF') {{
                                 badge.classList.add('truck-route-badge-off');
+                                applyBadgeFg('#fee2e2');
                             }} else if (badgeTextUpper === 'OOS') {{
                                 badge.classList.add('truck-route-badge-oos');
+                                applyBadgeFg('#f3f4f6');
                             }} else if (badgeTextUpper === 'SHOP') {{
                                 badge.classList.add('truck-route-badge-shop');
+                                applyBadgeFg('#b91c1c');
                             }} else if (badgeTextUpper === 'SPECIAL') {{
                                 badge.classList.add('truck-route-badge-special');
+                                applyBadgeFg('#f3e8ff');
+                            }} else {{
+                                applyBadgeFg('#dbeafe');
                             }}
                             btn.appendChild(badge);
                         }});
@@ -6529,7 +7097,13 @@ def render_numeric_truck_buttons(
                     if _is_numeric:
                         return int(value)
                     return str(value)
-    _force_mobile_button_grid([label for (label, _, _) in button_entries if str(label).strip()], mobile_cols=2, primary_only=True)
+    _force_mobile_button_grid(
+        [label for (label, _, _) in button_entries if str(label).strip()],
+        mobile_cols=2,
+        primary_only=True,
+        cell_gap_rem=0.62,
+        min_button_height_px=64,
+    )
     return None
 
 
@@ -6764,6 +7338,83 @@ def render_fleet_management():
         })
         st.session_state[selected_trucks_key] = multi_selected
 
+        target_trucks = sorted(st.session_state[selected_trucks_key])
+        st.caption(f"Selected trucks: {len(target_trucks)}")
+        selected_statuses = sorted({current_status_label(t) for t in target_trucks})
+        if len(selected_statuses) == 0:
+            st.caption("Current status for selected: None")
+        elif len(selected_statuses) == 1:
+            st.caption(f"Current status for selected: {selected_statuses[0]}")
+        else:
+            st.caption("Current status for selected: Mixed")
+
+        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop", "Out Of Service", "Spare"]
+        default_status = "Dirty"
+        if len(target_trucks) == 1:
+            default_status = current_status_label(int(target_trucks[0]))
+        default_idx = status_options.index(default_status) if default_status in status_options else 0
+        status_picker_col = st.columns([1, 2, 1])[1]
+        with status_picker_col:
+            status_sel = st.selectbox("Status", status_options, index=default_idx, key="sup_manage_multi_status_sel")
+        shop_load_on = ""
+        if status_sel == "Shop":
+            with status_picker_col:
+                shop_load_on = _render_shop_load_on_dropdown(
+                    "Load On? (optional)",
+                    key="sup_manage_multi_status_load_on_pick",
+                    current_value=str(st.session_state.get("sup_manage_multi_status_load_on") or ""),
+                )
+
+        apply_clicked = False
+        with st.columns([1, 2, 1])[1]:
+            apply_clicked = st.button("Apply status change", key="sup_manage_multi_apply_status", use_container_width=True)
+
+        if apply_clicked:
+            if not target_trucks:
+                st.warning("Select at least one truck.")
+            elif status_sel == "In Progress" and len(target_trucks) > 1:
+                st.warning("In Progress can only be set for one truck at a time.")
+            else:
+                for truck_num in target_trucks:
+                    _apply_truck_status_change(
+                        int(truck_num),
+                        status_sel,
+                        shop_load_on=shop_load_on,
+                    )
+                _mark_and_save()
+                st.session_state[selected_trucks_key] = []
+                st.session_state["sup_manage_multi_status_load_on"] = ""
+                if len(target_trucks) == 1:
+                    st.success(_status_update_feedback_message(int(target_trucks[0]), status_sel))
+                else:
+                    adjusted_count = sum(
+                        1
+                        for truck_num in target_trucks
+                        if str(current_status_label(int(truck_num)) or "").strip() != str(status_sel)
+                    )
+                    if adjusted_count > 0:
+                        st.warning(
+                            f"Updated {len(target_trucks)} trucks. "
+                            f"{adjusted_count} ended with a different status after normalization."
+                        )
+                    else:
+                        st.success(f"Updated {len(target_trucks)} trucks to {status_sel}.")
+                st.rerun()
+
+        st.markdown(
+            """
+            <style>
+            .st-key-sup_manage_multi_select_all,
+            .st-key-sup_manage_multi_select_clear {
+                margin-bottom: 0 !important;
+            }
+            .st-key-sup_manage_multi_pick {
+                margin-top: 2px !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         s1, s2 = st.columns([1, 1])
         with s1:
             if st.button("Select All", use_container_width=True, key="sup_manage_multi_select_all"):
@@ -6789,60 +7440,6 @@ def render_fleet_management():
                 currently_selected.add(clicked_num)
             st.session_state[selected_trucks_key] = sorted(currently_selected)
             st.rerun()
-
-        target_trucks = sorted(st.session_state[selected_trucks_key])
-        st.caption(f"Selected trucks: {len(target_trucks)}")
-        selected_statuses = sorted({current_status_label(t) for t in target_trucks})
-        if len(selected_statuses) == 0:
-            st.caption("Current status for selected: None")
-        elif len(selected_statuses) == 1:
-            st.caption(f"Current status for selected: {selected_statuses[0]}")
-        else:
-            st.caption("Current status for selected: Mixed")
-
-        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop", "Out Of Service", "Spare"]
-        default_status = "Dirty"
-        if len(target_trucks) == 1:
-            default_status = current_status_label(int(target_trucks[0]))
-        default_idx = status_options.index(default_status) if default_status in status_options else 0
-        status_sel = st.selectbox("Status", status_options, index=default_idx, key="sup_manage_multi_status_sel")
-        shop_load_on = ""
-        if status_sel == "Shop":
-            shop_load_on = _render_shop_load_on_dropdown(
-                "Load On? (optional)",
-                key="sup_manage_multi_status_load_on_pick",
-                current_value=str(st.session_state.get("sup_manage_multi_status_load_on") or ""),
-            )
-
-        if st.button("Apply status change", key="sup_manage_multi_apply_status"):
-            if not target_trucks:
-                st.warning("Select at least one truck.")
-            elif status_sel == "In Progress" and len(target_trucks) > 1:
-                st.warning("In Progress can only be set for one truck at a time.")
-            else:
-                for truck_num in target_trucks:
-                    _apply_truck_status_change(
-                        int(truck_num),
-                        status_sel,
-                        shop_load_on=shop_load_on,
-                    )
-                _mark_and_save()
-                if len(target_trucks) == 1:
-                    st.success(_status_update_feedback_message(int(target_trucks[0]), status_sel))
-                else:
-                    adjusted_count = sum(
-                        1
-                        for truck_num in target_trucks
-                        if str(current_status_label(int(truck_num)) or "").strip() != str(status_sel)
-                    )
-                    if adjusted_count > 0:
-                        st.warning(
-                            f"Updated {len(target_trucks)} trucks. "
-                            f"{adjusted_count} ended with a different status after normalization."
-                        )
-                    else:
-                        st.success(f"Updated {len(target_trucks)} trucks to {status_sel}.")
-                st.rerun()
         return
 
     if selected is None:
@@ -10819,8 +11416,30 @@ def go(screen: str):
 
 
 def _mark_and_save():
+    if bool(st.session_state.get("archive_view_mode")):
+        return
     normalize_states()
     save_state()
+
+
+def _restore_state_from_snapshot(snapshot_payload: dict) -> bool:
+    if not isinstance(snapshot_payload, dict):
+        return False
+
+    restored_state = _deserialize_state_payload(snapshot_payload)
+    if not isinstance(restored_state, dict) or not restored_state:
+        return False
+
+    for key, default_value in defaults.items():
+        if key in restored_state:
+            st.session_state[key] = restored_state[key]
+        else:
+            st.session_state[key] = default_value
+
+    st.session_state.role_workflow_settings = _normalize_role_workflow_settings(
+        st.session_state.get("role_workflow_settings")
+    )
+    return True
 
 
 def render_page_heading(title: str):
@@ -10901,6 +11520,8 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
                         align-items: center !important;
                         justify-content: flex-start !important;
                         gap: 0.5rem !important;
+                        color: #f8fafc !important;
+                        -webkit-text-fill-color: #f8fafc !important;
                     }}
                     section[data-testid="stSidebar"] .stButton > button.status-dot-badge::before {{
                         content: '';
@@ -10929,6 +11550,8 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
                         const dotColor = colorMap.get(raw);
                         if (!dotColor) return;
                         btn.classList.add('status-dot-badge');
+                        btn.style.setProperty('color', '#f8fafc', 'important');
+                        btn.style.setProperty('-webkit-text-fill-color', '#f8fafc', 'important');
                         btn.style.setProperty('--status-dot-color', dotColor);
                         appliedAny = true;
                     }});
@@ -12697,6 +13320,65 @@ _render_route_card_assign_dialog_if_needed()
 # Global notice for management Shop assignments
 render_shop_notice()
 
+if bool(st.session_state.get("archive_view_mode")):
+    archive_view_key = str(st.session_state.get("archive_view_date_key") or _current_run_date_key() or "").strip()
+    archive_view_label = archive_view_key if archive_view_key else "Unknown"
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] .stButton > button,
+        [data-testid="stAppViewContainer"] .stDownloadButton > button,
+        [data-testid="stAppViewContainer"] [data-testid="stTextInput"] input,
+        [data-testid="stAppViewContainer"] [data-testid="stNumberInput"] input,
+        [data-testid="stAppViewContainer"] [data-testid="stTextArea"] textarea,
+        [data-testid="stAppViewContainer"] [data-testid="stCheckbox"] input,
+        [data-testid="stAppViewContainer"] [data-testid="stRadio"] input,
+        [data-testid="stAppViewContainer"] [data-testid="stSlider"] [role="slider"],
+        [data-testid="stAppViewContainer"] [data-testid="stSelectbox"] div[role="combobox"],
+        [data-testid="stAppViewContainer"] [data-testid="stMultiSelect"] div[role="combobox"],
+        [data-testid="stAppViewContainer"] div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] .stButton > button,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[role="combobox"],
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] div[role="combobox"],
+        [data-testid="stSidebar"] div[data-baseweb="select"] > div {
+            pointer-events: none !important;
+            cursor: not-allowed !important;
+            opacity: 0.66 !important;
+            filter: saturate(0.82) !important;
+        }
+
+        .st-key-archive_view_live_btn .stButton > button,
+        .st-key-archive_view_live_btn button {
+            pointer-events: auto !important;
+            cursor: pointer !important;
+            opacity: 1 !important;
+            filter: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        archive_info_col, archive_live_col = st.columns([4, 1])
+        with archive_info_col:
+            st.markdown(f"**Archive View** • {archive_view_label}")
+            st.caption("Viewing archived data in read-only mode. Tap Live to return to your current workday.")
+        with archive_live_col:
+            if st.button("Live", key="archive_view_live_btn", use_container_width=True, type="primary"):
+                restored_ok = _restore_state_from_snapshot(st.session_state.get("archive_live_state_snapshot"))
+                st.session_state["archive_view_mode"] = False
+                st.session_state["archive_view_date_key"] = ""
+                st.session_state["archive_live_state_snapshot"] = None
+                if restored_ok:
+                    _mark_and_save()
+                    st.rerun()
+
+                fallback_date = date.today()
+                apply_run_config(fallback_date, [fallback_date + timedelta(days=1)])
+                st.session_state.active_screen = "UNLOAD"
+                _mark_and_save()
+                st.rerun()
+
 # ==========================================================
 # PAGES
 # ==========================================================
@@ -13925,13 +14607,19 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         unsafe_allow_html=True,
     )
 
-    reminder = st.session_state.get("daily_notes", "")
-    no_notes = "<span style=\"opacity:0.5;\">No notes set.</span>"
-    notes_html = _format_note_lines_as_bullets_html(reminder, empty_html=no_notes)
+    reminder = str(st.session_state.get("daily_notes", "") or "")
+    show_daily_notes_panel = bool(reminder.strip())
+    notes_html = _format_note_lines_as_bullets_html(reminder, empty_html="")
     is_mobile_inprog = _is_mobile_client()
+    inprog_layout_style = _normalize_inprog_layout_style(
+        st.session_state.get("inprog_layout_style")
+    )
+    inprog_layout_is_original = inprog_layout_style == INPROG_LAYOUT_ORIGINAL
     current_truck_margin_top = "-12px" if not is_mobile_inprog else "0px"
 
     def _render_inprog_daily_notes_panel():
+        if not show_daily_notes_panel:
+            return
         if is_mobile_inprog:
             st.markdown(
                 (
@@ -14059,7 +14747,12 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         left_col = st.container()
         center_col = st.container()
     else:
-        left_col, center_col = st.columns([1.0, 2.0], gap="medium")
+        if inprog_layout_style == INPROG_LAYOUT_CURRENT_RIGHT:
+            center_col, left_col = st.columns([2.0, 1.0], gap="medium")
+        elif inprog_layout_is_original:
+            left_col, center_col = st.columns([0.9, 2.1], gap="small")
+        else:
+            left_col, center_col = st.columns([1.0, 2.0], gap="medium")
     guest_read_only = _current_auth_role() == AUTH_ROLE_GUEST
     can_access_short_sheet = _screen_allowed_for_current_user("SHORTS")
 
@@ -14080,9 +14773,178 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         st.session_state.active_screen = "STATUS_LOADED"
         st.rerun()
 
+    def _render_inprog_next_up_controls(*, set_button_key: str, clear_button_key: str):
+        _sync_next_up_from_state_file()
+        _prune_next_up_queue_if_unavailable()
+        current_next_up_inprog = st.session_state.get("next_up_truck")
+        try:
+            if current_next_up_inprog is not None:
+                current_next_up_inprog = int(current_next_up_inprog)
+        except Exception:
+            current_next_up_inprog = None
+
+        next_up_candidates_for_prompt = _next_up_candidate_trucks(allow_off_day=False)
+        should_flash_set_next_up = (
+            current_next_up_inprog is None and len(next_up_candidates_for_prompt) > 0
+        )
+
+        if not guest_read_only:
+            next_up_button_label = "Set Next Up" if current_next_up_inprog is None else "Change Next Up"
+            next_up_button_col = st.columns([1, 2, 1])[1]
+            with next_up_button_col:
+                if st.button(
+                    next_up_button_label,
+                    use_container_width=True,
+                    key=set_button_key,
+                ):
+                    st.session_state["inprog_manage_next_up_dialog_open"] = True
+                    st.rerun()
+            _set_inprog_next_up_attention_flash(should_flash_set_next_up)
+
+            def _dismiss_inprog_next_up_dialog():
+                st.session_state["inprog_manage_next_up_dialog_open"] = False
+
+            if st.session_state.get("inprog_manage_next_up_dialog_open"):
+                @st.dialog("Set Next Up", width="small", on_dismiss=_dismiss_inprog_next_up_dialog)
+                def _render_inprog_next_up_dialog():
+                    _sync_next_up_from_state_file()
+                    _prune_next_up_queue_if_unavailable()
+
+                    dialog_next_up = st.session_state.get("next_up_truck")
+                    try:
+                        if dialog_next_up is not None:
+                            dialog_next_up = int(dialog_next_up)
+                    except Exception:
+                        dialog_next_up = None
+
+                    next_up_off_today_local = set(off_today_blocked)
+                    next_up_unloaded_candidates_local = (
+                        set(st.session_state.get("cleaned_set") or set())
+                        - set(st.session_state.get("loaded_set") or set())
+                        - set(st.session_state.get("inprog_set") or set())
+                        - set(st.session_state.get("shop_set") or set())
+                        - set(st.session_state.get("off_set") or set())
+                        - next_up_off_today_local
+                    )
+                    next_up_spare_candidates_local = (
+                        set(st.session_state.get("spare_set") or set())
+                        - set(st.session_state.get("loaded_set") or set())
+                        - set(st.session_state.get("inprog_set") or set())
+                        - set(st.session_state.get("shop_set") or set())
+                        - set(st.session_state.get("off_set") or set())
+                        - next_up_off_today_local
+                    )
+                    next_up_regular_candidates_local = sorted(
+                        {int(t) for t in next_up_unloaded_candidates_local}
+                    )
+                    next_up_spare_only_candidates_local = sorted(
+                        {int(t) for t in (next_up_spare_candidates_local - next_up_unloaded_candidates_local)}
+                    )
+                    next_up_candidates_local = (
+                        next_up_regular_candidates_local + next_up_spare_only_candidates_local
+                    )
+
+                    assigned_oos_routes_for_spare_local: dict[int, int] = {}
+                    for route_raw, spare_raw in (st.session_state.get("oos_spare_assignments") or {}).items():
+                        try:
+                            route_num = int(route_raw)
+                            spare_num = int(spare_raw)
+                        except Exception:
+                            continue
+                        if route_num in st.session_state.off_set:
+                            assigned_oos_routes_for_spare_local[spare_num] = route_num
+
+                    if dialog_next_up is not None:
+                        st.caption(f"Current Next Up: Truck {int(dialog_next_up)}")
+
+                    if next_up_candidates_local:
+                        candidate_labels_local = {}
+                        for candidate in next_up_candidates_local:
+                            candidate_num = int(candidate)
+                            if candidate_num in assigned_oos_routes_for_spare_local:
+                                candidate_labels_local[candidate_num] = (
+                                    f"Truck {candidate_num} • OOS route {assigned_oos_routes_for_spare_local[candidate_num]}"
+                                )
+                            elif candidate_num in next_up_spare_only_candidates_local:
+                                candidate_labels_local[candidate_num] = f"Truck {candidate_num} • Spare"
+                            else:
+                                candidate_labels_local[candidate_num] = f"Truck {candidate_num}"
+
+                        picked_next_up_dialog = st.selectbox(
+                            "Set next up",
+                            options=next_up_candidates_local,
+                            format_func=lambda t: candidate_labels_local.get(int(t), f"Truck {int(t)}"),
+                            key="inprog_next_up_dialog_pick",
+                        )
+
+                        set_col_dialog, clear_col_dialog = st.columns(2)
+                        with set_col_dialog:
+                            if st.button(
+                                "Set Next Up",
+                                use_container_width=True,
+                                key="inprog_next_up_dialog_set",
+                            ):
+                                st.session_state.next_up_truck = int(picked_next_up_dialog)
+                                st.session_state["inprog_manage_next_up_dialog_open"] = False
+                                _mark_and_save()
+                                st.rerun()
+                        with clear_col_dialog:
+                            if st.button(
+                                "Clear Next Up",
+                                use_container_width=True,
+                                key="inprog_next_up_dialog_clear",
+                            ):
+                                st.session_state.next_up_truck = None
+                                st.session_state["inprog_manage_next_up_dialog_open"] = False
+                                _mark_and_save()
+                                st.rerun()
+                    elif dialog_next_up is not None:
+                        if st.button(
+                            "Clear Next Up",
+                            use_container_width=True,
+                            key="inprog_next_up_dialog_clear_only",
+                        ):
+                            st.session_state.next_up_truck = None
+                            st.session_state["inprog_manage_next_up_dialog_open"] = False
+                            _mark_and_save()
+                            st.rerun()
+                    else:
+                        st.caption("No available unloaded/spare trucks to set as Next Up.")
+
+                _render_inprog_next_up_dialog()
+        else:
+            _set_inprog_next_up_attention_flash(False)
+
+        if current_next_up_inprog is not None:
+            st.markdown(
+                (
+                    "<div style='text-align:center; margin:10px 0 2px 0;'>"
+                    "  <div style='font-size:18px; letter-spacing:0.16em; text-transform:uppercase; opacity:0.7;'>Next Up</div>"
+                    f"  <div style='font-size:72px; font-weight:900; line-height:1.0; color:#3b82f6;'>#{int(current_next_up_inprog)}</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            avg_next = average_load_time_seconds([int(current_next_up_inprog)])
+            st.markdown(
+                (
+                    "<div style='text-align:center; margin-top:2px; font-size:18px; opacity:0.75;'>"
+                    f"Avg for next up: {seconds_to_mmss(avg_next) if avg_next is not None else 'N/A'}"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            if not guest_read_only:
+                clear_col_top = st.columns([1, 2, 1])[1]
+                with clear_col_top:
+                    if st.button("Clear Next Up", use_container_width=True, key=clear_button_key):
+                        st.session_state.next_up_truck = None
+                        _mark_and_save()
+                        st.rerun()
+
     with left_col:
         st.markdown("<div id='inprog-left-col-anchor' style='display:none;'></div>", unsafe_allow_html=True)
-        if inprog_truck:
+        if inprog_truck and not inprog_layout_is_original:
             route_targets_now_left = _truck_route_targets()
             inprog_truck_num_left = int(inprog_truck)
             inprog_route_target_left = int(
@@ -14155,172 +15017,10 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 unsafe_allow_html=True,
             )
 
-            _sync_next_up_from_state_file()
-            _prune_next_up_queue_if_unavailable()
-            current_next_up_inprog = st.session_state.get("next_up_truck")
-            try:
-                if current_next_up_inprog is not None:
-                    current_next_up_inprog = int(current_next_up_inprog)
-            except Exception:
-                current_next_up_inprog = None
-            next_up_candidates_for_prompt = _next_up_candidate_trucks(allow_off_day=False)
-            should_flash_set_next_up = (
-                current_next_up_inprog is None and len(next_up_candidates_for_prompt) > 0
+            _render_inprog_next_up_controls(
+                set_button_key="inprog_manage_next_up_button",
+                clear_button_key="inprog_next_up_clear_top_left",
             )
-
-            if not guest_read_only:
-                next_up_button_label = "Set Next Up" if current_next_up_inprog is None else "Change Next Up"
-                next_up_button_col = st.columns([1, 2, 1])[1]
-                with next_up_button_col:
-                    if st.button(
-                        next_up_button_label,
-                        use_container_width=True,
-                        key="inprog_manage_next_up_button",
-                    ):
-                        st.session_state["inprog_manage_next_up_dialog_open"] = True
-                        st.rerun()
-                _set_inprog_next_up_attention_flash(should_flash_set_next_up)
-
-                def _dismiss_inprog_next_up_dialog():
-                    st.session_state["inprog_manage_next_up_dialog_open"] = False
-
-                if st.session_state.get("inprog_manage_next_up_dialog_open"):
-                    @st.dialog("Set Next Up", width="small", on_dismiss=_dismiss_inprog_next_up_dialog)
-                    def _render_inprog_next_up_dialog():
-                        _sync_next_up_from_state_file()
-                        _prune_next_up_queue_if_unavailable()
-
-                        dialog_next_up = st.session_state.get("next_up_truck")
-                        try:
-                            if dialog_next_up is not None:
-                                dialog_next_up = int(dialog_next_up)
-                        except Exception:
-                            dialog_next_up = None
-
-                        next_up_off_today_local = set(off_today_blocked)
-                        next_up_unloaded_candidates_local = (
-                            set(st.session_state.get("cleaned_set") or set())
-                            - set(st.session_state.get("loaded_set") or set())
-                            - set(st.session_state.get("inprog_set") or set())
-                            - set(st.session_state.get("shop_set") or set())
-                            - set(st.session_state.get("off_set") or set())
-                            - next_up_off_today_local
-                        )
-                        next_up_spare_candidates_local = (
-                            set(st.session_state.get("spare_set") or set())
-                            - set(st.session_state.get("loaded_set") or set())
-                            - set(st.session_state.get("inprog_set") or set())
-                            - set(st.session_state.get("shop_set") or set())
-                            - set(st.session_state.get("off_set") or set())
-                            - next_up_off_today_local
-                        )
-                        next_up_regular_candidates_local = sorted(
-                            {int(t) for t in next_up_unloaded_candidates_local}
-                        )
-                        next_up_spare_only_candidates_local = sorted(
-                            {int(t) for t in (next_up_spare_candidates_local - next_up_unloaded_candidates_local)}
-                        )
-                        next_up_candidates_local = (
-                            next_up_regular_candidates_local + next_up_spare_only_candidates_local
-                        )
-
-                        assigned_oos_routes_for_spare_local: dict[int, int] = {}
-                        for route_raw, spare_raw in (st.session_state.get("oos_spare_assignments") or {}).items():
-                            try:
-                                route_num = int(route_raw)
-                                spare_num = int(spare_raw)
-                            except Exception:
-                                continue
-                            if route_num in st.session_state.off_set:
-                                assigned_oos_routes_for_spare_local[spare_num] = route_num
-
-                        if dialog_next_up is not None:
-                            st.caption(f"Current Next Up: Truck {int(dialog_next_up)}")
-
-                        if next_up_candidates_local:
-                            candidate_labels_local = {}
-                            for candidate in next_up_candidates_local:
-                                candidate_num = int(candidate)
-                                if candidate_num in assigned_oos_routes_for_spare_local:
-                                    candidate_labels_local[candidate_num] = (
-                                        f"Truck {candidate_num} • OOS route {assigned_oos_routes_for_spare_local[candidate_num]}"
-                                    )
-                                elif candidate_num in next_up_spare_only_candidates_local:
-                                    candidate_labels_local[candidate_num] = f"Truck {candidate_num} • Spare"
-                                else:
-                                    candidate_labels_local[candidate_num] = f"Truck {candidate_num}"
-
-                            picked_next_up_dialog = st.selectbox(
-                                "Set next up",
-                                options=next_up_candidates_local,
-                                format_func=lambda t: candidate_labels_local.get(int(t), f"Truck {int(t)}"),
-                                key="inprog_next_up_dialog_pick",
-                            )
-
-                            set_col_dialog, clear_col_dialog = st.columns(2)
-                            with set_col_dialog:
-                                if st.button(
-                                    "Set Next Up",
-                                    use_container_width=True,
-                                    key="inprog_next_up_dialog_set",
-                                ):
-                                    st.session_state.next_up_truck = int(picked_next_up_dialog)
-                                    st.session_state["inprog_manage_next_up_dialog_open"] = False
-                                    _mark_and_save()
-                                    st.rerun()
-                            with clear_col_dialog:
-                                if st.button(
-                                    "Clear Next Up",
-                                    use_container_width=True,
-                                    key="inprog_next_up_dialog_clear",
-                                ):
-                                    st.session_state.next_up_truck = None
-                                    st.session_state["inprog_manage_next_up_dialog_open"] = False
-                                    _mark_and_save()
-                                    st.rerun()
-                        elif dialog_next_up is not None:
-                            if st.button(
-                                "Clear Next Up",
-                                use_container_width=True,
-                                key="inprog_next_up_dialog_clear_only",
-                            ):
-                                st.session_state.next_up_truck = None
-                                st.session_state["inprog_manage_next_up_dialog_open"] = False
-                                _mark_and_save()
-                                st.rerun()
-                        else:
-                            st.caption("No available unloaded/spare trucks to set as Next Up.")
-
-                    _render_inprog_next_up_dialog()
-            else:
-                _set_inprog_next_up_attention_flash(False)
-
-            if current_next_up_inprog is not None:
-                st.markdown(
-                    (
-                        "<div style='text-align:center; margin:10px 0 2px 0;'>"
-                        "  <div style='font-size:18px; letter-spacing:0.16em; text-transform:uppercase; opacity:0.7;'>Next Up</div>"
-                        f"  <div style='font-size:72px; font-weight:900; line-height:1.0; color:#3b82f6;'>#{int(current_next_up_inprog)}</div>"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-                avg_next_left = average_load_time_seconds([int(current_next_up_inprog)])
-                st.markdown(
-                    (
-                        "<div style='text-align:center; margin-top:2px; font-size:18px; opacity:0.75;'>"
-                        f"Avg for next up: {seconds_to_mmss(avg_next_left) if avg_next_left is not None else 'N/A'}"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-                if not guest_read_only:
-                    clear_col_top_left = st.columns([1, 2, 1])[1]
-                    with clear_col_top_left:
-                        if st.button("Clear Next Up", use_container_width=True, key="inprog_next_up_clear_top_left"):
-                            st.session_state.next_up_truck = None
-                            _mark_and_save()
-                            st.rerun()
 
             if int(inprog_truck_num_left) in dust_garment_trucks_left:
                 st.markdown(
@@ -14369,17 +15069,24 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 "<div style='height:0; border-top:1px solid rgba(148,163,184,0.34); margin:6px 0 8px 0;'></div>",
                 unsafe_allow_html=True,
             )
-            if is_mobile_inprog:
-                shortages_toggle_key = "inprog_mobile_shortages_open"
-                is_open = bool(st.session_state.get(shortages_toggle_key, False))
-                toggle_label = "Select Shortages" if not is_open else "Hide Shortages"
-                if st.button(toggle_label, use_container_width=True, key="inprog_mobile_shortages_toggle"):
-                    st.session_state[shortages_toggle_key] = not is_open
-                    st.rerun()
-                if st.session_state.get(shortages_toggle_key, False):
-                    _render_inprog_shortages_controls(show_header=False)
-            else:
-                _render_inprog_shortages_controls(show_header=True)
+            shortages_toggle_key = "inprog_shortages_open"
+            legacy_shortages_toggle_key = "inprog_mobile_shortages_open"
+            if shortages_toggle_key not in st.session_state:
+                if legacy_shortages_toggle_key in st.session_state:
+                    st.session_state[shortages_toggle_key] = bool(
+                        st.session_state.get(legacy_shortages_toggle_key, False)
+                    )
+                else:
+                    st.session_state[shortages_toggle_key] = not is_mobile_inprog
+
+            is_open = bool(st.session_state.get(shortages_toggle_key, not is_mobile_inprog))
+            toggle_label = "Select Shortages" if not is_open else "Hide Shortages"
+            if st.button(toggle_label, use_container_width=True, key="inprog_shortages_toggle"):
+                st.session_state[shortages_toggle_key] = not is_open
+                st.rerun()
+
+            if st.session_state.get(shortages_toggle_key, False):
+                _render_inprog_shortages_controls(show_header=not is_mobile_inprog)
         elif inprog_truck and not st.session_state.get("shorts_disabled") and not guest_read_only and not can_access_short_sheet:
             st.caption("Short sheet workflow is restricted for your role.")
 
@@ -14438,7 +15145,70 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                         unsafe_allow_html=True,
                     )
         else:
-            _render_inprog_daily_notes_panel()
+            if inprog_layout_is_original:
+                route_targets_now_right = _truck_route_targets()
+                inprog_truck_num_right = int(inprog_truck)
+                inprog_route_target_right = int(
+                    route_targets_now_right.get(inprog_truck_num_right, inprog_truck_num_right)
+                )
+
+                route_target_chip_html_right = ""
+                if int(inprog_route_target_right) != int(inprog_truck_num_right):
+                    route_target_chip_html_right = (
+                        "  <div style='display:flex; justify-content:center; margin:4px 0 0 0;'>"
+                        "    <div style='display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border-radius:999px; border:1px solid rgba(147,197,253,0.46); background:rgba(30,58,138,0.34);'>"
+                        "      <span style='font-size:11px; letter-spacing:0.12em; text-transform:uppercase; opacity:0.82; font-weight:800;'>Loading Route</span>"
+                        f"      <span style='font-size:22px; font-weight:900; line-height:1.0; color:#93c5fd;'>#{inprog_route_target_right}</span>"
+                        "    </div>"
+                        "  </div>"
+                    )
+
+                load_day_chip_html_right = ""
+                selected_day_num_right = _effective_truck_load_day(int(inprog_truck_num_right))
+                if _holiday_mode_active() and selected_day_num_right is not None:
+                    load_day_chip_html_right = (
+                        "  <div style='display:flex; justify-content:center; margin:4px 0 0 0;'>"
+                        "    <div style='display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border-radius:999px; border:1px solid rgba(110,231,183,0.52); background:rgba(6,78,59,0.34);'>"
+                        "      <span style='font-size:11px; letter-spacing:0.12em; text-transform:uppercase; opacity:0.86; font-weight:800; color:#a7f3d0;'>Load Day</span>"
+                        f"      <span style='font-size:20px; font-weight:900; line-height:1.0; color:#d1fae5;'>{html.escape(load_day_label(int(selected_day_num_right)))}</span>"
+                        "    </div>"
+                        "  </div>"
+                    )
+
+                st.markdown(
+                    (
+                        "<div style='width:100%; max-width:600px; margin:0 auto 6px auto; text-align:center;'>"
+                        "  <div style='font-size:19px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
+                        f"  <div style='font-size:82px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
+                        f"{route_target_chip_html_right}"
+                        f"{load_day_chip_html_right}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+                dust_garment_trucks_right: set[int] = set()
+                for raw_truck in (st.session_state.get("dust_garment_trucks") or set()):
+                    try:
+                        truck_num = int(raw_truck)
+                    except Exception:
+                        continue
+                    if truck_num in DUST_GARMENT_TRUCK_OPTIONS:
+                        dust_garment_trucks_right.add(truck_num)
+                if int(inprog_truck_num_right) in dust_garment_trucks_right:
+                    st.markdown(
+                        (
+                            "<div style='display:flex; justify-content:center; margin:0 0 8px 0;'>"
+                            "  <div style='display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border-radius:999px; border:1px solid rgba(244,114,182,0.72); background:rgba(190,24,93,0.36);'>"
+                            "    <span style='font-size:11px; letter-spacing:0.12em; text-transform:uppercase; opacity:0.92; font-weight:900; color:#fbcfe8;'>Grab Garments</span>"
+                            "  </div>"
+                            "</div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+            else:
+                _render_inprog_daily_notes_panel()
+
             elapsed = elapsed_seconds()
             # Render elapsed timer into a DOM element that JS will update every second.
             init_elapsed = int(elapsed)
@@ -14751,6 +15521,13 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     """,
                     height=0,
                     width=0,
+                )
+
+            if inprog_layout_is_original:
+                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                _render_inprog_next_up_controls(
+                    set_button_key="inprog_manage_next_up_button_original",
+                    clear_button_key="inprog_next_up_clear_top_right_original",
                 )
 
             # Timer runs in the component iframe above.
@@ -15173,17 +15950,40 @@ elif st.session_state.active_screen == "SUPERVISOR":
         st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
         st.write("#### Daily Notes (visible all day)")
         reminder = st.session_state.get("daily_notes", "")
-        new_reminder = st.text_area(
-            "Edit daily notes",
-            value=reminder,
-            height=110,
-            key="sup_global_reminder_text",
-        )
-        if new_reminder != reminder:
-            st.session_state["daily_notes"] = new_reminder
-            save_state()
-            logging.info("Daily notes updated from Management tab.")
-            st.success("Daily notes updated.")
+        daily_notes_editor_key = "sup_global_reminder_text"
+        if st.session_state.get(daily_notes_editor_key, reminder) != reminder:
+            st.session_state[daily_notes_editor_key] = reminder
+        with st.form("sup_daily_notes_form", clear_on_submit=False):
+            new_reminder = st.text_area(
+                "Edit daily notes",
+                value=reminder,
+                height=110,
+                key=daily_notes_editor_key,
+            )
+            notes_save_col, notes_clear_col = st.columns([1, 1])
+            with notes_save_col:
+                save_daily_notes = st.form_submit_button("Save daily notes", use_container_width=True)
+            with notes_clear_col:
+                clear_daily_notes = st.form_submit_button("Clear daily notes", use_container_width=True)
+
+        if save_daily_notes:
+            cleaned_reminder = str(new_reminder or "")
+            if cleaned_reminder != str(reminder or ""):
+                st.session_state["daily_notes"] = cleaned_reminder
+                save_state()
+                logging.info("Daily notes updated from Management tab.")
+                st.success("Daily notes updated.")
+            else:
+                st.info("No daily note changes to save.")
+
+        if clear_daily_notes:
+            if str(reminder or ""):
+                st.session_state["daily_notes"] = ""
+                save_state()
+                logging.info("Daily notes cleared from Management tab.")
+                st.success("Daily notes cleared.")
+            else:
+                st.info("Daily notes are already empty.")
 
     st.markdown("#### Access and Preferences")
     _render_user_management_dropdown()
@@ -15217,6 +16017,20 @@ elif st.session_state.active_screen == "SUPERVISOR":
             "Enable live truck button styling",
             value=bool(st.session_state.get("live_button_styling", True)),
             key="mgmt_live_button_styling_pick",
+        )
+        current_inprog_layout_style = _normalize_inprog_layout_style(
+            st.session_state.get("inprog_layout_style")
+        )
+        inprog_layout_style_pick = st.selectbox(
+            "In Progress layout",
+            options=INPROG_LAYOUT_OPTIONS,
+            index=INPROG_LAYOUT_OPTIONS.index(current_inprog_layout_style),
+            key="mgmt_inprog_layout_style_pick",
+            help=(
+                "Current Left keeps the Current Truck panel on the left. "
+                "Current Right swaps the two existing desktop columns. "
+                "Original places Select Shortages + Mini Pace on the left and Current Truck + Elapsed + Finish Loading + Next Up on the right."
+            ),
         )
 
         st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
@@ -15265,6 +16079,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state.timezone_key = tz_pick
             st.session_state.ui_theme = "Dark"
             st.session_state.live_button_styling = bool(live_button_styling_pick)
+            st.session_state.inprog_layout_style = _normalize_inprog_layout_style(inprog_layout_style_pick)
             st.session_state.status_badge_colors = {
                 "dirty": _normalize_hex_color(badge_dirty_pick, DEFAULT_STATUS_BADGE_COLORS["dirty"]),
                 "shop": _normalize_hex_color(badge_shop_pick, DEFAULT_STATUS_BADGE_COLORS["shop"]),
@@ -15484,7 +16299,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
 
             with st.expander("Archive calendar", expanded=False):
-                st.caption("Choose a saved history date to open that archived workday snapshot.")
+                st.caption("Choose a saved history date to view that archived workday snapshot.")
+                if bool(st.session_state.get("archive_view_mode")):
+                    current_view_key = str(st.session_state.get("archive_view_date_key") or _current_run_date_key() or "")
+                    if current_view_key:
+                        st.caption(f"Archive View active: {current_view_key}")
+                    else:
+                        st.caption("Archive View active")
 
                 archive_dates = _available_state_history_run_dates()
                 archive_picker_key = "sup_archive_run_date_pick"
@@ -15501,12 +16322,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         format_func=lambda d: f"{fmt_long_date(d)} ({d.isoformat()})",
                     )
 
-                    if st.button("Open archived day", use_container_width=True, key="sup_open_archive_day_btn"):
+                    if st.button("View archived day", use_container_width=True, key="sup_open_archive_day_btn"):
                         target_date = selected_archive_date if isinstance(selected_archive_date, date) else default_archive_date
+                        if not bool(st.session_state.get("archive_view_mode")):
+                            st.session_state["archive_live_state_snapshot"] = _serialize_state()
                         apply_run_config(target_date, [target_date + timedelta(days=1)])
+                        st.session_state["archive_view_mode"] = True
+                        st.session_state["archive_view_date_key"] = target_date.isoformat()
                         st.session_state.active_screen = "UNLOAD"
-                        _mark_and_save()
-                        st.success(f"Opened archived day {target_date.isoformat()}.")
                         st.rerun()
                 else:
                     st.caption("No saved state history files found yet.")
@@ -15529,13 +16352,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
         with st.expander("2) Pace controls", expanded=False):
             st.caption("Manual override, loader scaling, and conservative buffers are grouped below.")
+            st.caption("Use the Apply button in each section to save changes.")
 
             with st.expander("Manual pace average", expanded=False):
                 st.caption("Override average per truck used by Mini Pace, Historical Pace, and Load Pace cards.")
 
                 ui_override_enabled_key = "mgmt_dev_pace_avg_override_enabled"
                 ui_override_seconds_key = "mgmt_dev_pace_avg_override_seconds"
-                override_enabled_pending_key = "mgmt_dev_pace_avg_override_enabled_pending"
 
                 persisted_override_enabled = _to_bool(st.session_state.get("pace_avg_override_enabled"), False)
                 try:
@@ -15545,10 +16368,6 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 except Exception:
                     persisted_override_seconds = PACE_OVERRIDE_DEFAULT_SECONDS
                 persisted_override_seconds = max(60, min(3600, persisted_override_seconds))
-
-                pending_override_enabled = st.session_state.pop(override_enabled_pending_key, None)
-                if pending_override_enabled is not None:
-                    st.session_state[ui_override_enabled_key] = bool(pending_override_enabled)
 
                 if ui_override_enabled_key not in st.session_state:
                     st.session_state[ui_override_enabled_key] = bool(persisted_override_enabled)
@@ -15575,27 +16394,26 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     and not bool(override_enabled)
                 )
                 effective_override_enabled = bool(override_enabled) or auto_enable_from_value_change
-                if auto_enable_from_value_change:
-                    st.session_state[override_enabled_pending_key] = True
 
                 st.caption(
                     f"Current pace average input: {seconds_to_mmss(normalized_override_seconds)} "
                     f"({'Manual Override' if effective_override_enabled else 'Historical Average'})"
                 )
-                if effective_override_enabled:
-                    if st.button("Disable manual override", key="mgmt_dev_disable_pace_override"):
-                        st.session_state[override_enabled_pending_key] = False
-                        st.session_state["pace_avg_override_enabled"] = False
-                        _mark_and_save()
-                        st.rerun()
+                if auto_enable_from_value_change:
+                    st.caption("Changing seconds while unchecked will enable manual override when applied.")
 
-                if (
-                    bool(effective_override_enabled) != bool(persisted_override_enabled)
-                    or int(normalized_override_seconds) != int(persisted_override_seconds)
-                ):
+                if st.button("Apply manual pace settings", key="mgmt_dev_apply_pace_override", use_container_width=True):
+                    has_changes = (
+                        bool(effective_override_enabled) != bool(persisted_override_enabled)
+                        or int(normalized_override_seconds) != int(persisted_override_seconds)
+                    )
                     st.session_state["pace_avg_override_enabled"] = bool(effective_override_enabled)
                     st.session_state["pace_avg_override_seconds"] = int(normalized_override_seconds)
                     _mark_and_save()
+                    if has_changes:
+                        st.success("Manual pace settings saved.")
+                    else:
+                        st.info("No manual pace changes to save.")
                     st.rerun()
 
             with st.expander("Loader scaling", expanded=False):
@@ -15649,13 +16467,18 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     f"({_pace_loader_multiplier_caption(tuned_loader_multiplier)})."
                 )
 
-                if (
-                    int(tuned_loader_active) != int(persisted_loader_active)
-                    or int(tuned_loader_baseline) != int(persisted_loader_baseline)
-                ):
+                if st.button("Apply loader scaling", key="mgmt_dev_apply_loader_scaling", use_container_width=True):
+                    has_changes = (
+                        int(tuned_loader_active) != int(persisted_loader_active)
+                        or int(tuned_loader_baseline) != int(persisted_loader_baseline)
+                    )
                     st.session_state["pace_loader_active_count"] = int(tuned_loader_active)
                     st.session_state["pace_loader_baseline_count"] = int(tuned_loader_baseline)
                     _mark_and_save()
+                    if has_changes:
+                        st.success("Loader scaling saved.")
+                    else:
+                        st.info("No loader scaling changes to save.")
                     st.rerun()
 
             with st.expander("Conservative buffer", expanded=False):
@@ -15731,22 +16554,27 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     f"Percent {tuned_percent_ratio * 100.0:.1f}%"
                 )
 
-                c_reset, _ = st.columns([1, 3])
+                c_reset, c_apply = st.columns([1, 2])
                 with c_reset:
                     if st.button("Reset buffers", key="mgmt_dev_reset_pace_buffers", use_container_width=True):
                         st.session_state[reset_pace_buffers_pending_key] = True
                         st.rerun()
-
-                if (
-                    int(tuned_base_seconds) != int(persisted_base_seconds)
-                    or int(tuned_per_truck_seconds) != int(persisted_per_truck_seconds)
-                    or abs(float(tuned_percent_ratio) - float(persisted_percent_ratio)) >= 0.0001
-                ):
-                    st.session_state["pace_buffer_base_seconds"] = int(tuned_base_seconds)
-                    st.session_state["pace_buffer_per_truck_seconds"] = int(tuned_per_truck_seconds)
-                    st.session_state["pace_buffer_percent"] = float(round(tuned_percent_ratio, 4))
-                    _mark_and_save()
-                    st.rerun()
+                with c_apply:
+                    if st.button("Apply conservative buffer", key="mgmt_dev_apply_pace_buffers", use_container_width=True):
+                        has_changes = (
+                            int(tuned_base_seconds) != int(persisted_base_seconds)
+                            or int(tuned_per_truck_seconds) != int(persisted_per_truck_seconds)
+                            or abs(float(tuned_percent_ratio) - float(persisted_percent_ratio)) >= 0.0001
+                        )
+                        st.session_state["pace_buffer_base_seconds"] = int(tuned_base_seconds)
+                        st.session_state["pace_buffer_per_truck_seconds"] = int(tuned_per_truck_seconds)
+                        st.session_state["pace_buffer_percent"] = float(round(tuned_percent_ratio, 4))
+                        _mark_and_save()
+                        if has_changes:
+                            st.success("Conservative buffer saved.")
+                        else:
+                            st.info("No conservative buffer changes to save.")
+                        st.rerun()
 
         with st.expander("3) Export and import", expanded=False):
             durations_download_bytes = b"[]\n"
@@ -16813,6 +17641,13 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
 # --------------------------
 elif st.session_state.active_screen == "UNLOAD":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
+    _apply_mobile_touch_target_styles(
+        button_min_height_px=58,
+        button_font_px=18,
+        input_min_height_px=56,
+        input_font_px=19,
+        widget_spacing_rem=0.2,
+    )
 
     if _is_mobile_client():
         unload_watch_col = st.container()
@@ -16900,7 +17735,13 @@ elif st.session_state.active_screen == "UNLOAD":
 
             _apply_primary_button_color_map_for_labels(visible_color_map)
             if mobile_now:
-                _force_mobile_button_grid(visible_labels, mobile_cols=2, primary_only=True)
+                _force_mobile_button_grid(
+                    visible_labels,
+                    mobile_cols=2,
+                    primary_only=True,
+                    cell_gap_rem=0.62,
+                    min_button_height_px=64,
+                )
             return
 
         st.session_state.pop("unload_mobile_sent_order", None)
@@ -16926,6 +17767,8 @@ elif st.session_state.active_screen == "UNLOAD":
                 mobile_labels,
                 mobile_cols=2,
                 primary_only=True,
+                cell_gap_rem=0.62,
+                min_button_height_px=64,
             )
         if clicked_truck is not None:
             t = int(clicked_truck)
@@ -17165,6 +18008,13 @@ elif st.session_state.active_screen == "TRUCK":
 # Batch page (opened when ?pick= is provided)
 # --------------------------
 elif st.session_state.active_screen == "BATCH":
+    _apply_mobile_touch_target_styles(
+        button_min_height_px=58,
+        button_font_px=18,
+        input_min_height_px=56,
+        input_font_px=20,
+        widget_spacing_rem=0.2,
+    )
     render_page_heading("Batch Assignment")
     t = st.session_state.get("unload_inprog_truck")
     if t is None:
@@ -17219,6 +18069,7 @@ elif st.session_state.active_screen == "BATCH":
             (function(){{
                 try {{
                 const root = window.parent.document;
+                const isMobile = {str(_is_mobile_client()).lower()};
                 const inputs = root.querySelectorAll('input[aria-label="Wearers"]');
                 inputs.forEach((el) => {{
                     el.setAttribute('inputmode', 'numeric');
@@ -17228,6 +18079,13 @@ elif st.session_state.active_screen == "BATCH":
                     el.setAttribute('autocapitalize', 'off');
                     el.setAttribute('autocomplete', 'off');
                     el.setAttribute('spellcheck', 'false');
+                    if (isMobile) {{
+                        el.style.setProperty('min-height', '56px', 'important');
+                        el.style.setProperty('font-size', '22px', 'important');
+                        el.style.setProperty('line-height', '1.1', 'important');
+                        el.style.setProperty('padding-top', '8px', 'important');
+                        el.style.setProperty('padding-bottom', '8px', 'important');
+                    }}
                     if (!el.dataset.batchLiveBound) {{
                         el.dataset.batchLiveBound = '1';
                         el.addEventListener('input', () => {{
@@ -17237,7 +18095,6 @@ elif st.session_state.active_screen == "BATCH":
                 }});
 
                 const target = inputs.length ? inputs[inputs.length - 1] : null;
-                const isMobile = {str(_is_mobile_client()).lower()};
                 const focusToken = 'batch-wearers-{int(t)}-{int(st.session_state.get("nav_seq") or 0)}';
                 if (isMobile && target && window.parent.__wearersFocusToken !== focusToken) {{
                     const openKeyboard = () => {{
@@ -17906,13 +18763,13 @@ elif st.session_state.active_screen == "LOAD":
                 "<style>"
                 ".st-key-load_pace_shift_view{margin:0 !important;}"
                 ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
-                ".load-pace-label{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;text-align:left;cursor:pointer;user-select:none;}"
-                ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;}"
-                ".load-pace-head-right{display:flex;align-items:center;gap:10px;}"
+                ".load-pace-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;text-align:left;user-select:none;}"
+                ".load-pace-toggle-hit{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;cursor:pointer;}"
+                ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
                 ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
                 ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
                 ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
-                ".load-pace-shift-host{display:flex;align-items:center;}"
+                ".load-pace-shift-host{display:flex;align-items:center;flex:0 0 auto;pointer-events:auto;position:relative;z-index:3;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view{width:min(160px,100%);margin:0 !important;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view [data-testid='stSelectbox'] > div{margin-bottom:0 !important;}"
                 ".load-pace-shift-host .st-key-load_pace_shift_view [data-baseweb='select'] > div{min-height:34px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:10px !important;}"
@@ -17922,13 +18779,13 @@ elif st.session_state.active_screen == "LOAD":
                 ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
                 "</style>"
                 f"<div class='load-pace-wrap' data-load-pace-card='1' style='border:{pace_border_style};'>"
-                f"  <div class='load-pace-label' data-load-pace-header='1' role='button' tabindex='0' style='background:{pace_header_gradient};'>"
-                f"    <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
-                "    <span class='load-pace-head-right'>"
-                "      <span class='load-pace-shift-host' data-load-pace-shift-host='1'></span>"
+                f"  <div class='load-pace-label' data-load-pace-header='1' style='background:{pace_header_gradient};'>"
+                "    <span class='load-pace-toggle-hit' data-load-pace-toggle-hit='1' role='button' tabindex='0'>"
+                f"      <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
                 f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
                 "      <span class='load-pace-chevron'>▾</span>"
                 "    </span>"
+                "    <span class='load-pace-shift-host' data-load-pace-shift-host='1'></span>"
                 "  </div>"
                 f"  <div class='load-pace-body'>{pace_body_html}</div>"
                 "</div>"
@@ -17945,19 +18802,40 @@ elif st.session_state.active_screen == "LOAD":
                     if (!cards || !cards.length) return;
                     const card = cards[cards.length - 1];
                     const header = card.querySelector('[data-load-pace-header="1"]');
+                    const toggleHit = card.querySelector('[data-load-pace-toggle-hit="1"]');
                     if (!header) return;
+                    if (!toggleHit) return;
                     const shiftHost = card.querySelector('[data-load-pace-shift-host="1"]');
-                    const shiftControl = root.querySelector('.st-key-load_pace_shift_view');
+                    const shiftControls = root.querySelectorAll('.st-key-load_pace_shift_view');
+                    const shiftControl = shiftControls.length ? shiftControls[shiftControls.length - 1] : null;
                     if (shiftHost && shiftControl && shiftControl.parentElement !== shiftHost) {
                         shiftHost.appendChild(shiftControl);
                     }
-                    if (shiftControl && !shiftControl.dataset.boundLoadPaceShiftStop) {
+                    const eventIsShiftControlInteraction = (event) => {
+                        try {
+                            const target = event && event.target;
+                            if (!target || !target.closest) return false;
+                            return !!target.closest(
+                                '[data-load-pace-shift-host="1"], .st-key-load_pace_shift_view, [data-baseweb="select"], [role="combobox"], div[data-baseweb="popover"]'
+                            );
+                        } catch (e) {
+                            return false;
+                        }
+                    };
+
+                    const bindShiftStopPropagation = (node, token) => {
+                        if (!node || node.dataset[token]) return;
                         const stopEvent = (event) => { event.stopPropagation(); };
-                        shiftControl.addEventListener('mousedown', stopEvent);
-                        shiftControl.addEventListener('click', stopEvent);
-                        shiftControl.addEventListener('keydown', stopEvent);
-                        shiftControl.dataset.boundLoadPaceShiftStop = '1';
-                    }
+                        node.addEventListener('pointerdown', stopEvent, true);
+                        node.addEventListener('mousedown', stopEvent, true);
+                        node.addEventListener('touchstart', stopEvent, true);
+                        node.addEventListener('click', stopEvent, true);
+                        node.addEventListener('keydown', stopEvent, true);
+                        node.dataset[token] = '1';
+                    };
+
+                    bindShiftStopPropagation(shiftHost, 'boundLoadPaceShiftHostStop');
+                    bindShiftStopPropagation(shiftControl, 'boundLoadPaceShiftStop');
 
                     const storage = (() => {
                         try { return window.parent.localStorage; } catch (e) { return null; }
@@ -17984,22 +18862,26 @@ elif st.session_state.active_screen == "LOAD":
 
                     applyCollapsed();
 
-                    if (!header.dataset.boundLoadPaceToggle) {
+                    if (!toggleHit.dataset.boundLoadPaceToggle) {
                         const toggle = () => {
                             const willCollapse = !card.classList.contains('collapsed');
                             card.classList.toggle('collapsed', willCollapse);
                             setCollapsed(willCollapse);
                         };
 
-                        header.addEventListener('click', toggle);
-                        header.addEventListener('keydown', (event) => {
+                        toggleHit.addEventListener('click', (event) => {
+                            if (eventIsShiftControlInteraction(event)) return;
+                            toggle();
+                        });
+                        toggleHit.addEventListener('keydown', (event) => {
+                            if (eventIsShiftControlInteraction(event)) return;
                             if (event.key === 'Enter' || event.key === ' ') {
                                 event.preventDefault();
                                 toggle();
                             }
                         });
 
-                        header.dataset.boundLoadPaceToggle = '1';
+                        toggleHit.dataset.boundLoadPaceToggle = '1';
                     }
                 } catch (e) {}
             })();

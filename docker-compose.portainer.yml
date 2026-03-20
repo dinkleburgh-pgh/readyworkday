@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   truckapp:
-    image: ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.8
+    image: ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.9
     container_name: truckapp
     working_dir: /app
     ports:

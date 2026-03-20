@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.9 - 2026-03-20
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.6.9** with release date **20260320**.
+2. Updated deployment image references in compose files to **v1.6.9**.
+3. Updated README release and deployment tag references to **v1.6.9**.
+
 ## v1.6.7 - 2026-03-18
 
 Ordered list of final changes included in this release:

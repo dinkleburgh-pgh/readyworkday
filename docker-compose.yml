@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.8
+    image: ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.9
     container_name: truckapp
     working_dir: /app
     ports:

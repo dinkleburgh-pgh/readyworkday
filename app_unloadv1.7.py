@@ -6203,7 +6203,7 @@ if setup_was_bootstrapped and str(st.session_state.get("active_screen") or "").u
     st.session_state["active_screen"] = _default_screen_for_role(_current_auth_role())
 
 if setup_was_bootstrapped:
-    _mark_and_save()
+    save_state()
 
 if "archive_view_mode" not in st.session_state:
     st.session_state["archive_view_mode"] = False

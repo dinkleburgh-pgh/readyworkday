@@ -5877,7 +5877,12 @@ def _restore_day_state_from_archive(archived_state: dict, run_date: date, ship_d
     )
 
 
-def apply_run_config(run_date: date, ship_dates: list[date], restore_archive: bool = True):
+def apply_run_config(
+    run_date: date,
+    ship_dates: list[date],
+    restore_archive: bool = True,
+    force_reset: bool = False,
+):
     new_key = _run_date_key(run_date)
     old_key = _current_run_date_key()
     old_ship_dates = st.session_state.get("ship_dates") or []
@@ -5921,10 +5926,10 @@ def apply_run_config(run_date: date, ship_dates: list[date], restore_archive: bo
         st.session_state.end_of_day_prompt_snooze_until = 0.0
     # Switching to a different day with no archive starts a new day.
     # Changing ship dates within the same day should not erase current load status.
-    if day_changed and new_key and not archived_state:
+    if (day_changed or force_reset) and new_key and not archived_state:
         day_num = ship_day_number(ship_dates[0]) if ship_dates else None
         reset_status_for_new_day(day_num)
-    elif day_changed and not new_key:
+    elif (day_changed or force_reset) and not new_key:
         day_num = ship_day_number(ship_dates[0]) if ship_dates else None
         reset_status_for_new_day(day_num)
     elif (not day_changed) and ship_days_changed:
@@ -19904,6 +19909,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 selected_load_date,
                 [selected_load_date + timedelta(days=1)],
                 restore_archive=False,
+                force_reset=True,
             )
             st.session_state.active_screen = "UNLOAD"
             _mark_and_save()

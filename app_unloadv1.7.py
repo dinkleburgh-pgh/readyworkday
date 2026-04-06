@@ -14224,7 +14224,6 @@ def apply_off_schedule(day_num: int | None, exclude_trucks: set[int] | None = No
     excluded = {int(t) for t in (exclude_trucks or set())}
     blocked_status = (
         set(st.session_state.get("off_set") or set())
-        | set(st.session_state.get("spare_set") or set())
         | set(st.session_state.get("shop_set") or set())
         | set(st.session_state.get("special_set") or set())
     )
@@ -14233,6 +14232,7 @@ def apply_off_schedule(day_num: int | None, exclude_trucks: set[int] | None = No
             continue
         if t in blocked_status:
             continue
+        st.session_state.spare_set.discard(t)
         st.session_state.cleaned_set.add(t)
         st.session_state.inprog_set.discard(t)
         st.session_state.loaded_set.discard(t)
@@ -16759,15 +16759,17 @@ if _is_mobile_client():
                         const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
                         if (!sidebar) return;
 
+                        const collapseSidebar = () => {
+                            const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+                            if (collapse) collapse.click();
+                        };
+
                         const bindBtn = (btn) => {
                             if (!btn || btn.dataset.mobileAutoCollapseBound === '1') return;
                             btn.dataset.mobileAutoCollapseBound = '1';
                             btn.addEventListener('click', () => {
                                 setTimeout(() => {
-                                    const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
-                                    if (collapse) {
-                                        collapse.click();
-                                    }
+                                    collapseSidebar();
                                 }, 80);
                             }, { passive: true });
                         };
@@ -16777,6 +16779,30 @@ if _is_mobile_client():
                             sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
                         });
                         observer.observe(sidebar, { childList: true, subtree: true });
+
+                        if (!root.__truckOutsideTapSidebarCloseBound) {
+                            root.__truckOutsideTapSidebarCloseBound = true;
+                            const onOutsideTap = (ev) => {
+                                try {
+                                    const viewportW = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
+                                    if (viewportW > 980) return;
+                                    const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                                    if (!expanded) return;
+
+                                    const target = ev && ev.target ? ev.target : null;
+                                    if (!target) return;
+
+                                    if (sidebar.contains(target)) return;
+                                    const toggleWrap = doc.querySelector('[data-testid="stSidebarCollapseButton"]');
+                                    if (toggleWrap && toggleWrap.contains(target)) return;
+
+                                    collapseSidebar();
+                                } catch (e) {}
+                            };
+
+                            doc.addEventListener('click', onOutsideTap, true);
+                            doc.addEventListener('touchend', onOutsideTap, true);
+                        }
                     } catch (e) {}
                 })();
                 </script>

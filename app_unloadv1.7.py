@@ -7620,12 +7620,33 @@ def scheduled_trucks_for_current_load_day() -> set[int]:
 def unload_trucks_for_current_day() -> set[int]:
     previous_day_num = _normalize_load_day_num(_previous_ship_day_num(_current_ship_day_num()))
     if previous_day_num is None:
-        return set()
+        previous_day_routes: set[int] = set()
+    else:
+        previous_day_routes = set()
+        raw_map = st.session_state.get("truck_load_day_by_truck") or {}
+        if isinstance(raw_map, dict):
+            for truck_raw, day_raw in raw_map.items():
+                try:
+                    truck_num = int(truck_raw)
+                except Exception:
+                    continue
+                day_val = _normalize_load_day_num(day_raw)
+                if day_val is None or int(day_val) != int(previous_day_num):
+                    continue
+                if truck_num in set(FLEET):
+                    previous_day_routes.add(int(truck_num))
 
+    # Off-today routes do not need unload unless explicitly marked ran-special.
+    off_today_routes = {int(t) for t in off_trucks_for_today()}
+    ran_special_routes = {int(t) for t in (st.session_state.get("special_set") or set())}
+    persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
+
+    unload_targets = (previous_day_routes - off_today_routes) | ran_special_routes
+    unload_targets -= persistent_spares
     return {
         int(t)
-        for t in FLEET
-        if _normalize_load_day_num(_effective_truck_load_day(int(t))) == int(previous_day_num)
+        for t in unload_targets
+        if int(t) in set(FLEET)
     }
 
 
@@ -14387,6 +14408,9 @@ def reset_status_for_new_day(day_num: int | None):
             previous_day_num,
             exclude_trucks=used_for_route_oos_coverage,
         )
+        # Current-day OFF routes should start as Unloaded unless blocked by
+        # explicit OOS/Shop/Special status.
+        apply_off_schedule(current_or_selected_day_num)
 
     # Force previously used special/coverage trucks to start Dirty on the new day.
     # These trucks should not begin as Unloaded.

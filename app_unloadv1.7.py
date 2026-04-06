@@ -14244,7 +14244,15 @@ def reset_status_for_new_day(day_num: int | None):
     batching_disabled = bool(st.session_state.get("batching_disabled"))
     shorts_mode = st.session_state.get("shorts_mode") or SHORTS_MODE_BUTTONS
     persistent_spares = {int(t) for t in PERSISTENT_SPARE_TRUCKS}
-    preserved_oos = {int(t) for t in (st.session_state.get("off_set") or set())}
+    current_or_selected_day_num = day_num if day_num is not None else _current_ship_day_num()
+    previous_day_num = _previous_ship_day_num(current_or_selected_day_num)
+    previous_day_off_routes = {int(t) for t in off_trucks_for_day(previous_day_num)}
+    current_day_off_routes = {int(t) for t in off_trucks_for_day(current_or_selected_day_num)}
+
+    raw_off_set = {int(t) for t in (st.session_state.get("off_set") or set())}
+    # Keep true OOS routes, but do not retain prior-day scheduled OFF routes
+    # as OOS unless they are also scheduled OFF for the current day.
+    preserved_oos = raw_off_set - (previous_day_off_routes - current_day_off_routes)
     preserved_shop = {int(t) for t in (st.session_state.get("shop_set") or set())}
 
     preserved_oos_assignments: dict[int, int] = {}
@@ -14349,10 +14357,9 @@ def reset_status_for_new_day(day_num: int | None):
 
     # Holiday mode runs all routes each day, so do not auto-promote previous
     # day's off-schedule trucks to Unloaded.
-    current_or_selected_day_num = day_num if day_num is not None else _current_ship_day_num()
     if not _holiday_mode_active():
         apply_off_schedule(
-            _previous_ship_day_num(current_or_selected_day_num),
+            previous_day_num,
             exclude_trucks=used_for_route_oos_coverage,
         )
 
@@ -14360,6 +14367,7 @@ def reset_status_for_new_day(day_num: int | None):
     # These trucks should not begin as Unloaded.
     force_dirty_trucks = (
         {int(t) for t in used_for_route_oos_coverage}
+        | {int(t) for t in used_spares_prev_day}
         | {int(t) for t in special_used_prev_day}
     )
     force_dirty_trucks -= {int(t) for t in (st.session_state.get("off_set") or set())}
@@ -16739,6 +16747,42 @@ if role_access_notice:
 # SIDEBAR
 # ==========================================================
 st.sidebar.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
+if _is_mobile_client():
+        components.html(
+                """
+                <script>
+                (function(){
+                    try {
+                        const root = window.parent || window;
+                        if (!root || !root.document) return;
+                        const doc = root.document;
+                        const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+                        if (!sidebar) return;
+
+                        const bindBtn = (btn) => {
+                            if (!btn || btn.dataset.mobileAutoCollapseBound === '1') return;
+                            btn.dataset.mobileAutoCollapseBound = '1';
+                            btn.addEventListener('click', () => {
+                                setTimeout(() => {
+                                    const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+                                    if (collapse) {
+                                        collapse.click();
+                                    }
+                                }, 80);
+                            }, { passive: true });
+                        };
+
+                        sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
+                        const observer = new MutationObserver(() => {
+                            sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
+                        });
+                        observer.observe(sidebar, { childList: true, subtree: true });
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+        )
 if st.session_state.setup_done:
     run = st.session_state.run_date
     ship = st.session_state.ship_dates[0] if st.session_state.ship_dates else None

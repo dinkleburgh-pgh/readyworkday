@@ -11,6 +11,7 @@ Ordered list of final changes included in this release:
 5. Enhanced STATUS_SHOP rail UX by adding clear active-mode highlighting for **Send** vs **Return**, removing extra separators, and aligning button block vertical start with the route card.
 6. Updated deployment defaults/tags to **v1.7.0** in `docker-compose.yml`, `docker-compose.portainer.yml`, and `docker-entrypoint.sh`.
 7. Updated README release, deployment, and pinned-image references to **v1.7.0**.
+8. Promoted `app_unloadv1.7.py` as the main app entry file and moved previous root app version files into `backups/` to prevent runtime file-selection confusion.
 
 ## v1.6.9 - 2026-03-20
 

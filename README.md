@@ -6,7 +6,7 @@ Current release: **v1.7.0**
 
 ## Recent updates (v1.7.0)
 
-- Updated app release metadata to **v1.7.0** (`20260406`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Updated app release metadata to **v1.7.0** (`20260406`) and promoted `app_unloadv1.7.py` as the main app entry file.
 - Fixed soft-reset and load-day initialization regressions so day-based status behavior no longer starts with all trucks as Unloaded.
 - Improved STATUS_UNLOADED and STATUS_SHOP rail layouts for better card/control fit and visual alignment.
 - Added clearer STATUS_SHOP mode selection highlighting and refined rail separators for a cleaner control area.
@@ -68,7 +68,7 @@ Current release: **v1.7.0**
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-streamlit run app_unloadv1.6.py
+streamlit run app_unloadv1.7.py
 ```
 
 Then open: `http://localhost:8501`
@@ -83,7 +83,7 @@ chmod +x run_streamlit.sh
 Notes:
 - `run_streamlit.sh` starts Streamlit in the background.
 - Script log output goes to `.data/streamlit.log`.
-- The script runs `app_unloadv1.6.py` by default.
+- The script runs `app_unloadv1.7.py` by default.
 
 ## Containerized run (Docker)
 
@@ -108,14 +108,14 @@ docker compose up --build -d
 PowerShell:
 
 ```powershell
-$env:APP_FILE="app_unloadv1.6.py"
+$env:APP_FILE="app_unloadv1.7.py"
 docker compose up --build
 ```
 
 Bash:
 
 ```bash
-APP_FILE=app_unloadv1.6.py docker compose up --build
+APP_FILE=app_unloadv1.7.py docker compose up --build
 ```
 
 ## Deploy with Portainer
@@ -127,7 +127,7 @@ Use a **Git-based Stack** in Portainer.
 1. Push this workspace to GitHub/GitLab.
 2. In Portainer, open **Stacks → Add stack → Repository**.
 3. Set repository URL/branch and compose path to `docker-compose.yml`.
-4. Set env var `APP_FILE=app_unloadv1.6.py`.
+4. Set env var `APP_FILE=app_unloadv1.7.py`.
 5. Deploy.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
@@ -135,7 +135,7 @@ Use a **Git-based Stack** in Portainer.
 1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.7.0` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
-	- `APP_FILE=app_unloadv1.6.py`
+	- `APP_FILE=app_unloadv1.7.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
@@ -160,10 +160,10 @@ docker compose down
 
 ## Key project files
 
-- Main app (latest): `app_unloadv1.6.py`
-- Previous release entry file: `app_unloadv1.5.py`
-- Previous release snapshot: `backups/v1.4/app_unloadv1.4.py`
-- Legacy snapshots: `backups/v1.3/`, `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`
+- Main app (latest): `app_unloadv1.7.py`
+- Previous release entry file: `backups/v1.6/app_unloadv1.6.py`
+- Previous release snapshot: `backups/v1.5/app_unloadv1.5.py`
+- Legacy snapshots: `backups/v1.4/`, `backups/v1.3/`, `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`
 - Fleet config: `truck_fleet.json`
 - Load duration history: `load_durations.json`
 - State snapshots: `state_history/`

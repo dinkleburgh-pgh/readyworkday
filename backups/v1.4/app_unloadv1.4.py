@@ -51,10 +51,50 @@ st.set_page_config(page_title="Load Management", layout="centered")
 # ==========================================================
 # CONFIG
 # ==========================================================
-FLEET_MIN = 50
-FLEET_MAX = 96
-FLEET = list(range(FLEET_MIN, FLEET_MAX + 1))
-PERSISTENT_SPARE_TRUCKS = set(range(10, 18))
+DEFAULT_FLEET_TRUCKS = [
+    4,
+    7,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    64,
+    65,
+    66,
+    68,
+    69,
+    70,
+    73,
+    75,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    91,
+    92,
+    93,
+    94,
+    95,
+]
+PERSISTENT_SPARE_TRUCKS = {10, 11, 12, 13, 14, 15, 16, 17}
+FLEET_MIN = min(DEFAULT_FLEET_TRUCKS)
+FLEET_MAX = max(DEFAULT_FLEET_TRUCKS)
+FLEET = sorted(set(DEFAULT_FLEET_TRUCKS) | set(PERSISTENT_SPARE_TRUCKS))
 
 BATCH_COUNT = 6
 BATCH_CAP = 400  # cannot go over
@@ -923,6 +963,56 @@ def _delete_communications_message(message_id: str, actor_username: str, actor_r
 
     _save_communications_messages(kept_messages)
     return True, "Message deleted.", removed_message
+
+
+def _refresh_communications_censor_words() -> int:
+    global COMMUNICATIONS_CENSOR_WORDS, _CHAT_CENSOR_PATTERN
+
+    COMMUNICATIONS_CENSOR_WORDS = load_chat_censor_words()
+    _CHAT_CENSOR_PATTERN = (
+        re.compile(
+            r"\b(" + "|".join(re.escape(word) for word in sorted(COMMUNICATIONS_CENSOR_WORDS, key=len, reverse=True)) + r")\b",
+            flags=re.IGNORECASE,
+        )
+        if COMMUNICATIONS_CENSOR_WORDS
+        else None
+    )
+    return len(COMMUNICATIONS_CENSOR_WORDS)
+
+
+def _prune_communications_messages_by_age(max_age_days: float) -> tuple[int, int]:
+    all_messages = _load_communications_messages()
+    if not all_messages:
+        return 0, 0
+
+    days = max(1.0, float(max_age_days or 0.0))
+    cutoff_ts = time.time() - (days * 86_400)
+    kept_messages: list[dict] = []
+    for entry in all_messages:
+        try:
+            entry_ts = float(entry.get("ts") or 0.0)
+        except Exception:
+            entry_ts = 0.0
+        if entry_ts >= cutoff_ts:
+            kept_messages.append(entry)
+
+    removed_count = max(0, len(all_messages) - len(kept_messages))
+    if removed_count > 0:
+        _save_communications_messages(kept_messages)
+    return removed_count, len(kept_messages)
+
+
+def _keep_latest_communications_messages(keep_count: int) -> tuple[int, int]:
+    all_messages = _load_communications_messages()
+    if not all_messages:
+        return 0, 0
+
+    target_count = max(0, int(keep_count or 0))
+    kept_messages = all_messages[-target_count:] if target_count > 0 else []
+    removed_count = max(0, len(all_messages) - len(kept_messages))
+    if removed_count > 0:
+        _save_communications_messages(kept_messages)
+    return removed_count, len(kept_messages)
 
 
 def _clear_communications_messages() -> int:
@@ -2324,8 +2414,8 @@ try:
         extra_ints = [int(x) for x in extra]
         removed = st.session_state.get("removed_fleet") or []
         removed_ints = [int(x) for x in removed]
-        # Compute runtime FLEET = base range + extras - removed
-        base = set(range(FLEET_MIN, FLEET_MAX + 1))
+        # Compute runtime FLEET = configured defaults + extras - removed
+        base = set(DEFAULT_FLEET_TRUCKS) | set(PERSISTENT_SPARE_TRUCKS)
         FLEET = sorted((base | set(extra_ints)) - set(removed_ints))
         # Persist initial fleet file for future runs
         save_fleet_file(FLEET)
@@ -4849,7 +4939,7 @@ def mark_return_from_shop(truck: int, new_status_label: str):
     push_shop_notice(f"Returned from shop: #{t} — {new_status_label}", kind="return")
     log_action(f"Truck {t} returned from Shop")
 
-def render_next_up_controls(context_key: str):
+def render_next_up_controls(context_key: str, show_start_button: bool = False):
     unloaded = sorted(st.session_state.cleaned_set)
     current = st.session_state.get("next_up_truck")
     off_today = off_trucks_for_today()
@@ -4857,6 +4947,21 @@ def render_next_up_controls(context_key: str):
     st.write("### Next up queue")
     if current:
         st.info(f"Current next up: Truck {int(current)}")
+        if show_start_button and not st.session_state.inprog_set:
+            if st.button(
+                f"Start Next Up (Truck {int(current)})",
+                key=f"next_up_start_{context_key}",
+                use_container_width=True,
+            ):
+                if int(current) in st.session_state.shop_set:
+                    st.session_state.pending_start_truck = int(current)
+                    st.session_state.active_screen = "STATUS_CLEANED"
+                    _mark_and_save()
+                    st.rerun()
+                start_loading_truck(int(current))
+                _mark_and_save()
+                st.session_state.active_screen = "IN_PROGRESS"
+                st.rerun()
     else:
         st.caption("No next-up truck set.")
     if not unloaded:
@@ -5127,6 +5232,7 @@ def _set_shorts_button_state(truck: int, new_state: dict):
     state = st.session_state.get("shorts_button_state") or {}
     state[t] = new_state
     st.session_state.shorts_button_state = state
+    save_state()
 
 def _reset_shorts_button_state(truck: int):
     _set_shorts_button_state(truck, _default_shorts_button_state())
@@ -5157,8 +5263,13 @@ def _shorts_button_add_item(truck: int, label: str, qty: int):
         deduped_rows.append(row)
     deduped_rows.append({"item": target_label, "qty": int(qty), "note": existing_note})
     st.session_state.shorts[t] = deduped_rows
+    save_state()
 
-def render_shorts_button_flow(truck: int):
+def render_shorts_button_flow(
+    truck: int,
+    desktop_cols: int | None = None,
+    show_header: bool = True,
+):
     t = int(truck)
     state = _get_shorts_button_state(t)
     step = state.get("step") or "category"
@@ -5166,11 +5277,71 @@ def render_shorts_button_flow(truck: int):
     bulk_group = state.get("bulk_group")
     item = state.get("item")
 
-    st.write("### Select Shortages")
+    def _shorts_cols(default_cols: int) -> int:
+        if _is_mobile_client():
+            return _truck_grid_columns(default_cols)
+        if desktop_cols is None:
+            return max(1, int(default_cols))
+        return max(1, min(int(default_cols), int(desktop_cols)))
+
+    def _render_step_heading(title: str, context: str | None = None):
+        safe_title = html.escape(str(title or "").strip())
+        if not safe_title:
+            return
+        safe_context = html.escape(str(context or "").strip())
+        if safe_context:
+            st.markdown(
+                (
+                    "<div style='text-align:center; margin:0 0 0.45rem 0;'>"
+                    "  <div style='font-size:1rem; font-weight:800; line-height:1.15; opacity:0.9;'>"
+                    f"  {safe_title}"
+                    "  </div>"
+                    "  <div style='font-size:clamp(2.4rem, 7vw, 3.2rem); font-weight:900; line-height:1.0; margin-top:2px;'>"
+                    f"  {safe_context}"
+                    "  </div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            return
+
+        st.markdown(
+            (
+                "<div style='text-align:center; font-size:1.42rem; font-weight:900; "
+                "line-height:1.22; margin:0 0 0.4rem 0;'>"
+                f"{safe_title}"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+
+    def _selection_context(cat: str | None, bulk: str | None, selected_item: str | None) -> str:
+        item_text = str(selected_item or "").strip()
+        cat_text = str(cat or "").strip()
+        bulk_text = str(bulk or "").strip()
+        if cat_text == "Bulk":
+            if bulk_text and item_text:
+                return f"Bulk — {bulk_text} — {item_text}"
+            if bulk_text:
+                return f"Bulk — {bulk_text}"
+            if item_text:
+                return f"Bulk — {item_text}"
+            return "Bulk"
+        if cat_text and item_text:
+            return f"{cat_text} — {item_text}"
+        if cat_text:
+            return cat_text
+        return item_text
+
+    if show_header:
+        st.markdown(
+            "<div style='text-align:center; font-size:2rem; font-weight:700; margin:0 0 0.35rem 0;'>Select Shortages</div>",
+            unsafe_allow_html=True,
+        )
     if step == "category":
         cat_entries: list[tuple[str, str]] = [("cat", cat) for cat in SHORTS_BUTTON_MAP.keys()]
         cat_entries.append(("recents", "Recents"))
-        cols_per_row = _truck_grid_columns(len(cat_entries))
+        cols_per_row = _shorts_cols(len(cat_entries))
         for start in range(0, len(cat_entries), cols_per_row):
             row_entries = cat_entries[start : start + cols_per_row]
             row_cols = st.columns(cols_per_row)
@@ -5256,7 +5427,7 @@ def render_shorts_button_flow(truck: int):
     if step == "bulk_group":
         st.caption("Bulk group")
         groups = list(SHORTS_BUTTON_MAP.get("Bulk", {}).keys())
-        cols_per_row = _truck_grid_columns(3)
+        cols_per_row = _shorts_cols(3)
         for start in range(0, len(groups), cols_per_row):
             row_groups = groups[start : start + cols_per_row]
             row_cols = st.columns(cols_per_row)
@@ -5278,8 +5449,8 @@ def render_shorts_button_flow(truck: int):
         else:
             items = list(SHORTS_BUTTON_MAP.get(category or "", []))
             title = category or "Items"
-        st.caption(f"Select item — {title}")
-        cols_per_row = _truck_grid_columns(3)
+        _render_step_heading("Select Item", title)
+        cols_per_row = _shorts_cols(3)
         for start in range(0, len(items), cols_per_row):
             row_items = items[start : start + cols_per_row]
             row_cols = st.columns(cols_per_row)
@@ -5298,12 +5469,13 @@ def render_shorts_button_flow(truck: int):
 
     if step == "qty":
         label = item or ""
-        st.caption(f"Select amount for {label}")
+        context_label = _selection_context(category, bulk_group, label)
+        _render_step_heading("Select Amount", context_label if context_label else None)
         # Load quick-select values for this item
         quick_amounts = QUICK_AMOUNTS_MAP.get(label, [1, 2, 5, 10])
         if not isinstance(quick_amounts, list) or not quick_amounts:
             quick_amounts = [1, 2, 5, 10]
-        quick_cols_per_row = _truck_grid_columns(min(len(quick_amounts), 4))
+        quick_cols_per_row = _shorts_cols(min(len(quick_amounts), 4))
         # Quick-select buttons directly add the item
         for start in range(0, len(quick_amounts), quick_cols_per_row):
             row_amounts = quick_amounts[start : start + quick_cols_per_row]
@@ -6570,6 +6742,13 @@ if st.session_state.setup_done:
             if st.sidebar.button("Request Account", key="auth_open_request_btn", use_container_width=True):
                 st.session_state.auth_request_portal_pending = True
                 st.rerun()
+    version_label = str(_APP_VERSION).strip()
+    if version_label and not version_label.lower().startswith("v"):
+        version_label = f"v{version_label}"
+    st.sidebar.markdown(
+        f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label)}</div>",
+        unsafe_allow_html=True,
+    )
 
 nav_active_labels = set()
 nav_flash_labels = set()
@@ -7090,26 +7269,134 @@ elif st.session_state.active_screen == "IN_PROGRESS":
     else:
         left_col, center_col = st.columns([0.9, 2.1], gap="small")
     guest_read_only = _current_auth_role() == AUTH_ROLE_GUEST
+
+    def _finish_in_progress_loading(success_message: str):
+        if not inprog_truck:
+            return
+        t = int(inprog_truck)
+        sec = elapsed_seconds()
+        st.session_state.load_durations[t] = sec
+        append_load_duration(t, sec)
+        st.session_state.inprog_start_time = None
+        st.session_state.inprog_set.clear()
+        st.session_state.loaded_set.add(t)
+        st.session_state.load_finish_times[t] = time.time()
+        st.session_state.inprog_skip_confirm = False
+        _mark_and_save()
+        st.success(success_message)
+        st.session_state.active_screen = "STATUS_LOADED"
+        st.rerun()
+
     with left_col:
-        st.markdown(
-            (
-                "<div style='width:100%; margin:0 0 8px 0; position:-webkit-sticky; position:sticky; top:64px; align-self:flex-start; z-index:12;'>"
-                "  <div id='daily-notes-box' style='width:100%; min-width:0; max-width:340px; margin:0 auto; box-sizing:border-box; "
-                "      border-radius:16px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
-                "      background:rgba(15,23,42,0.65); box-shadow:0 12px 30px rgba(0,0,0,0.24); max-height:calc(100vh - 110px); display:flex; flex-direction:column;'>"
-                "    <div id='daily-notes-bar' style='display:flex; align-items:center; justify-content:center; "
-                "        padding:10px 12px; font-weight:900; font-size:18px; letter-spacing:0.16em; text-transform:uppercase; "
-                "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>"
-                "      <span style='margin:0 auto;'>Daily Notes</span>"
-                "    </div>"
-                "    <div id='daily-notes-body' style='padding:12px 14px; font-size:25.5px; font-weight:800; line-height:1.3; overflow-y:auto;'>"
-                f"      {notes_html}"
-                "    </div>"
-                "  </div>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
+        if is_mobile_inprog:
+            st.markdown(
+                (
+                    "<style>"
+                    ".inprog-mobile-notes-wrap{width:100%;margin:0 auto 8px auto;}"
+                    ".inprog-mobile-notes-toggle{display:none;}"
+                    ".inprog-mobile-notes-label{display:flex;align-items:center;justify-content:space-between;"
+                    "padding:10px 12px;font-weight:900;font-size:16px;letter-spacing:0.14em;text-transform:uppercase;"
+                    "text-align:center;background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26));"
+                    "border:1px solid rgba(34,197,94,0.45);border-radius:14px;cursor:pointer;user-select:none;}"
+                    ".inprog-mobile-notes-label .chev{transition:transform .24s ease;opacity:0.9;}"
+                    ".inprog-mobile-notes-body{max-height:0;overflow:hidden;transition:max-height .28s ease,padding .28s ease;"
+                    "padding:0 14px;font-size:22px;font-weight:800;line-height:1.28;"
+                    "border-left:1px solid rgba(34,197,94,0.45);border-right:1px solid rgba(34,197,94,0.45);"
+                    "border-bottom:1px solid rgba(34,197,94,0.45);border-radius:0 0 14px 14px;"
+                    "background:rgba(15,23,42,0.65);box-shadow:0 8px 20px rgba(0,0,0,0.2);}"
+                    ".inprog-mobile-notes-toggle:checked + .inprog-mobile-notes-label{border-radius:14px 14px 0 0;}"
+                    ".inprog-mobile-notes-toggle:checked + .inprog-mobile-notes-label .chev{transform:rotate(180deg);}"
+                    ".inprog-mobile-notes-toggle:checked ~ .inprog-mobile-notes-body{max-height:360px;padding:12px 14px;}"
+                    "</style>"
+                    "<div class='inprog-mobile-notes-wrap'>"
+                    "  <input id='inprog-mobile-notes-toggle' class='inprog-mobile-notes-toggle' type='checkbox'>"
+                    "  <label for='inprog-mobile-notes-toggle' class='inprog-mobile-notes-label'>"
+                    "    <span style='flex:1;text-align:center;'>Daily Notes</span>"
+                    "    <span class='chev'>▾</span>"
+                    "  </label>"
+                    "  <div class='inprog-mobile-notes-body'>"
+                    f"    {notes_html}"
+                    "  </div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                (
+                    "<div style='width:100%; margin:0 0 8px 0; position:-webkit-sticky; position:sticky; top:64px; align-self:flex-start; z-index:12;'>"
+                    "  <div id='daily-notes-box' style='width:100%; min-width:0; max-width:340px; margin:0 auto; box-sizing:border-box; "
+                    "      border-radius:16px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); "
+                    "      background:rgba(15,23,42,0.65); box-shadow:0 12px 30px rgba(0,0,0,0.24); max-height:calc(100vh - 110px); display:flex; flex-direction:column;'>"
+                    "    <div id='daily-notes-bar' style='display:flex; align-items:center; justify-content:center; "
+                    "        padding:10px 12px; font-weight:900; font-size:18px; letter-spacing:0.16em; text-transform:uppercase; "
+                    "        background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative;'>"
+                    "      <span style='margin:0 auto;'>Daily Notes</span>"
+                    "    </div>"
+                    "    <div id='daily-notes-body' style='padding:12px 14px; font-size:25.5px; font-weight:800; line-height:1.3; overflow-y:auto;'>"
+                    f"      {notes_html}"
+                    "    </div>"
+                    "  </div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+        def _render_inprog_shortages_controls(show_header: bool = True):
+            ensure_shorts_model(inprog_truck)
+            render_shorts_button_flow(inprog_truck, desktop_cols=3, show_header=show_header)
+            inprog_short_rows = st.session_state.shorts.get(int(inprog_truck), [])
+            inprog_short_view = [
+                {
+                    "Item": str(r.get("item", "")).strip(),
+                    "Qty": r.get("qty"),
+                }
+                for r in inprog_short_rows
+                if (r.get("item") or "").strip() and r.get("item") != "None"
+            ]
+            if inprog_short_view:
+                st.table(inprog_short_view)
+
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("Go To Shortages", use_container_width=True):
+                    st.session_state.shorts_truck = int(inprog_truck)
+                    ensure_shorts_model(inprog_truck)
+                    st.session_state.shorts_autostart_next_up_for_truck = None
+                    st.session_state.shorts_pending_next_up_confirm_for_truck = None
+                    st.session_state.active_screen = "SHORTS"
+                    _mark_and_save()
+                    st.rerun()
+            with c2:
+                if st.button("Skip Shortages", use_container_width=True):
+                    st.session_state.inprog_skip_confirm = True
+
+            if st.session_state.get("inprog_skip_confirm"):
+                st.warning("Skip shortages and stop the timer for this truck?")
+                c3, c4 = st.columns([1, 1])
+                with c3:
+                    if st.button("Confirm skip", use_container_width=True):
+                        _finish_in_progress_loading(
+                            f"Truck {int(inprog_truck)} marked Loaded (shortages skipped)."
+                        )
+                with c4:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state.inprog_skip_confirm = False
+                        st.rerun()
+
+        if inprog_truck and not st.session_state.get("shorts_disabled") and not guest_read_only:
+            st.divider()
+            if is_mobile_inprog:
+                shortages_toggle_key = "inprog_mobile_shortages_open"
+                is_open = bool(st.session_state.get(shortages_toggle_key, False))
+                toggle_label = "Select Shortages" if not is_open else "Hide Shortages"
+                if st.button(toggle_label, use_container_width=True, key="inprog_mobile_shortages_toggle"):
+                    st.session_state[shortages_toggle_key] = not is_open
+                    st.rerun()
+                if st.session_state.get(shortages_toggle_key, False):
+                    _render_inprog_shortages_controls(show_header=False)
+            else:
+                _render_inprog_shortages_controls(show_header=True)
 
     with center_col:
         if not inprog_truck:
@@ -7133,21 +7420,6 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         else:
             elapsed = elapsed_seconds()
             avg_all = average_load_time_seconds([])
-
-            def _finish_in_progress_loading(success_message: str):
-                t = int(inprog_truck)
-                sec = elapsed_seconds()
-                st.session_state.load_durations[t] = sec
-                append_load_duration(t, sec)
-                st.session_state.inprog_start_time = None
-                st.session_state.inprog_set.clear()
-                st.session_state.loaded_set.add(t)
-                st.session_state.load_finish_times[t] = time.time()
-                st.session_state.inprog_skip_confirm = False
-                _mark_and_save()
-                st.success(success_message)
-                st.session_state.active_screen = "STATUS_LOADED"
-                st.rerun()
 
             global_note, daily_note, note_text = get_truck_notes(inprog_truck)
             if note_text:
@@ -7523,40 +7795,6 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                         key="inprog_next_up_empty",
                         disabled=True,
                     )
-
-            st.divider()
-            if not st.session_state.get("shorts_disabled") and not guest_read_only:
-                ensure_shorts_model(inprog_truck)
-                render_shorts_button_flow(inprog_truck)
-                inprog_short_rows = st.session_state.shorts.get(int(inprog_truck), [])
-                inprog_short_view = [r for r in inprog_short_rows if (r.get("item") or "").strip() and r.get("item") != "None"]
-                if inprog_short_view:
-                    st.table(inprog_short_view)
-
-                c1, c2 = st.columns([1, 1])
-                with c1:
-                    if st.button("Go To Shortages", use_container_width=True):
-                        st.session_state.shorts_truck = int(inprog_truck)
-                        ensure_shorts_model(inprog_truck)
-                        st.session_state.shorts_autostart_next_up_for_truck = None
-                        st.session_state.shorts_pending_next_up_confirm_for_truck = None
-                        st.session_state.active_screen = "SHORTS"
-                        _mark_and_save()
-                        st.rerun()
-                with c2:
-                    if st.button("Skip Shortages", use_container_width=True):
-                        st.session_state.inprog_skip_confirm = True
-
-                if st.session_state.get("inprog_skip_confirm"):
-                    st.warning("Skip shortages and stop the timer for this truck?")
-                    c3, c4 = st.columns([1, 1])
-                    with c3:
-                        if st.button("Confirm skip", use_container_width=True):
-                            _finish_in_progress_loading(f"Truck {int(inprog_truck)} marked Loaded (shortages skipped).")
-                    with c4:
-                        if st.button("Cancel", use_container_width=True):
-                            st.session_state.inprog_skip_confirm = False
-                            st.rerun()
 
             # Timer runs in the component iframe above.
 
@@ -9058,50 +9296,146 @@ elif st.session_state.active_screen == "LOAD":
 
         completion = current_load_day_completion()
         scheduled_total = int(completion.get("scheduled_total", 0) or 0)
-        loaded_count = int(completion.get("loaded_count", 0) or 0)
         remaining_trucks = [int(t) for t in (completion.get("remaining") or [])]
         remaining_count = len(remaining_trucks)
-        progress_header = f"Load Day {int(day_num)} Progress" if day_num else "Load Progress"
-        with st.expander(progress_header, expanded=True):
-            st.markdown(
-                (
-                    "<div style='display:flex; flex-direction:column; gap:8px;'>"
-                    f"  <div style='padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'>"
-                    f"    <div style='font-size:13px; opacity:0.78;'>Total scheduled for day</div>"
-                    f"    <div style='font-size:24px; font-weight:900; line-height:1.1; text-align:center;'>{scheduled_total}</div>"
-                    "  </div>"
-                    f"  <div style='padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'>"
-                    f"    <div style='font-size:13px; opacity:0.78;'>Remaining to load</div>"
-                    f"    <div style='font-size:24px; font-weight:900; line-height:1.1; text-align:center;'>{remaining_count}</div>"
-                    f"    <div style='font-size:12px; opacity:0.72; margin-top:2px;'>Loaded: {loaded_count}</div>"
-                    "  </div>"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
-            )
-            if remaining_trucks:
-                show_remaining_key = "load_progress_show_remaining_trucks"
-                if show_remaining_key not in st.session_state:
-                    st.session_state[show_remaining_key] = False
-                toggle_label = "Hide remaining" if st.session_state[show_remaining_key] else "Show remaining"
-                if st.button(toggle_label, use_container_width=True, key="load_progress_toggle_remaining_btn"):
-                    st.session_state[show_remaining_key] = not bool(st.session_state[show_remaining_key])
-                    st.rerun()
-                if st.session_state.get(show_remaining_key):
-                    st.caption(", ".join(f"#{int(t)}" for t in remaining_trucks))
-            else:
-                st.session_state["load_progress_show_remaining_trucks"] = False
-                st.caption("All scheduled trucks are loaded for this day.")
 
     with load_main_col:
-        history = load_duration_history()
-        last_sec = int(history[-1].get("seconds")) if history else None
         avg_sec = average_load_time_seconds([])
-        c0, c1 = st.columns(2)
-        with c0:
-            st.metric("Last load duration", seconds_to_mmss(last_sec) if last_sec is not None else "N/A")
-        with c1:
-            st.metric("Average load duration", seconds_to_mmss(avg_sec) if avg_sec is not None else "N/A")
+
+        now_local = _now_local()
+        run_day = st.session_state.get("run_date")
+        shift_day = run_day if isinstance(run_day, date) else now_local.date()
+        shift_tz = now_local.tzinfo
+        shift_start = datetime(shift_day.year, shift_day.month, shift_day.day, 14, 0, 0, tzinfo=shift_tz)
+        shift_end = datetime(shift_day.year, shift_day.month, shift_day.day, 22, 0, 0, tzinfo=shift_tz)
+        shift_total_seconds = int((shift_end - shift_start).total_seconds())
+        raw_time_left_seconds = int((shift_end - now_local).total_seconds())
+        shift_time_left_seconds = max(0, min(shift_total_seconds, raw_time_left_seconds))
+        avg_per_truck_seconds = int(avg_sec) if (avg_sec is not None and int(avg_sec) > 0) else None
+
+        pace_calc_available = avg_per_truck_seconds is not None
+        pace_header_gradient = "linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2))"
+        pace_border_style = "1px solid rgba(148,163,184,0.35)"
+        pace_header_value = "N/A"
+        pace_body_html = ""
+
+        if pace_calc_available:
+            needed_seconds = int(remaining_count * avg_per_truck_seconds)
+            pace_delta_seconds = int(shift_time_left_seconds - needed_seconds)
+            ahead = pace_delta_seconds >= 0
+            pace_sign = "+" if ahead else "-"
+            pace_color = GREEN if ahead else RED
+            pace_label = "Ahead" if ahead else "Behind"
+            pace_value = seconds_to_mmss(abs(pace_delta_seconds))
+            pace_header_gradient = "linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26))"
+            pace_border_style = "2px solid rgba(34,197,94,0.42)"
+            pace_header_value = f"{pace_sign}{pace_value}"
+            pace_body_html = (
+                "<div style='padding:8px 12px 12px 12px; text-align:center;'>"
+                f"  <div style='font-size:16px; font-weight:800; opacity:0.84; margin-bottom:2px;'>{pace_label} by</div>"
+                f"  <div style='font-size:clamp(2.8rem, 8vw, 4.2rem); font-weight:900; line-height:1.0; color:{pace_color};'>{pace_sign}{pace_value}</div>"
+                "  <div style='display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:10px;'>"
+                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Trucks this shift</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{scheduled_total}</div></div>"
+                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Remaining</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{remaining_count}</div></div>"
+                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Avg per truck</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(avg_per_truck_seconds)}</div></div>"
+                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Shift time left</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(shift_time_left_seconds)}</div></div>"
+                "  </div>"
+                "</div>"
+            )
+        else:
+            pace_body_html = (
+                "<div style='padding:12px 12px 14px 12px; text-align:center; opacity:0.85;'>"
+                "  Need completed load-time history to calculate pace delta."
+                "</div>"
+            )
+
+        st.markdown(
+            (
+                "<style>"
+                ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
+                ".load-pace-label{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;text-align:left;cursor:pointer;user-select:none;}"
+                ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;}"
+                ".load-pace-head-right{display:flex;align-items:center;gap:10px;}"
+                ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
+                ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
+                ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
+                ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
+                ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
+                "</style>"
+                f"<div class='load-pace-wrap' data-load-pace-card='1' style='border:{pace_border_style};'>"
+                f"  <div class='load-pace-label' data-load-pace-header='1' role='button' tabindex='0' style='background:{pace_header_gradient};'>"
+                "    <span class='load-pace-title'>2nd Shift Pace (2:00 PM - 10:00 PM)</span>"
+                "    <span class='load-pace-head-right'>"
+                f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
+                "      <span class='load-pace-chevron'>▾</span>"
+                "    </span>"
+                "  </div>"
+                f"  <div class='load-pace-body'>{pace_body_html}</div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        components.html(
+            """
+            <script>
+            (function(){
+                try {
+                    const root = window.parent.document;
+                    const cards = root.querySelectorAll('[data-load-pace-card="1"]');
+                    if (!cards || !cards.length) return;
+                    const card = cards[cards.length - 1];
+                    const header = card.querySelector('[data-load-pace-header="1"]');
+                    if (!header) return;
+
+                    const storage = (() => {
+                        try { return window.parent.localStorage; } catch (e) { return null; }
+                    })();
+
+                    const getCollapsed = () => {
+                        try {
+                            if (!storage) return false;
+                            return storage.getItem('loadPaceCollapsed') === '1';
+                        } catch (e) {
+                            return false;
+                        }
+                    };
+
+                    const setCollapsed = (collapsed) => {
+                        try {
+                            if (storage) storage.setItem('loadPaceCollapsed', collapsed ? '1' : '0');
+                        } catch (e) {}
+                    };
+
+                    const applyCollapsed = () => {
+                        card.classList.toggle('collapsed', getCollapsed());
+                    };
+
+                    applyCollapsed();
+
+                    if (!header.dataset.boundLoadPaceToggle) {
+                        const toggle = () => {
+                            const willCollapse = !card.classList.contains('collapsed');
+                            card.classList.toggle('collapsed', willCollapse);
+                            setCollapsed(willCollapse);
+                        };
+
+                        header.addEventListener('click', toggle);
+                        header.addEventListener('keydown', (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                toggle();
+                            }
+                        });
+
+                        header.dataset.boundLoadPaceToggle = '1';
+                    }
+                } catch (e) {}
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
 
         if inprog_truck is not None:
             render_next_up_controls("load")
@@ -9139,21 +9473,7 @@ elif st.session_state.active_screen == "LOAD":
                     st.rerun()
 
             st.divider()
-            next_up = st.session_state.get("next_up_truck")
-            if next_up is not None and not st.session_state.inprog_set:
-                st.info(f"Next up: Truck {int(next_up)}")
-                if st.button(f"Start Next Up (Truck {int(next_up)})", use_container_width=True, key="start_next_up_load"):
-                    if int(next_up) in st.session_state.shop_set:
-                        st.session_state.pending_start_truck = int(next_up)
-                        st.session_state.active_screen = "STATUS_CLEANED"
-                        _mark_and_save()
-                        st.rerun()
-                    start_loading_truck(int(next_up))
-                    _mark_and_save()
-                    st.session_state.active_screen = "IN_PROGRESS"
-                    st.rerun()
-
-            render_next_up_controls("load")
+            render_next_up_controls("load", show_start_button=True)
 
 # --------------------------
 # Shorts
@@ -9231,14 +9551,14 @@ elif st.session_state.active_screen == "SHORTS":
                 if pending_row_idx is None or pending_row_idx < 0 or pending_row_idx >= len(rows) or not _short_row_has_item(rows[pending_row_idx]):
                     pending_row_idx = None
                     st.session_state[pending_delete_key] = None
+                    save_state()
 
             if pending_row_idx is not None:
                 pending_row = rows[pending_row_idx]
                 pending_item = str(pending_row.get("item", "")).strip() or "—"
                 pending_qty = pending_row.get("qty")
                 pending_qty_text = "—" if pending_qty in (None, "") else str(pending_qty)
-                pending_note = str(pending_row.get("note", "")).strip() or "—"
-                st.warning(f"Confirm delete: {pending_item} • Qty {pending_qty_text} • Note {pending_note}")
+                st.warning(f"Confirm delete: {pending_item} • Qty {pending_qty_text}")
                 c_del_1, c_del_2 = st.columns([1, 1])
                 with c_del_1:
                     if st.button("Confirm delete", key=f"shorts_delete_confirm_{t}_{pending_row_idx}", use_container_width=True):
@@ -9246,42 +9566,41 @@ elif st.session_state.active_screen == "SHORTS":
                         remaining = [r for r in remaining if _short_row_has_item(r)]
                         st.session_state.shorts[t] = remaining if remaining else [{"item": "None", "qty": None, "note": ""}]
                         st.session_state[pending_delete_key] = None
+                        save_state()
                         st.rerun()
                 with c_del_2:
                     if st.button("Cancel", key=f"shorts_delete_cancel_{t}", use_container_width=True):
                         st.session_state[pending_delete_key] = None
+                        save_state()
                         st.rerun()
 
             if indexed_rows:
                 st.caption("Tap ✕, then confirm deletion. To edit, delete it and add the corrected one above.")
-                h1, h2, h3, h4 = st.columns([4, 1, 4, 0.6])
+                h1, h2, h3 = st.columns([4, 1, 0.6])
                 with h1:
                     st.markdown("**Item**")
                 with h2:
                     st.markdown("**Qty**")
                 with h3:
-                    st.markdown("**Note**")
-                with h4:
                     st.markdown("**X**")
                 for row_idx, row in indexed_rows:
                     item_text = str(row.get("item", "")).strip()
                     qty_text = row.get("qty")
-                    note_text = str(row.get("note", "")).strip()
-                    c1, c2, c3, c4 = st.columns([4, 1, 4, 0.6])
+                    c1, c2, c3 = st.columns([4, 1, 0.6])
                     with c1:
                         st.write(item_text if item_text else "—")
                     with c2:
                         st.write("—" if qty_text in (None, "") else str(qty_text))
                     with c3:
-                        st.write(note_text if note_text else "—")
-                    with c4:
                         is_pending_row = pending_row_idx is not None and int(pending_row_idx) == int(row_idx)
                         delete_label = "⚠" if is_pending_row else "✕"
                         if st.button(delete_label, key=f"shorts_delete_{t}_{row_idx}"):
                             st.session_state[pending_delete_key] = {"truck": int(t), "row_idx": int(row_idx)}
+                            save_state()
                             st.rerun()
             else:
                 st.session_state[pending_delete_key] = None
+                save_state()
                 st.caption("No shortages recorded yet.")
 
             initials = _current_actor_name()

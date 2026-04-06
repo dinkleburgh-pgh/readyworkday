@@ -362,16 +362,16 @@ def _set_status_badge_picker_values(color_map: dict[str, str]):
 # ==========================================================
 # STATE
 # ==========================================================
-STATE_FILE = ".truck_state.json"
+STATE_FILE = os.getenv("TRUCKAPP_STATE_FILE", ".truck_state.json")
 FLEET_FILE = "truck_fleet.json"
-DURATIONS_FILE = "load_durations.json"
-OFF_SCHEDULE_DEFAULTS_FILE = "off_schedule_defaults.json"
-HISTORY_DIR = "state_history"
-AUTH_USERS_FILE = "auth_users.json"
-AUTH_REQUESTS_FILE = "auth_user_requests.json"
-COMMUNICATIONS_FILE = "communications_chat.json"
+DURATIONS_FILE = os.getenv("TRUCKAPP_DURATIONS_FILE", "load_durations.json")
+OFF_SCHEDULE_DEFAULTS_FILE = os.getenv("TRUCKAPP_OFF_SCHEDULE_DEFAULTS_FILE", "off_schedule_defaults.json")
+HISTORY_DIR = os.getenv("TRUCKAPP_HISTORY_DIR", "state_history")
+AUTH_USERS_FILE = os.getenv("TRUCKAPP_AUTH_USERS_FILE", "auth_users.json")
+AUTH_REQUESTS_FILE = os.getenv("TRUCKAPP_AUTH_REQUESTS_FILE", "auth_user_requests.json")
+COMMUNICATIONS_FILE = os.getenv("TRUCKAPP_COMMUNICATIONS_FILE", "communications_chat.json")
 CHAT_CENSOR_WORDS_FILE = "chat_censor_words.json"
-AUDIT_HISTORY_FILE = "audit_requests.json"
+AUDIT_HISTORY_FILE = os.getenv("TRUCKAPP_AUDIT_HISTORY_FILE", "audit_requests.json")
 LEGACY_STATUS_UNLOADED_PAGE = "STATUS_CLEANED"
 STATUS_UNLOADED_PAGE = "STATUS_UNLOADED"
 

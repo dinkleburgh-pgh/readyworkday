@@ -17,6 +17,15 @@ services:
       TRUCKAPP_AUTH_COOKIE_NAME: ${TRUCKAPP_AUTH_COOKIE_NAME:-truckapp_auth}
       TRUCKAPP_AUTH_COOKIE_KEY: ${TRUCKAPP_AUTH_COOKIE_KEY:-truckapp_cookie_key_change_me_please_override_with_random_32_plus_chars}
       TRUCKAPP_AUTH_COOKIE_DAYS: ${TRUCKAPP_AUTH_COOKIE_DAYS:-7}
+      TRUCKAPP_STATE_FILE: /app/data/.truck_state.json
+      TRUCKAPP_DURATIONS_FILE: /app/data/load_durations.json
+      TRUCKAPP_OFF_SCHEDULE_DEFAULTS_FILE: /app/data/off_schedule_defaults.json
+      TRUCKAPP_HISTORY_DIR: /app/data/state_history
+      TRUCKAPP_AUTH_USERS_FILE: /app/data/auth_users.json
+      TRUCKAPP_AUTH_REQUESTS_FILE: /app/data/auth_user_requests.json
+      TRUCKAPP_COMMUNICATIONS_FILE: /app/data/communications_chat.json
+      TRUCKAPP_AUDIT_HISTORY_FILE: /app/data/audit_requests.json
     volumes:
       - ./:/app
+      - ${TRUCKAPP_DATA_DIR:-./data}:/app/data
     restart: unless-stopped

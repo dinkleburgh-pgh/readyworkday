@@ -136,12 +136,14 @@ Use a **Git-based Stack** in Portainer.
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.7.py`
+	- `TRUCKAPP_DATA_DIR=/path/on/docker-host/truckapp-data`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
 - The Portainer compose file is pinned to image tag `v1.7.0` to avoid stale `latest` pulls.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
+- Runtime state/auth files now persist under `/app/data` inside the container; point `TRUCKAPP_DATA_DIR` at a durable host path so setup/auth is preserved across recreate/redeploy.
 
 ### Stop
 

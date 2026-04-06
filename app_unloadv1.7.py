@@ -19895,16 +19895,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
         current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
 
         st.write("#### Load Date")
-        selected_load_date = st.date_input(
-            "Pick load date",
-            value=current_run_date,
-            key="sup_configure_load_date_pick",
-        )
-        if not isinstance(selected_load_date, date):
-            selected_load_date = current_run_date
+        with st.form("sup_configure_load_date_form", clear_on_submit=False):
+            selected_load_date = st.date_input(
+                "Pick load date",
+                value=current_run_date,
+                key="sup_configure_load_date_pick",
+            )
+            if not isinstance(selected_load_date, date):
+                selected_load_date = current_run_date
 
-        st.caption(f"Ship date will be {(selected_load_date + timedelta(days=1)).isoformat()}.")
-        if st.button("Apply load date", width="stretch", key="sup_apply_load_date_btn"):
+            st.caption(f"Ship date will be {(selected_load_date + timedelta(days=1)).isoformat()}.")
+            apply_load_date = st.form_submit_button("Apply load date", width="stretch")
+
+        if apply_load_date:
             apply_run_config(
                 selected_load_date,
                 [selected_load_date + timedelta(days=1)],
@@ -19914,6 +19917,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state.active_screen = "UNLOAD"
             _mark_and_save()
             _queue_management_confirmation(f"Load date set to {selected_load_date.isoformat()}.")
+            st.rerun()
+
+        if st.button("Re-sync trucks for current run day", width="stretch", key="sup_resync_run_day_btn"):
+            current_ship_dates = list(st.session_state.get("ship_dates") or [])
+            current_day_num = ship_day_number(current_ship_dates[0]) if current_ship_dates else None
+            reset_status_for_new_day(current_day_num)
+            _mark_and_save()
+            _queue_management_confirmation("Truck statuses re-synced for the current run day.")
             st.rerun()
 
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()

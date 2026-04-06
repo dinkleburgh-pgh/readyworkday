@@ -2793,14 +2793,36 @@ def _off_schedule_has_entries(schedule: dict[int, list[int]] | None) -> bool:
 
 def load_off_schedule_defaults() -> dict[int, list[int]]:
     path = _off_schedule_defaults_path()
-    if not os.path.exists(path):
-        return {i: [] for i in range(1, 6)}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return _normalize_off_schedule(data)
-    except Exception:
-        return {i: [] for i in range(1, 6)}
+    empty_schedule = {i: [] for i in range(1, 6)}
+
+    def _read_schedule_file(candidate_path: str) -> dict[int, list[int]]:
+        try:
+            with open(candidate_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return _normalize_off_schedule(data)
+        except Exception:
+            return {i: [] for i in range(1, 6)}
+
+    if os.path.exists(path):
+        primary = _read_schedule_file(path)
+        if _off_schedule_has_entries(primary):
+            return primary
+
+    # If the configured path is empty/missing (common with /app/data first boot),
+    # fall back to bundled defaults from the app directory.
+    bundled_path = os.path.join(os.path.dirname(__file__), "off_schedule_defaults.json")
+    if os.path.abspath(path) != os.path.abspath(bundled_path) and os.path.exists(bundled_path):
+        bundled = _read_schedule_file(bundled_path)
+        if _off_schedule_has_entries(bundled):
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({str(day): list(trucks) for day, trucks in bundled.items()}, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            return bundled
+
+    return empty_schedule
 
 
 def save_off_schedule_defaults(schedule):
@@ -2808,6 +2830,9 @@ def save_off_schedule_defaults(schedule):
     normalized = _normalize_off_schedule(schedule or {})
     payload = {str(day): list(trucks) for day, trucks in normalized.items()}
     try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -16756,12 +16781,20 @@ if _is_mobile_client():
                         const root = window.parent || window;
                         if (!root || !root.document) return;
                         const doc = root.document;
-                        const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-                        if (!sidebar) return;
+                        const getSidebar = () => doc.querySelector('section[data-testid="stSidebar"]');
+                        if (!getSidebar()) return;
 
                         const collapseSidebar = () => {
                             const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
-                            if (collapse) collapse.click();
+                            if (collapse) {
+                                collapse.click();
+                                return;
+                            }
+                            // Fallback for mobile webviews where Streamlit toggle button is not exposed.
+                            const sidebar = getSidebar();
+                            if (!sidebar) return;
+                            sidebar.setAttribute('aria-expanded', 'false');
+                            sidebar.style.setProperty('transform', 'translateX(-102%)', 'important');
                         };
 
                         const bindBtn = (btn) => {
@@ -16774,11 +16807,13 @@ if _is_mobile_client():
                             }, { passive: true });
                         };
 
-                        sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
+                        getSidebar().querySelectorAll('.stButton > button').forEach(bindBtn);
                         const observer = new MutationObserver(() => {
+                            const sidebar = getSidebar();
+                            if (!sidebar) return;
                             sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
                         });
-                        observer.observe(sidebar, { childList: true, subtree: true });
+                        observer.observe(getSidebar(), { childList: true, subtree: true });
 
                         if (!root.__truckOutsideTapSidebarCloseBound) {
                             root.__truckOutsideTapSidebarCloseBound = true;
@@ -16786,6 +16821,8 @@ if _is_mobile_client():
                                 try {
                                     const viewportW = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
                                     if (viewportW > 980) return;
+                                    const sidebar = getSidebar();
+                                    if (!sidebar) return;
                                     const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
                                     if (!expanded) return;
 

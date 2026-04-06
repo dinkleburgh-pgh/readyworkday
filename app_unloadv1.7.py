@@ -4474,7 +4474,7 @@ def _apply_soft_auto_refresh(screen: str):
     if _auth_enabled() and st.session_state.get("authentication_status") is not True:
         return
     screen_key = str(screen or "UNKNOWN").upper()
-    if screen_key in {"COMMUNICATIONS", "FLEET", "UNLOAD", "BATCH"}:
+    if screen_key in {"COMMUNICATIONS", "FLEET", "UNLOAD", "BATCH", "SUPERVISOR"}:
         return
     if screen_key == "IN_PROGRESS" and bool(st.session_state.get("inprog_set")):
         return
@@ -19920,9 +19920,16 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.rerun()
 
         if st.button("Re-sync trucks for current run day", width="stretch", key="sup_resync_run_day_btn"):
-            current_ship_dates = list(st.session_state.get("ship_dates") or [])
-            current_day_num = ship_day_number(current_ship_dates[0]) if current_ship_dates else None
-            reset_status_for_new_day(current_day_num)
+            current_run_date_raw = st.session_state.get("run_date")
+            current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
+            # Force a standard single-day configuration so previous-day OFF schedule
+            # routes are pulled into Unloaded consistently.
+            apply_run_config(
+                current_run_date,
+                [current_run_date + timedelta(days=1)],
+                restore_archive=False,
+                force_reset=True,
+            )
             _mark_and_save()
             _queue_management_confirmation("Truck statuses re-synced for the current run day.")
             st.rerun()

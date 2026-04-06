@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.7.0 - 2026-04-06
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.7.0** with release date **20260406**.
+2. Fixed soft workday reset behavior to preserve Off/OOS, Spare, Shop, and Special states while preventing excessive Dirty/Unloaded misclassification.
+3. Corrected load-day initialization behavior for management load-date changes so day-based configuration is applied without restoring stale archived status distributions.
+4. Updated STATUS_UNLOADED desktop shell widths so the left rail route card has more usable space and the right off-schedule rail is narrower.
+5. Enhanced STATUS_SHOP rail UX by adding clear active-mode highlighting for **Send** vs **Return**, removing extra separators, and aligning button block vertical start with the route card.
+6. Updated deployment defaults/tags to **v1.7.0** in `docker-compose.yml`, `docker-compose.portainer.yml`, and `docker-entrypoint.sh`.
+7. Updated README release, deployment, and pinned-image references to **v1.7.0**.
+
 ## v1.6.9 - 2026-03-20
 
 Ordered list of final changes included in this release:

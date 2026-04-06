@@ -2,14 +2,14 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.6.9**
+Current release: **v1.7.0**
 
-## Recent updates (v1.6.9)
+## Recent updates (v1.7.0)
 
-- Updated app release metadata to **v1.6.9** (`20260320`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
-- Removed the legacy **Current** pace shift option and standardized shift views to **1st / 2nd / 3rd** across pace cards.
-- Updated Load Pace **Ahead/Behind** math to compare projected finish against the selected shift end, so each shift view reports independently.
-- Integrated compact shift selectors directly into the pace-card headers for Mini Pace and Load Pace while keeping auto-default to the live current shift.
+- Updated app release metadata to **v1.7.0** (`20260406`) while continuing to use `app_unloadv1.6.py` as the main app entry file.
+- Fixed soft-reset and load-day initialization regressions so day-based status behavior no longer starts with all trucks as Unloaded.
+- Improved STATUS_UNLOADED and STATUS_SHOP rail layouts for better card/control fit and visual alignment.
+- Added clearer STATUS_SHOP mode selection highlighting and refined rail separators for a cleaner control area.
 
 ## Prior updates (v1.5.0)
 
@@ -132,14 +132,14 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.6.9` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.7.0` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.6.py`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
-- The Portainer compose file is pinned to image tag `v1.6.9` to avoid stale `latest` pulls.
+- The Portainer compose file is pinned to image tag `v1.7.0` to avoid stale `latest` pulls.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 

@@ -9320,13 +9320,17 @@ def render_numeric_truck_buttons(
     heavy_button_page_mode = active_screen_key in {"FLEET", "UNLOAD", "BATCH", "AUDIT_FLEET"}
     if active_screen_key == "AUDIT_FLEET":
         button_style_retry_delays_json = json.dumps([70, 220, 450, 800, 1300])
+    elif active_screen_key == "FLEET":
+        button_style_retry_delays_json = json.dumps([70, 220, 450, 900])
     else:
         button_style_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [50, 250])
     button_decoration_retry_delays_json = json.dumps([] if heavy_button_page_mode else [80, 240, 520])
     outline_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
     badge_render_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
     oos_overlay_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [80, 240, 520])
-    button_style_use_resize_listener_json = json.dumps((not heavy_button_page_mode) or active_screen_key == "AUDIT_FLEET")
+    button_style_use_resize_listener_json = json.dumps(
+        (not heavy_button_page_mode) or active_screen_key in {"AUDIT_FLEET", "FLEET"}
+    )
     if heavy_button_page_mode and active_screen_key != "FLEET":
         button_decoration_js_enabled = False
 
@@ -9506,7 +9510,6 @@ def render_numeric_truck_buttons(
                             if (!match) {{
                                 if (trailingLabels.has(raw)) {{
                                     const trailingSig = `trailing|${{forceTextColor || ''}}`;
-                                    if (btn.dataset.truckColorSig === trailingSig) return;
                                     const wrapper = btn.closest('[data-testid="stButton"]');
                                     if (wrapper) {{
                                         wrapper.style.setProperty('width', '100%', 'important');
@@ -9581,7 +9584,6 @@ def render_numeric_truck_buttons(
                                     btn.style.setProperty('min-height', '58px', 'important');
                                 }}
                             const styleSig = `${{colors.bg}}|${{colors.border}}|${{fg}}|${{scaledSize}}|${{isDisabledTruck ? 1 : 0}}|${{btn.classList.contains('truck-route-badge-host') ? 1 : 0}}`;
-                            if (btn.dataset.truckColorSig === styleSig) return;
                             btn.style.setProperty('font-size', scaledSize, 'important');
                             btn.style.setProperty('line-height', '1', 'important');
                             if (isDisabledTruck) {{
@@ -9613,6 +9615,40 @@ def render_numeric_truck_buttons(
                 (retryDelays || []).forEach((delay) => {{
                     setTimeout(applyTruckColors, Math.max(0, Number(delay) || 0));
                 }});
+
+                const shouldObserveMutations = ['FLEET', 'UNLOAD', 'BATCH', 'AUDIT_FLEET'].includes({json.dumps(active_screen_key)});
+                if (window.parent.__truckColorMutationObserver) {{
+                    try {{ window.parent.__truckColorMutationObserver.disconnect(); }} catch (e) {{}}
+                    window.parent.__truckColorMutationObserver = null;
+                }}
+                if (window.parent.__truckColorMutationCleanupTimer) {{
+                    try {{ clearTimeout(window.parent.__truckColorMutationCleanupTimer); }} catch (e) {{}}
+                    window.parent.__truckColorMutationCleanupTimer = null;
+                }}
+                if (shouldObserveMutations && typeof MutationObserver !== 'undefined') {{
+                    const mutationHost = root.querySelector('[data-testid="stAppViewContainer"]') || root.body;
+                    if (mutationHost) {{
+                        let mutationApplyPending = false;
+                        const observer = new MutationObserver(() => {{
+                            if (mutationApplyPending) return;
+                            mutationApplyPending = true;
+                            setTimeout(() => {{
+                                mutationApplyPending = false;
+                                applyTruckColors();
+                            }}, 0);
+                        }});
+                        observer.observe(mutationHost, {{ childList: true, subtree: true }});
+                        window.parent.__truckColorMutationObserver = observer;
+                        window.parent.__truckColorMutationCleanupTimer = setTimeout(() => {{
+                            try {{ observer.disconnect(); }} catch (e) {{}}
+                            if (window.parent.__truckColorMutationObserver === observer) {{
+                                window.parent.__truckColorMutationObserver = null;
+                            }}
+                            window.parent.__truckColorMutationCleanupTimer = null;
+                        }}, 7000);
+                    }}
+                }}
+
                 if (window.parent.__truckColorResizeHandler) {{
                     window.parent.removeEventListener('resize', window.parent.__truckColorResizeHandler);
                     window.parent.__truckColorResizeHandler = null;
@@ -16768,8 +16804,8 @@ if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Com
     _mark_and_save()
     st.rerun()
 
-if _is_mobile_client() and _current_auth_role() == AUTH_ROLE_GUEST and _auth_enabled():
-    if st.sidebar.button("Login", key="auth_open_login_mobile_nav_btn", width="stretch"):
+if _current_auth_role() == AUTH_ROLE_GUEST and _auth_enabled():
+    if st.sidebar.button("Login", key="auth_open_login_nav_btn", width="stretch"):
         st.session_state.auth_request_portal_pending = False
         st.session_state.auth_login_portal_pending = True
         st.session_state.auth_login_portal_requested_at = time.time()
@@ -16974,6 +17010,33 @@ if st.session_state.setup_done:
         f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label)}</div>",
         unsafe_allow_html=True,
     )
+
+if (
+    _auth_enabled()
+    and st.session_state.get("authentication_status") is True
+    and _current_auth_role() != AUTH_ROLE_GUEST
+):
+    st.sidebar.markdown("<hr style='margin:8px 0 6px 0;'>", unsafe_allow_html=True)
+    if st.sidebar.button("Logout", key="auth_logout_nav_btn", width="stretch"):
+        if authenticator is not None:
+            try:
+                authenticator.logout(location="unrendered", key="truckapp_sidebar_logout")
+            except TypeError:
+                try:
+                    authenticator.logout(location="unrendered")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        st.session_state.authentication_status = None
+        st.session_state.auth_name = "Guest"
+        st.session_state.auth_username = "guest"
+        st.session_state.auth_role = AUTH_ROLE_GUEST
+        st.session_state.auth_login_portal_auto_prompted = False
+        st.session_state.auth_login_portal_pending = False
+        st.session_state.auth_login_portal_requested_at = 0.0
+        st.session_state.auth_request_portal_pending = False
+        st.rerun()
 
 nav_active_labels = set()
 nav_flash_labels = set()
@@ -18522,7 +18585,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
     )
     inprog_layout_is_original = inprog_layout_style == INPROG_LAYOUT_ORIGINAL
     current_truck_margin_top = "-88px" if not is_mobile_inprog else "0px"
-    right_rail_top_pull = "-88px" if not is_mobile_inprog else "0px"
+    right_rail_top_pull = "-132px" if not is_mobile_inprog else "0px"
 
     def _render_inprog_daily_notes_panel():
         if not show_daily_notes_panel:
@@ -18973,7 +19036,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         st.markdown("<div id='inprog-right-col-anchor' style='display:none;'></div>", unsafe_allow_html=True)
         if not is_mobile_inprog:
             st.markdown(
-                f"<div style='height:0; margin:0; padding:0; margin-bottom:{right_rail_top_pull};'></div>",
+                f"<div style='margin-top:{right_rail_top_pull};'></div>",
                 unsafe_allow_html=True,
             )
         _render_route_card(always_show=True, dock_left=False, expanded=True)

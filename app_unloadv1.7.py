@@ -6174,6 +6174,37 @@ st.session_state.last_screen_for_history = last_hist_screen or None
 last_req_page = _normalize_screen_page(st.session_state.get("last_requested_page"))
 st.session_state.last_requested_page = last_req_page or None
 
+# Auto-bootstrap setup defaults so the app can run without a manual Ready Workday step.
+setup_was_bootstrapped = False
+run_date_value = st.session_state.get("run_date")
+if not isinstance(run_date_value, date):
+    run_date_value = date.today()
+    st.session_state["run_date"] = run_date_value
+    setup_was_bootstrapped = True
+
+ship_dates_value = st.session_state.get("ship_dates")
+if not isinstance(ship_dates_value, list) or not ship_dates_value:
+    st.session_state["ship_dates"] = [run_date_value + timedelta(days=1)]
+    setup_was_bootstrapped = True
+
+if not st.session_state.get("run_date_key"):
+    st.session_state["run_date_key"] = _run_date_key(run_date_value)
+    setup_was_bootstrapped = True
+
+if not st.session_state.get("setup_done"):
+    st.session_state["setup_done"] = True
+    setup_was_bootstrapped = True
+
+if not isinstance(st.session_state.get("last_setup_date"), date):
+    st.session_state["last_setup_date"] = date.today()
+    setup_was_bootstrapped = True
+
+if setup_was_bootstrapped and str(st.session_state.get("active_screen") or "").upper() == "SETUP":
+    st.session_state["active_screen"] = _default_screen_for_role(_current_auth_role())
+
+if setup_was_bootstrapped:
+    _mark_and_save()
+
 if "archive_view_mode" not in st.session_state:
     st.session_state["archive_view_mode"] = False
 if "archive_view_date_key" not in st.session_state:

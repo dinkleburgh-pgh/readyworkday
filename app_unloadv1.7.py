@@ -12070,7 +12070,7 @@ def render_fleet_management():
         clicked_truck = render_numeric_truck_buttons(
             FLEET,
             "sup_manage_pick",
-            default_cols=2,
+            default_cols=(2 if _is_mobile_client() else 8),
             flash_trucks=flash_trucks,
             button_badges=fleet_badges if fleet_badges else None,
             outlined_trucks=(

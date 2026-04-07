@@ -7636,12 +7636,12 @@ def unload_trucks_for_current_day() -> set[int]:
                 if truck_num in set(FLEET):
                     previous_day_routes.add(int(truck_num))
 
-    # Off-today routes do not need unload unless explicitly marked ran-special.
-    off_today_routes = {int(t) for t in off_trucks_for_today()}
     ran_special_routes = {int(t) for t in (st.session_state.get("special_set") or set())}
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
 
-    unload_targets = (previous_day_routes - off_today_routes) | ran_special_routes
+    # Include routes that ran on the previous load day (including routes that are
+    # OFF today), plus any explicit ran-special routes.
+    unload_targets = previous_day_routes | ran_special_routes
     unload_targets -= persistent_spares
     return {
         int(t)
@@ -8676,6 +8676,51 @@ def _is_mobile_client() -> bool:
         "blackberry",
     ]
     return any(tok in user_agent for tok in mobile_tokens)
+
+
+def _inject_mobile_query_hint() -> None:
+    try:
+        query_params = _get_query_params()
+        mobile_qp = str(query_params.get("mobile", "")).strip().lower()
+        if mobile_qp in {"1", "true", "yes", "y", "on", "0", "false", "no", "n", "off"}:
+            return
+    except Exception:
+        pass
+
+    # Browser-side detection backfills ?mobile=1 when server headers are missing
+    # (common behind reverse proxies and some Android browsers/webviews).
+    components.html(
+        """
+        <script>
+        (function(){
+          try {
+            var root = window.parent || window;
+            if (!root || !root.location) return;
+            var href = String(root.location.href || '');
+            if (!href) return;
+            var url = new URL(href);
+            if (url.searchParams.has('mobile')) return;
+
+            var ua = String((root.navigator && root.navigator.userAgent) || '').toLowerCase();
+            var platform = String((root.navigator && root.navigator.platform) || '').toLowerCase();
+            var touchPoints = Number((root.navigator && root.navigator.maxTouchPoints) || 0);
+            var vw = Math.max(0, root.innerWidth || (root.document && root.document.documentElement && root.document.documentElement.clientWidth) || 0);
+
+            var uaMobile = /android|iphone|ipad|ipod|mobile|samsungbrowser|firefox\//.test(ua);
+            var likelyHandheld = uaMobile || ((touchPoints >= 2) && (vw > 0 && vw <= 1100) && (platform.indexOf('linux') >= 0 || platform.indexOf('android') >= 0));
+            if (!likelyHandheld) return;
+
+            url.searchParams.set('mobile', '1');
+            root.location.replace(url.toString());
+          } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+_inject_mobile_query_hint()
 
 def _truck_grid_columns(default_cols: int = 8) -> int:
     base_cols = max(1, int(default_cols))

@@ -2935,31 +2935,55 @@ def _render_supervisor_audit_trends(
 
     def _with_example_watermark(spec: dict) -> dict:
         # Layer a subtle EXAMPLE watermark over placeholder-only charts.
-        base_layer = {k: v for k, v in dict(spec or {}).items() if k != "$schema"}
-        return {
-            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-            "layer": [
-                base_layer,
-                {
-                    "data": {"values": [{"wm": "EXAMPLE"}]},
-                    "mark": {
-                        "type": "text",
-                        "align": "center",
-                        "baseline": "middle",
-                        "fontSize": 72,
-                        "fontWeight": "bold",
-                        "angle": -24,
-                        "opacity": 0.12,
-                        "color": "#94a3b8",
-                    },
-                    "encoding": {
-                        "text": {"field": "wm", "type": "nominal"},
-                        "x": {"value": 260},
-                        "y": {"value": 150},
-                    },
+        base_spec = dict(spec or {})
+        schema = str(base_spec.get("$schema") or "https://vega.github.io/schema/vega-lite/v5.json")
+
+        # Keep shared layout/config properties at the top-level so chart sizing
+        # behaves exactly like the original spec.
+        layered_spec: dict = {"$schema": schema}
+        for key in (
+            "title",
+            "width",
+            "height",
+            "autosize",
+            "padding",
+            "background",
+            "config",
+            "resolve",
+            "datasets",
+            "usermeta",
+        ):
+            if key in base_spec:
+                layered_spec[key] = base_spec[key]
+
+        base_layer = {}
+        for key in ("data", "transform", "mark", "encoding", "params"):
+            if key in base_spec:
+                base_layer[key] = base_spec[key]
+
+        layered_spec["layer"] = [
+            base_layer,
+            {
+                "data": {"values": [{"wm": "EXAMPLE"}]},
+                "mark": {
+                    "type": "text",
+                    "align": "center",
+                    "baseline": "middle",
+                    "fontSize": 64,
+                    "fontWeight": "bold",
+                    "angle": -24,
+                    "opacity": 0.12,
+                    "color": "#94a3b8",
+                    "clip": True,
                 },
-            ],
-        }
+                "encoding": {
+                    "text": {"field": "wm", "type": "nominal"},
+                    "x": {"value": 260},
+                    "y": {"value": 150},
+                },
+            },
+        ]
+        return layered_spec
 
     if external_days_back is None:
         trend_window_options = ["Show All", 7, 14, 30]
@@ -5838,10 +5862,10 @@ def _build_authenticator():
     if stauth is None:
         return None, {}
 
-    username = str(os.getenv("TRUCKAPP_AUTH_USERNAME", "ready")).strip() or "ready"
+    username = str(os.getenv("TRUCKAPP_AUTH_USERNAME", "Nate")).strip() or "Nate"
     password_env = os.getenv("TRUCKAPP_AUTH_PASSWORD")
     password_value = str(password_env if password_env is not None else "ready")
-    default_role = _normalize_auth_role(os.getenv("TRUCKAPP_AUTH_ROLE", AUTH_ROLE_ADMIN))
+    default_role = _normalize_auth_role(os.getenv("TRUCKAPP_AUTH_ROLE", AUTH_ROLE_LEAD))
     cookie_name = str(os.getenv("TRUCKAPP_AUTH_COOKIE_NAME", "truckapp_auth")).strip() or "truckapp_auth"
     cookie_key_env = str(os.getenv("TRUCKAPP_AUTH_COOKIE_KEY", "truckapp_cookie_key_change_me_please_override_in_env")).strip() or "truckapp_cookie_key_change_me_please_override_in_env"
     cookie_key = _normalize_auth_cookie_key(cookie_key_env)
@@ -22371,7 +22395,13 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             if inprog_short_view:
                 st.table(inprog_short_view)
 
-        if inprog_truck and not st.session_state.get("shorts_disabled") and not guest_read_only and can_access_short_sheet:
+        if (
+            inprog_truck
+            and not is_mobile_inprog
+            and not st.session_state.get("shorts_disabled")
+            and not guest_read_only
+            and can_access_short_sheet
+        ):
             st.markdown(
                 "<div style='height:0; border-top:1px solid rgba(148,163,184,0.34); margin:6px 0 8px 0;'></div>",
                 unsafe_allow_html=True,
@@ -22844,13 +22874,36 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
                 if is_mobile_inprog and not guest_read_only:
                     st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
-                    if st.button(
-                        "Audit",
-                        width="stretch",
-                        key="inprog_open_audit_dialog_mobile",
-                    ):
-                        st.session_state["inprog_audit_dialog_open"] = True
-                        st.rerun()
+                    can_open_mobile_shorts_dialog = bool(
+                        inprog_truck
+                        and not st.session_state.get("shorts_disabled")
+                        and can_access_short_sheet
+                    )
+                    action_cols = st.columns(2, gap="small")
+                    with action_cols[0]:
+                        if st.button(
+                            "Audit",
+                            width="stretch",
+                            key="inprog_open_audit_dialog_mobile",
+                        ):
+                            st.session_state["inprog_audit_dialog_open"] = True
+                            st.rerun()
+
+                    with action_cols[1]:
+                        shorts_button_help = None
+                        if st.session_state.get("shorts_disabled"):
+                            shorts_button_help = "Shortages are disabled in settings."
+                        elif not can_access_short_sheet:
+                            shorts_button_help = "Shortages are restricted for your role."
+                        if st.button(
+                            "Add Shortages",
+                            width="stretch",
+                            key="inprog_open_shorts_dialog_mobile",
+                            disabled=not can_open_mobile_shorts_dialog,
+                            help=shorts_button_help,
+                        ):
+                            st.session_state["inprog_shorts_dialog_open"] = True
+                            st.rerun()
 
                     if st.session_state.get("inprog_audit_dialog_open"):
                         @st.dialog("Audit Requests", width="small")
@@ -22861,6 +22914,16 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                                 st.rerun()
 
                         _render_inprog_audit_dialog_mobile()
+
+                    if can_open_mobile_shorts_dialog and st.session_state.get("inprog_shorts_dialog_open"):
+                        @st.dialog("Add Shortages", width="small")
+                        def _render_inprog_shorts_dialog_mobile():
+                            _render_inprog_shortages_controls(show_header=False)
+                            if st.button("Close", width="stretch", key="inprog_close_shorts_dialog_mobile"):
+                                st.session_state["inprog_shorts_dialog_open"] = False
+                                st.rerun()
+
+                        _render_inprog_shorts_dialog_mobile()
 
             if inprog_layout_is_original:
                 st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)

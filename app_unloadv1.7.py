@@ -19,6 +19,9 @@ import html
 import os
 import re
 import hashlib
+import shutil
+import zipfile
+from pathlib import Path
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -56,6 +59,12 @@ try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
+
+try:
+    from PIL import Image, ImageOps
+except Exception:
+    Image = None
+    ImageOps = None
 
 # PDF (ReportLab)
 from reportlab.lib.pagesizes import letter # type: ignore
@@ -373,6 +382,9 @@ COMMUNICATIONS_FILE = os.getenv("TRUCKAPP_COMMUNICATIONS_FILE", "communications_
 CHAT_CENSOR_WORDS_FILE = "chat_censor_words.json"
 AUDIT_HISTORY_FILE = os.getenv("TRUCKAPP_AUDIT_HISTORY_FILE", "audit_requests.json")
 BATCH_HISTORY_FILE = os.getenv("TRUCKAPP_BATCH_HISTORY_FILE", "batch_history.json")
+AUDIT_PHOTO_ARCHIVE_DIR = os.getenv("TRUCKAPP_AUDIT_PHOTO_ARCHIVE_DIR", "audit_photo_archive")
+AUDIT_PHOTO_MAX_DIMENSION = int(os.getenv("TRUCKAPP_AUDIT_PHOTO_MAX_DIMENSION", "1920") or 1920)
+AUDIT_PHOTO_JPEG_QUALITY = int(os.getenv("TRUCKAPP_AUDIT_PHOTO_JPEG_QUALITY", "72") or 72)
 LEGACY_STATUS_UNLOADED_PAGE = "STATUS_CLEANED"
 STATUS_UNLOADED_PAGE = "STATUS_UNLOADED"
 
@@ -737,6 +749,361 @@ def _save_audit_history(entries: list[dict]) -> bool:
         return True
     except Exception:
         return False
+
+
+def _audit_photo_archive_dir_path() -> str:
+    return os.path.join(os.getcwd(), AUDIT_PHOTO_ARCHIVE_DIR)
+
+
+def _audit_photo_day_dir_path(run_date_key: str | None = None) -> str:
+    run_key = str(run_date_key or _current_run_date_iso()).strip()
+    parts = run_key.split("-")
+    if len(parts) == 3 and all(parts):
+        yyyy, mm, dd = parts[0], parts[1], parts[2]
+    else:
+        today = date.today().isoformat().split("-")
+        yyyy, mm, dd = today[0], today[1], today[2]
+    return os.path.join(_audit_photo_archive_dir_path(), yyyy, mm, dd)
+
+
+def _safe_audit_photo_token(value, fallback: str = "item", max_len: int = 24) -> str:
+    token = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip())
+    token = token.strip("_")
+    if not token:
+        token = fallback
+    return token[: max(8, int(max_len))]
+
+
+def _audit_photo_manifest_path(run_date_key: str | None = None) -> str:
+    return os.path.join(_audit_photo_day_dir_path(run_date_key), "audit_photo_manifest.json")
+
+
+def _load_audit_photo_manifest(run_date_key: str | None = None) -> list[dict]:
+    path = _audit_photo_manifest_path(run_date_key)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, list):
+            return []
+        return [dict(r) for r in raw if isinstance(r, dict)]
+    except Exception:
+        return []
+
+
+def _save_audit_photo_manifest(entries: list[dict], run_date_key: str | None = None) -> bool:
+    path = _audit_photo_manifest_path(run_date_key)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(entries, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _save_audit_photo_file(
+    uploaded_file,
+    *,
+    truck_num: int,
+    source_label: str,
+    note_text: str,
+) -> tuple[bool, str, dict | None]:
+    if Image is None:
+        return False, "Photo upload requires Pillow (PIL).", None
+
+    try:
+        raw_bytes = uploaded_file.getvalue()
+    except Exception:
+        raw_bytes = b""
+    if not raw_bytes:
+        return False, "Uploaded photo had no data.", None
+
+    try:
+        image_obj = Image.open(BytesIO(raw_bytes))
+        if ImageOps is not None:
+            image_obj = ImageOps.exif_transpose(image_obj)
+        if str(image_obj.mode or "").upper() != "RGB":
+            image_obj = image_obj.convert("RGB")
+
+        max_dim = max(640, int(AUDIT_PHOTO_MAX_DIMENSION or 1920))
+        resample_filter = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+        image_obj.thumbnail((max_dim, max_dim), resample_filter)
+
+        run_date_key = _current_run_date_iso()
+        current_load_day = _normalize_load_day_num(_current_ship_day_num())
+        load_day_token = f"d{int(current_load_day)}" if current_load_day is not None else "d0"
+        route_num = int((_truck_route_targets() or {}).get(int(truck_num), int(truck_num)))
+        ts = datetime.now()
+
+        day_dir = _audit_photo_day_dir_path(run_date_key)
+        truck_dir = os.path.join(day_dir, f"truck_{int(truck_num)}")
+        os.makedirs(truck_dir, exist_ok=True)
+
+        # Short, sortable name tied to load day, route, and date/time.
+        file_stem = f"a_{load_day_token}_r{int(route_num)}_{ts.strftime('%Y%m%d_%H%M%S_%f')[:-3]}"
+        out_name = f"{file_stem}.jpg"
+        out_path = os.path.join(truck_dir, out_name)
+
+        jpg_quality = min(90, max(45, int(AUDIT_PHOTO_JPEG_QUALITY or 72)))
+        image_obj.save(out_path, format="JPEG", optimize=True, progressive=True, quality=jpg_quality)
+
+        compressed_bytes = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+        rel_path = str(Path(out_path).relative_to(Path(os.getcwd())))
+
+        entry = {
+            "entry_id": hashlib.sha1(f"{ts.isoformat()}|{rel_path}|{truck_num}".encode("utf-8")).hexdigest()[:16],
+            "ts": ts.isoformat(),
+            "run_date": run_date_key,
+            "truck": int(truck_num),
+            "actor": str(_current_actor_name() or "").strip() or "Unknown",
+            "source": str(source_label or "upload"),
+            "note": str(note_text or "").strip(),
+            "relative_path": rel_path,
+            "original_bytes": int(len(raw_bytes)),
+            "compressed_bytes": int(compressed_bytes),
+            "jpeg_quality": int(jpg_quality),
+            "max_dimension": int(max_dim),
+        }
+
+        manifest = _load_audit_photo_manifest(run_date_key)
+        manifest.append(entry)
+        _save_audit_photo_manifest(manifest, run_date_key)
+        return True, "", entry
+    except Exception as exc:
+        return False, f"Could not process photo: {exc}", None
+
+
+def _recent_audit_photo_entries(run_date_key: str | None = None, limit: int = 8) -> list[dict]:
+    entries = _load_audit_photo_manifest(run_date_key)
+    sorted_entries = sorted(entries, key=lambda e: str(e.get("ts") or ""), reverse=True)
+    return sorted_entries[: max(1, int(limit))]
+
+
+def _build_audit_photo_zip_bytes(run_date_key: str | None = None) -> bytes | None:
+    entries = _load_audit_photo_manifest(run_date_key)
+    if not entries:
+        return None
+
+    payload = BytesIO()
+    try:
+        with zipfile.ZipFile(payload, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for entry in entries:
+                rel_path = str(entry.get("relative_path") or "").strip()
+                if not rel_path:
+                    continue
+                abs_path = os.path.join(os.getcwd(), rel_path)
+                if not os.path.exists(abs_path):
+                    continue
+                zf.write(abs_path, arcname=rel_path)
+            manifest_path = _audit_photo_manifest_path(run_date_key)
+            if os.path.exists(manifest_path):
+                manifest_rel = str(Path(manifest_path).relative_to(Path(os.getcwd())))
+                zf.write(manifest_path, arcname=manifest_rel)
+        return payload.getvalue()
+    except Exception:
+        return None
+
+
+def _audit_photo_entries_for_day(run_date_key: str | None = None) -> list[dict]:
+    entries = _load_audit_photo_manifest(run_date_key)
+    return sorted(entries, key=lambda e: str(e.get("ts") or ""), reverse=True)
+
+
+def _audit_photo_archive_run_dates() -> list[str]:
+    root = _audit_photo_archive_dir_path()
+    if not os.path.isdir(root):
+        return []
+
+    run_dates: list[str] = []
+    try:
+        for year in os.listdir(root):
+            y_path = os.path.join(root, str(year))
+            if not os.path.isdir(y_path):
+                continue
+            for month in os.listdir(y_path):
+                m_path = os.path.join(y_path, str(month))
+                if not os.path.isdir(m_path):
+                    continue
+                for day in os.listdir(m_path):
+                    d_path = os.path.join(m_path, str(day))
+                    if not os.path.isdir(d_path):
+                        continue
+                    run_key = f"{year}-{month}-{day}"
+                    try:
+                        run_key = date.fromisoformat(run_key).isoformat()
+                    except Exception:
+                        continue
+                    manifest_path = os.path.join(d_path, "audit_photo_manifest.json")
+                    if os.path.exists(manifest_path):
+                        run_dates.append(run_key)
+    except Exception:
+        return []
+    return sorted(set(run_dates), reverse=True)
+
+
+def _delete_audit_photo_entries(run_date_key: str, entry_ids: list[str]) -> tuple[int, int]:
+    target_ids = {str(x or "").strip() for x in (entry_ids or []) if str(x or "").strip()}
+    if not target_ids:
+        return 0, 0
+
+    deleted_files = 0
+    deleted_rows = 0
+    manifest = _load_audit_photo_manifest(run_date_key)
+    keep_rows: list[dict] = []
+    for entry in manifest:
+        row_id = str(entry.get("entry_id") or "").strip()
+        if row_id not in target_ids:
+            keep_rows.append(entry)
+            continue
+
+        deleted_rows += 1
+        rel_path = str(entry.get("relative_path") or "").strip()
+        if rel_path:
+            abs_path = os.path.join(os.getcwd(), rel_path)
+            try:
+                if os.path.exists(abs_path):
+                    os.remove(abs_path)
+                    deleted_files += 1
+            except Exception:
+                pass
+
+    _save_audit_photo_manifest(keep_rows, run_date_key)
+    return deleted_rows, deleted_files
+
+
+def _delete_audit_photo_day_archive(run_date_key: str) -> tuple[int, int]:
+    entries = _load_audit_photo_manifest(run_date_key)
+    row_count = len(entries)
+    file_count = 0
+    for entry in entries:
+        rel_path = str(entry.get("relative_path") or "").strip()
+        if not rel_path:
+            continue
+        abs_path = os.path.join(os.getcwd(), rel_path)
+        if os.path.exists(abs_path):
+            file_count += 1
+
+    day_dir = _audit_photo_day_dir_path(run_date_key)
+    try:
+        if os.path.isdir(day_dir):
+            shutil.rmtree(day_dir)
+    except Exception:
+        pass
+
+    return row_count, file_count
+
+
+def _render_mobile_audit_photo_uploader(
+    *,
+    selected_truck_num: int | None,
+    truck_options: list[int],
+):
+    st.markdown(
+        "<div style='margin-top:0.85rem; font-size:0.88rem; letter-spacing:0.08em; text-transform:uppercase; font-weight:900; opacity:0.82;'>Audit Photos</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption("Upload from camera or photo library. Images are auto-compressed and archived by date.")
+
+    if Image is None:
+        st.warning("Photo upload needs Pillow (PIL). Add `pillow` to requirements and reinstall dependencies.")
+        return
+
+    if selected_truck_num is not None:
+        target_truck_num = int(selected_truck_num)
+        st.caption(f"Saving to Truck {target_truck_num}")
+    else:
+        options = sorted({int(t) for t in (truck_options or [])})
+        if not options:
+            st.info("No fleet trucks available for audit photo upload.")
+            return
+        target_truck_num = int(
+            st.selectbox(
+                "Truck",
+                options=options,
+                index=0,
+                key="audit_mobile_photo_truck_picker",
+            )
+        )
+
+    photo_note_key = f"audit_mobile_photo_note_{target_truck_num}"
+    camera_key = f"audit_mobile_camera_capture_{target_truck_num}"
+    upload_key = f"audit_mobile_file_upload_{target_truck_num}"
+    save_btn_key = f"audit_mobile_photo_save_btn_{target_truck_num}"
+
+    camera_capture = st.camera_input("Take audit photo", key=camera_key)
+    upload_files = st.file_uploader(
+        "Or upload image files",
+        type=["jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True,
+        key=upload_key,
+    )
+    st.text_input("Photo note (optional)", key=photo_note_key, max_chars=120)
+
+    if st.button("Save Audit Photo(s)", width="stretch", key=save_btn_key):
+        candidates: list[tuple[str, object]] = []
+        if camera_capture is not None:
+            candidates.append(("camera", camera_capture))
+        for uploaded in (upload_files or []):
+            if uploaded is not None:
+                candidates.append(("upload", uploaded))
+
+        if not candidates:
+            st.warning("Take or select at least one photo first.")
+        else:
+            note_text = str(st.session_state.get(photo_note_key) or "").strip()
+            success_count = 0
+            fail_messages: list[str] = []
+            for source_label, upload_obj in candidates:
+                ok, err, _entry = _save_audit_photo_file(
+                    upload_obj,
+                    truck_num=int(target_truck_num),
+                    source_label=source_label,
+                    note_text=note_text,
+                )
+                if ok:
+                    success_count += 1
+                elif err:
+                    fail_messages.append(str(err))
+
+            if success_count:
+                st.success(f"Saved {success_count} audit photo(s).")
+            if fail_messages:
+                st.error(" ".join(fail_messages[:2]))
+
+    run_date_key = _current_run_date_iso()
+    recent_entries = _recent_audit_photo_entries(run_date_key, limit=6)
+    if recent_entries:
+        zip_bytes = _build_audit_photo_zip_bytes(run_date_key)
+        if zip_bytes:
+            st.download_button(
+                "Download Today Photo Archive (.zip)",
+                data=zip_bytes,
+                file_name=f"audit_photos_{run_date_key}.zip",
+                mime="application/zip",
+                key=f"audit_mobile_photo_zip_{run_date_key}",
+                width="stretch",
+            )
+
+        with st.expander("Recent photos", expanded=False):
+            for entry in recent_entries:
+                rel_path = str(entry.get("relative_path") or "").strip()
+                if not rel_path:
+                    continue
+                abs_path = os.path.join(os.getcwd(), rel_path)
+                if not os.path.exists(abs_path):
+                    continue
+                st.image(abs_path, use_container_width=True)
+                orig = int(entry.get("original_bytes") or 0)
+                comp = int(entry.get("compressed_bytes") or 0)
+                ratio_text = ""
+                if orig > 0 and comp > 0:
+                    saved_pct = max(0, int(round((1 - (comp / float(orig))) * 100)))
+                    ratio_text = f" - saved {saved_pct}%"
+                st.caption(
+                    f"Truck {int(entry.get('truck') or 0)} - {str(entry.get('source') or 'upload').title()}{ratio_text}"
+                )
 
 
 def _load_batch_history() -> list[dict]:
@@ -2784,16 +3151,19 @@ def _render_supervisor_audit_trends(
             wearers_chart_spec = _with_example_watermark(wearers_chart_spec)
 
         wearers_event = None
-        try:
-            wearers_event = st.vega_lite_chart(
-                wearers_chart_spec,
-                width="stretch",
-                key="sup_wearers_trend_chart",
-                on_select="rerun",
-                selection_mode=["wearers_pick"],
-            )
-        except TypeError:
+        if using_placeholder_wearers:
             st.vega_lite_chart(wearers_chart_spec, width="stretch")
+        else:
+            try:
+                wearers_event = st.vega_lite_chart(
+                    wearers_chart_spec,
+                    width="stretch",
+                    key="sup_wearers_trend_chart",
+                    on_select="rerun",
+                    selection_mode=["wearers_pick"],
+                )
+            except TypeError:
+                st.vega_lite_chart(wearers_chart_spec, width="stretch")
 
         if bool(render_details_panel):
             details_state_key = "sup_audit_trends_selected_details"
@@ -3157,16 +3527,19 @@ def _render_supervisor_audit_trends(
             route_chart_spec = _with_example_watermark(route_chart_spec)
 
         route_event = None
-        try:
-            route_event = st.vega_lite_chart(
-                route_chart_spec,
-                width="stretch",
-                key="sup_audit_route_click_chart",
-                on_select="rerun",
-                selection_mode=["route_bar_pick"],
-            )
-        except TypeError:
+        if using_placeholder_route_rows:
             st.vega_lite_chart(route_chart_spec, width="stretch")
+        else:
+            try:
+                route_event = st.vega_lite_chart(
+                    route_chart_spec,
+                    width="stretch",
+                    key="sup_audit_route_click_chart",
+                    on_select="rerun",
+                    selection_mode=["route_bar_pick"],
+                )
+            except TypeError:
+                st.vega_lite_chart(route_chart_spec, width="stretch")
 
         route_point = _extract_selected_point(route_event, "route_bar_pick")
         if (not using_placeholder_route_rows) and isinstance(route_point, dict) and route_point:
@@ -11150,6 +11523,7 @@ def _render_fleet_left_rail_actions():
     selected_trucks_key = "sup_manage_multi_selected_trucks"
     if selected_trucks_key not in st.session_state:
         st.session_state[selected_trucks_key] = []
+    is_mobile_fleet = _is_mobile_client()
 
     multi_mode_active = bool(st.session_state.get("sup_manage_multi_mode"))
     pending_unload_request_feedback = st.session_state.pop(unload_request_feedback_key, None)
@@ -11271,7 +11645,25 @@ def _render_fleet_left_rail_actions():
             _render_unload_request_dialog_body()
 
     if not multi_mode_active:
-        if st.button("Unload Request", width="stretch", key="fleet_left_unload_request_mode"):
+        if is_mobile_fleet:
+            mode_c1, mode_c2 = st.columns(2)
+            with mode_c1:
+                unload_request_pressed = st.button("Unload Request", width="stretch", key="fleet_left_unload_request_mode")
+            with mode_c2:
+                multi_pressed = st.button("Multi", width="stretch", key="fleet_left_multi_mode")
+
+            mode_c3, mode_c4 = st.columns(2)
+            with mode_c3:
+                swap_pressed = st.button("Swap", width="stretch", key="fleet_left_swap_mode")
+            with mode_c4:
+                new_pressed = st.button("New", width="stretch", key="fleet_left_new_mode")
+        else:
+            unload_request_pressed = st.button("Unload Request", width="stretch", key="fleet_left_unload_request_mode")
+            multi_pressed = st.button("Multi", width="stretch", key="fleet_left_multi_mode")
+            swap_pressed = st.button("Swap", width="stretch", key="fleet_left_swap_mode")
+            new_pressed = st.button("New", width="stretch", key="fleet_left_new_mode")
+
+        if unload_request_pressed:
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = False
             st.session_state.sup_manage_truck = None
@@ -11287,7 +11679,7 @@ def _render_fleet_left_rail_actions():
             st.session_state[unload_request_dialog_open_key] = True
             st.rerun()
 
-        if st.button("Multi", width="stretch", key="fleet_left_multi_mode"):
+        if multi_pressed:
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = True
             st.session_state.sup_manage_truck = None
@@ -11303,7 +11695,7 @@ def _render_fleet_left_rail_actions():
             st.session_state[selected_trucks_key] = []
             st.rerun()
 
-        if st.button("Swap", width="stretch", key="fleet_left_swap_mode"):
+        if swap_pressed:
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = False
             st.session_state.sup_manage_truck = None
@@ -11317,7 +11709,7 @@ def _render_fleet_left_rail_actions():
             st.session_state[swap_load_input_key] = None
             st.rerun()
 
-        if st.button("New", width="stretch", key="fleet_left_new_mode"):
+        if new_pressed:
             st.session_state["sup_manage_new_dialog_open"] = True
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = False
@@ -24085,6 +24477,113 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["mgmt_dev_backup_import_dialog_open"] = False
                     st.rerun()
 
+        with st.expander("4) Audit photo archive", expanded=False):
+            st.caption("Review and delete archived audit photos by day.")
+            available_photo_days = _audit_photo_archive_run_dates()
+            if not available_photo_days:
+                st.caption("No archived audit photos found.")
+            else:
+                day_picker_key = "mgmt_dev_audit_photo_day_pick"
+                selected_photo_day = st.session_state.get(day_picker_key)
+                if selected_photo_day not in available_photo_days:
+                    selected_photo_day = available_photo_days[0]
+                    st.session_state[day_picker_key] = selected_photo_day
+
+                selected_photo_day = st.selectbox(
+                    "Archive day",
+                    options=available_photo_days,
+                    key=day_picker_key,
+                )
+
+                day_entries = _audit_photo_entries_for_day(selected_photo_day)
+                total_original = sum(int(e.get("original_bytes") or 0) for e in day_entries)
+                total_compressed = sum(int(e.get("compressed_bytes") or 0) for e in day_entries)
+                if total_original > 0 and total_compressed > 0:
+                    saved_pct = max(0, int(round((1 - (float(total_compressed) / float(total_original))) * 100)))
+                    st.caption(
+                        f"{len(day_entries)} photo(s) - compressed {total_compressed:,} bytes from {total_original:,} bytes (saved {saved_pct}%)."
+                    )
+                else:
+                    st.caption(f"{len(day_entries)} photo(s) in archive.")
+
+                day_zip = _build_audit_photo_zip_bytes(selected_photo_day)
+                if day_zip:
+                    st.download_button(
+                        "Download selected day archive (.zip)",
+                        data=day_zip,
+                        file_name=f"audit_photos_{selected_photo_day}.zip",
+                        mime="application/zip",
+                        width="stretch",
+                        key=f"mgmt_dev_download_audit_photos_{selected_photo_day}",
+                    )
+
+                delete_confirm_key = f"mgmt_dev_audit_photo_delete_confirm_{selected_photo_day}"
+                st.checkbox(
+                    "I understand photo deletion cannot be undone",
+                    value=False,
+                    key=delete_confirm_key,
+                )
+
+                selected_delete_ids: list[str] = []
+                list_limit = 60
+                if len(day_entries) > list_limit:
+                    st.caption(f"Showing newest {list_limit} entries for delete selection.")
+
+                for entry in day_entries[:list_limit]:
+                    entry_id = str(entry.get("entry_id") or "").strip()
+                    if not entry_id:
+                        continue
+                    ts_text = str(entry.get("ts") or "")[:19].replace("T", " ")
+                    truck_text = str(entry.get("truck") or "-")
+                    source_text = str(entry.get("source") or "upload").strip().title()
+                    rel_path = str(entry.get("relative_path") or "").strip()
+                    file_name = os.path.basename(rel_path) if rel_path else "photo.jpg"
+                    row_label = f"{ts_text} | Truck {truck_text} | {source_text} | {file_name}"
+                    if st.checkbox(row_label, value=False, key=f"mgmt_dev_audit_photo_delete_pick_{selected_photo_day}_{entry_id}"):
+                        selected_delete_ids.append(entry_id)
+
+                delete_c1, delete_c2 = st.columns(2)
+                with delete_c1:
+                    if st.button(
+                        "Delete selected photos",
+                        width="stretch",
+                        key=f"mgmt_dev_audit_photo_delete_selected_{selected_photo_day}",
+                    ):
+                        if not bool(st.session_state.get(delete_confirm_key)):
+                            st.warning("Check the confirmation box before deleting photos.")
+                        elif not selected_delete_ids:
+                            st.warning("Select at least one photo to delete.")
+                        else:
+                            deleted_rows, deleted_files = _delete_audit_photo_entries(
+                                str(selected_photo_day),
+                                selected_delete_ids,
+                            )
+                            log_action(
+                                f"Development deleted audit photos day={selected_photo_day} rows={deleted_rows} files={deleted_files}."
+                            )
+                            _queue_management_confirmation(
+                                f"Deleted {deleted_rows} photo record(s) ({deleted_files} file(s)) from {selected_photo_day}."
+                            )
+                            st.rerun()
+
+                with delete_c2:
+                    if st.button(
+                        "Delete whole day archive",
+                        width="stretch",
+                        key=f"mgmt_dev_audit_photo_delete_day_{selected_photo_day}",
+                    ):
+                        if not bool(st.session_state.get(delete_confirm_key)):
+                            st.warning("Check the confirmation box before deleting day archive.")
+                        else:
+                            deleted_rows, deleted_files = _delete_audit_photo_day_archive(str(selected_photo_day))
+                            log_action(
+                                f"Development deleted full audit photo day archive day={selected_photo_day} rows={deleted_rows} files={deleted_files}."
+                            )
+                            _queue_management_confirmation(
+                                f"Deleted audit photo archive for {selected_photo_day} ({deleted_rows} record(s), {deleted_files} file(s))."
+                            )
+                            st.rerun()
+
         if st.session_state.get("mgmt_dev_backup_import_dialog_open"):
             def _dismiss_mgmt_dev_backup_import_dialog():
                 st.session_state["mgmt_dev_backup_import_dialog_open"] = False
@@ -27379,6 +27878,12 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         st.empty()
 
     if is_mobile_audit:
+        with audit_main_col:
+            with st.expander("Audit Photo Upload", expanded=False):
+                _render_mobile_audit_photo_uploader(
+                    selected_truck_num=selected_audit_truck_num,
+                    truck_options=all_fleet_audit_trucks,
+                )
         st.markdown("<div style='height:86px;'></div>", unsafe_allow_html=True)
         _render_mobile_audit_dock_card(max_items=6, recent_days=7, expanded=False)
 

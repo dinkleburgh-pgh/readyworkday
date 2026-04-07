@@ -28,8 +28,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.7.0"
-_APP_DATE = "20260406"  
+_APP_VERSION = "1.7.1"
+_APP_DATE = "20260407"  
 
 
 def _emit_startup_version_banner_once():
@@ -372,6 +372,7 @@ AUTH_REQUESTS_FILE = os.getenv("TRUCKAPP_AUTH_REQUESTS_FILE", "auth_user_request
 COMMUNICATIONS_FILE = os.getenv("TRUCKAPP_COMMUNICATIONS_FILE", "communications_chat.json")
 CHAT_CENSOR_WORDS_FILE = "chat_censor_words.json"
 AUDIT_HISTORY_FILE = os.getenv("TRUCKAPP_AUDIT_HISTORY_FILE", "audit_requests.json")
+BATCH_HISTORY_FILE = os.getenv("TRUCKAPP_BATCH_HISTORY_FILE", "batch_history.json")
 LEGACY_STATUS_UNLOADED_PAGE = "STATUS_CLEANED"
 STATUS_UNLOADED_PAGE = "STATUS_UNLOADED"
 
@@ -704,6 +705,10 @@ def _audit_history_path() -> str:
     return os.path.join(os.getcwd(), AUDIT_HISTORY_FILE)
 
 
+def _batch_history_path() -> str:
+    return os.path.join(os.getcwd(), BATCH_HISTORY_FILE)
+
+
 def _load_audit_history() -> list[dict]:
     path = _audit_history_path()
     if not os.path.exists(path):
@@ -734,6 +739,71 @@ def _save_audit_history(entries: list[dict]) -> bool:
         return False
 
 
+def _load_batch_history() -> list[dict]:
+    path = _batch_history_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return []
+
+    if not isinstance(raw, list):
+        return []
+
+    out: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            out.append(entry)
+    return out
+
+
+def _save_batch_history(entries: list[dict]) -> bool:
+    path = _batch_history_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(entries, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _append_batch_history_entry(
+    *,
+    truck: int,
+    batch_id: int | None,
+    wearers: int,
+    action: str = "assign",
+) -> bool:
+    truck_num = int(truck)
+    wearers_num = max(0, int(wearers))
+    route_targets = _truck_route_targets()
+    route_num = int(route_targets.get(int(truck_num), int(truck_num)))
+    run_date_key = _current_run_date_iso()
+    load_day_num = _normalize_load_day_num(_current_ship_day_num())
+    ts_iso = datetime.now().isoformat()
+    batch_num = int(batch_id) if batch_id is not None else None
+
+    entry = {
+        "entry_id": hashlib.sha1(
+            f"{ts_iso}|{run_date_key}|{truck_num}|{route_num}|{batch_num}|{wearers_num}|{action}".encode("utf-8")
+        ).hexdigest()[:16],
+        "ts": ts_iso,
+        "run_date": str(run_date_key),
+        "load_day_num": int(load_day_num) if load_day_num is not None else None,
+        "truck": int(truck_num),
+        "route": int(route_num),
+        "batch_id": int(batch_num) if batch_num is not None else None,
+        "wearers": int(wearers_num),
+        "action": str(action or "assign"),
+    }
+
+    entries = _load_batch_history()
+    entries.append(entry)
+    return _save_batch_history(entries)
+
+
 def _audit_entry_item_options() -> list[str]:
     labels = _shorts_button_item_labels()
     if not labels:
@@ -760,7 +830,7 @@ def _audit_loaded_day_num_from_applied(applied_day_num) -> int | None:
     normalized = _normalize_load_day_num(applied_day_num)
     if normalized is None:
         return None
-    return _previous_ship_day_num(int(normalized))
+    return int(normalized)
 
 
 def _audit_loaded_day_num_from_entry(entry: dict) -> int | None:
@@ -768,7 +838,6 @@ def _audit_loaded_day_num_from_entry(entry: dict) -> int | None:
     if loaded_day_num is not None:
         return int(loaded_day_num)
     return _audit_loaded_day_num_from_applied(_audit_applied_day_num_from_entry(entry))
-
 
 def _current_run_date_iso() -> str:
     run_date = st.session_state.get("run_date")
@@ -789,6 +858,13 @@ def _audit_today_entries_for_truck(truck: int) -> list[dict]:
             continue
         out.append(entry)
     return out
+
+
+def _audit_today_total_qty_for_truck(truck: int) -> int:
+    total_qty = 0
+    for entry in _audit_today_entries_for_truck(int(truck)):
+        total_qty += int(_normalize_audit_qty(entry.get("qty")))
+    return int(total_qty)
 
 
 def _mark_audit_warning_applied(entry_id: str) -> bool:
@@ -974,39 +1050,174 @@ def _audit_recent_top_removed_rows(max_items: int = 6, recent_days: int = 7) -> 
 
 def _render_audit_left_rail_card(max_items: int = 6, recent_days: int = 7):
     top_rows = _audit_recent_top_removed_rows(max_items=max_items, recent_days=recent_days)
+    rows_html = ""
+    if not top_rows:
+        rows_html = (
+            "<div style='font-size:0.82rem; opacity:0.8; text-align:center; padding:0.2rem 0;'>"
+            "No recent removals yet."
+            "</div>"
+        )
+    else:
+        row_parts: list[str] = []
+        for idx, row in enumerate(top_rows, start=1):
+            item_text = html.escape(str(row.get("item") or "Unknown").strip())
+            route_num = int(row.get("route") or 0)
+            qty_num = int(row.get("qty") or 0)
+            row_parts.append(
+                (
+                    "<div style='display:grid; grid-template-columns:auto 1fr auto; gap:7px; align-items:start; "
+                    "padding:7px 8px; border-top:1px solid rgba(148,163,184,0.2); border-radius:8px; "
+                    "background:rgba(15,23,42,0.24); margin:4px 0;'>"
+                    f"<div style='font-size:0.74rem; font-weight:900; color:#cbd5e1; padding-top:1px;'>#{int(idx)}</div>"
+                    "<div style='min-width:0;'>"
+                    f"<div style='font-size:0.74rem; font-weight:800; opacity:0.82; text-transform:uppercase; letter-spacing:0.03em;'>"
+                    f"Route: {int(route_num)}</div>"
+                    f"<div style='font-size:0.86rem; font-weight:800; line-height:1.2; margin-top:1px;'>"
+                    f"{item_text}</div>"
+                    "</div>"
+                    f"<div style='font-size:0.8rem; font-weight:900; color:#bfdbfe; text-align:right;'>Qty {int(qty_num)}</div>"
+                    "</div>"
+                )
+            )
+        rows_html = "".join(row_parts)
+
     st.markdown(
         (
             "<div style='border:1px solid rgba(148,163,184,0.35); border-radius:12px; padding:10px 10px 8px 10px; "
             "background:rgba(15,23,42,0.36); margin:0 0 0.45rem 0;'>"
-            "<div style='font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; opacity:0.76; font-weight:900;'>"
-            "Audit Card"
-            "</div>"
+            "<div style='font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; opacity:0.76; font-weight:900;'>Audit Card</div>"
             "<div style='font-size:1rem; font-weight:800; line-height:1.2; margin:2px 0 2px 0;'>Top Removed Items</div>"
-            f"<div style='font-size:0.74rem; opacity:0.78;'>Last {int(max(1, recent_days))} day(s)</div>"
+            f"<div style='font-size:0.74rem; opacity:0.78; margin-bottom:2px;'>Last {int(max(1, recent_days))} day(s)</div>"
+            f"{rows_html}"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
-    if not top_rows:
-        st.caption("No recent removals yet.")
-        return
 
-    for idx, row in enumerate(top_rows, start=1):
-        item_text = str(row.get("item") or "Unknown").strip()
-        route_num = int(row.get("route") or 0)
-        qty_num = int(row.get("qty") or 0)
-        st.markdown(
-            (
-                "<div style='padding:7px 9px; margin:0 0 0.32rem 0; border-radius:10px; "
-                "border:1px solid rgba(148,163,184,0.22); background:rgba(15,23,42,0.24);'>"
-                f"<div style='font-size:0.74rem; opacity:0.74; font-weight:700;'>#{int(idx)} · Route {int(route_num)}</div>"
-                f"<div style='font-size:0.9rem; font-weight:800; line-height:1.22;'>{html.escape(item_text)}</div>"
-                f"<div style='font-size:0.76rem; opacity:0.78;'>Qty removed: {int(qty_num)}</div>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
+def _render_mobile_audit_dock_card(*, max_items: int = 6, recent_days: int = 7, expanded: bool = False):
+    top_rows = _audit_recent_top_removed_rows(max_items=max_items, recent_days=recent_days)
+    if not top_rows:
+        rows_html = (
+            "<div style='font-size:0.82rem; opacity:0.8; text-align:center; padding:0.4rem 0;'>"
+            "No recent removals yet."
+            "</div>"
         )
+    else:
+        row_parts: list[str] = []
+        for idx, row in enumerate(top_rows, start=1):
+            item_text = html.escape(str(row.get("item") or "Unknown").strip())
+            route_num = int(row.get("route") or 0)
+            qty_num = int(row.get("qty") or 0)
+            row_parts.append(
+                (
+                    "<div style='display:grid; grid-template-columns:auto 1fr auto; gap:7px; align-items:start; "
+                    "padding:7px 8px; border-top:1px solid rgba(148,163,184,0.2); border-radius:8px; "
+                    "background:rgba(15,23,42,0.24); margin:4px 0;'>"
+                    f"<div style='font-size:0.74rem; font-weight:900; color:#cbd5e1; padding-top:1px;'>#{int(idx)}</div>"
+                    "<div style='min-width:0;'>"
+                    f"<div style='font-size:0.74rem; font-weight:800; opacity:0.82; text-transform:uppercase; letter-spacing:0.03em;'>"
+                    f"Route: {int(route_num)}</div>"
+                    f"<div style='font-size:0.86rem; font-weight:800; line-height:1.2; margin-top:1px;'>"
+                    f"{item_text}</div>"
+                    "</div>"
+                    f"<div style='font-size:0.8rem; font-weight:900; color:#bfdbfe; text-align:right;'>Qty {int(qty_num)}</div>"
+                    "</div>"
+                )
+            )
+        rows_html = "".join(row_parts)
+
+    collapse_scope = "audit_fleet_mobile"
+    storage_key = f"auditDockCollapsed_{collapse_scope}"
+
+    dock_html = (
+        "<style>"
+        ".audit-dock-wrap{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);border-radius:18px;overflow:hidden;background:transparent;box-shadow:0 14px 34px rgba(0,0,0,0.24);box-sizing:border-box;border:2px solid rgba(37,99,235,0.42);}"
+        ".audit-dock-wrap:not(.collapsed){background:rgba(15,23,42,0.96);}"
+        ".audit-dock-wrap.collapsed{background:transparent !important;}"
+        ".audit-dock-label{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 34px 7px 34px;text-align:center;cursor:pointer;user-select:none;box-sizing:border-box;width:100%;background:linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2));}"
+        ".audit-dock-title{display:block;width:100%;font-weight:900;font-size:16px;letter-spacing:0.10em;text-transform:uppercase;line-height:1.0;}"
+        ".audit-dock-mini{display:block;width:100%;margin-top:4px;font-weight:900;font-size:0.88rem;opacity:0.92;line-height:1.05;}"
+        ".audit-dock-chevron{position:absolute;right:12px;top:50%;transform:translateY(-50%);transition:transform .28s ease;opacity:0.88;line-height:1.0;}"
+        ".audit-dock-body{max-height:min(56vh,460px);overflow:auto;transition:max-height .32s ease,padding .32s ease;}"
+        ".audit-dock-wrap.collapsed .audit-dock-chevron{transform:translateY(-50%) rotate(-90deg);}"
+        ".audit-dock-wrap.collapsed .audit-dock-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;overflow:hidden;}"
+        "</style>"
+        f"<div class='audit-dock-wrap' data-audit-dock='1' data-audit-dock-scope='{collapse_scope}'>"
+        f"  <div class='audit-dock-label' data-audit-dock-header='1' data-audit-dock-scope='{collapse_scope}' role='button' tabindex='0'>"
+        "    <span class='audit-dock-title'>Audit Card</span>"
+        f"    <span class='audit-dock-mini'>Top Removed Items - Last {int(max(1, recent_days))} day(s)</span>"
+        "    <span class='audit-dock-chevron'>v</span>"
+        "  </div>"
+        "  <div class='audit-dock-body'>"
+        "    <div style='padding:7px 8px 10px 8px;'>"
+        f"      {rows_html}"
+        "    </div>"
+        "  </div>"
+        "</div>"
+    )
+
+    st.markdown(dock_html, unsafe_allow_html=True)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            try {{
+                const root = window.parent.document;
+                const scope = {json.dumps(collapse_scope)};
+                const storageKey = {json.dumps(storage_key)};
+                const defaultCollapsed = {str(not bool(expanded)).lower()};
+                const cards = root.querySelectorAll(`[data-audit-dock="1"][data-audit-dock-scope="${{scope}}"]`);
+                if (!cards || !cards.length) return;
+                const card = cards[cards.length - 1];
+                const header = card.querySelector(`[data-audit-dock-header="1"][data-audit-dock-scope="${{scope}}"]`);
+                if (!header) return;
+
+                const storage = (() => {{
+                    try {{ return window.parent.localStorage; }} catch (e) {{ return null; }}
+                }})();
+
+                const getCollapsed = () => {{
+                    try {{
+                        if (!storage) return defaultCollapsed;
+                        const raw = storage.getItem(storageKey);
+                        if (raw === null) return defaultCollapsed;
+                        return raw === '1';
+                    }} catch (e) {{
+                        return defaultCollapsed;
+                    }}
+                }};
+
+                const setCollapsed = (collapsed) => {{
+                    try {{
+                        if (storage) storage.setItem(storageKey, collapsed ? '1' : '0');
+                    }} catch (e) {{}}
+                }};
+
+                card.classList.toggle('collapsed', getCollapsed());
+
+                if (!header.dataset.boundAuditDockToggle) {{
+                    const toggle = () => {{
+                        const willCollapse = !card.classList.contains('collapsed');
+                        card.classList.toggle('collapsed', willCollapse);
+                        setCollapsed(willCollapse);
+                    }};
+                    header.addEventListener('click', toggle);
+                    header.addEventListener('keydown', (event) => {{
+                        if (event.key === 'Enter' || event.key === ' ') {{
+                            event.preventDefault();
+                            toggle();
+                        }}
+                    }});
+                    header.dataset.boundAuditDockToggle = '1';
+                }}
+            }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def _append_audit_history_entry(
@@ -1072,6 +1283,7 @@ def _render_audit_capture_panel(
     show_header: bool = True,
     source: str = "workflow",
     show_note_and_warning_inputs: bool = True,
+    show_active_warnings_top: bool = True,
 ):
     t = int(truck)
     if show_header:
@@ -1081,7 +1293,10 @@ def _render_audit_capture_panel(
         )
 
     active_warnings = _audit_active_warning_entries_for_truck(t)
-    if active_warnings:
+
+    def _render_active_warnings_block() -> None:
+        if not active_warnings:
+            return
         st.markdown(
             "<div style='font-size:0.76rem; font-weight:900; letter-spacing:0.08em; text-transform:uppercase; color:#facc15; margin:0 0 6px 0;'>Warning tags for this load day</div>",
             unsafe_allow_html=True,
@@ -1113,6 +1328,9 @@ def _render_audit_capture_panel(
                     st.rerun()
                 else:
                     st.error("Could not mark warning as applied.")
+
+    if bool(show_active_warnings_top):
+        _render_active_warnings_block()
 
     tracked_map = _tracked_items_map()
 
@@ -1178,21 +1396,23 @@ def _render_audit_capture_panel(
             if not button_labels:
                 return
             cols_per_row = _audit_cols(max(1, len(button_labels)))
-            row_cols = st.columns(cols_per_row)
-            for idx, label in enumerate(button_labels):
-                with row_cols[idx]:
-                    if st.button(label, width="stretch", key=f"audit_cat_{source}_{t}_{row_key}_{label}"):
-                        next_step = "bulk_group" if label == "Bulk" else "item"
-                        _set_audit_button_state(
-                            {
-                                "step": next_step,
-                                "category": label,
-                                "bulk_group": None,
-                                "item": None,
-                                "qty": 1,
-                            }
-                        )
-                        st.rerun()
+            for start in range(0, len(button_labels), cols_per_row):
+                row_labels = button_labels[start : start + cols_per_row]
+                row_cols = st.columns(cols_per_row)
+                for idx, label in enumerate(row_labels):
+                    with row_cols[idx]:
+                        if st.button(label, width="stretch", key=f"audit_cat_{source}_{t}_{row_key}_{start}_{label}"):
+                            next_step = "bulk_group" if label == "Bulk" else "item"
+                            _set_audit_button_state(
+                                {
+                                    "step": next_step,
+                                    "category": label,
+                                    "bulk_group": None,
+                                    "item": None,
+                                    "qty": 1,
+                                }
+                            )
+                            st.rerun()
 
         _render_category_buttons(top_categories, "top")
         _render_category_buttons(bottom_categories, "bottom")
@@ -1426,6 +1646,9 @@ def _render_audit_capture_panel(
             key=warn_next_load_key,
         )
         st.text_input("Note (optional)", key=note_key, help="Optional detail saved with this remove request.")
+
+    if not bool(show_active_warnings_top):
+        _render_active_warnings_block()
 
     today_entries = _audit_today_entries_for_truck(t)
     if today_entries:
@@ -1832,6 +2055,106 @@ def _shortage_category_filter_options(days_back: int | None = 30, day_filter: st
     return ["Show All"] + options
 
 
+def _batch_wearers_rows(
+    days_back: int | None = 30,
+    *,
+    day_filter: str | None = "Show All",
+    truck_filter: str | None = "Show All",
+    batch_filter: str | None = "Show All",
+) -> list[dict]:
+    days = int(days_back) if days_back is not None else 0
+    apply_window = int(days) > 0
+    start_date = date.today() - timedelta(days=max(0, int(days) - 1)) if apply_window else None
+    selected_day_num = _normalize_audit_day_filter(day_filter)
+
+    latest_by_day_truck: dict[tuple[str, int], dict] = {}
+    for entry in _load_batch_history():
+        run_date_key = str(entry.get("run_date") or "").strip()
+        if not run_date_key:
+            continue
+
+        if apply_window:
+            try:
+                run_day = date.fromisoformat(run_date_key)
+            except Exception:
+                continue
+            if start_date is not None and run_day < start_date:
+                continue
+
+        entry_day_num = _normalize_load_day_num(entry.get("load_day_num"))
+        if selected_day_num is not None and int(entry_day_num or -1) != int(selected_day_num):
+            continue
+
+        try:
+            truck_num = int(entry.get("truck") or 0)
+        except Exception:
+            truck_num = 0
+        if truck_num <= 0:
+            continue
+
+        key = (run_date_key, int(truck_num))
+        ts_key = str(entry.get("ts") or "")
+        prev = latest_by_day_truck.get(key)
+        if prev is None or ts_key >= str(prev.get("ts") or ""):
+            latest_by_day_truck[key] = entry
+
+    out: list[dict] = []
+    for (_, _truck_num), entry in latest_by_day_truck.items():
+        try:
+            truck_num = int(entry.get("truck") or 0)
+            route_num = int(entry.get("route") or truck_num)
+            wearers_num = int(entry.get("wearers") or 0)
+            batch_id_raw = entry.get("batch_id")
+            batch_num = int(batch_id_raw) if batch_id_raw is not None else 0
+        except Exception:
+            continue
+
+        if wearers_num <= 0 or batch_num <= 0:
+            continue
+
+        truck_label = f"Truck {int(truck_num)}"
+        batch_label = f"Batch {int(batch_num)}"
+        if truck_filter not in (None, "", "Show All") and str(truck_filter) != truck_label:
+            continue
+        if batch_filter not in (None, "", "Show All") and str(batch_filter) != batch_label:
+            continue
+
+        out.append(
+            {
+                "day": str(entry.get("run_date") or ""),
+                "truck": str(truck_label),
+                "truck_num": int(truck_num),
+                "route": f"Route {int(route_num)}",
+                "batch": str(batch_label),
+                "batch_id": int(batch_num),
+                "wearers": int(wearers_num),
+                "load_day_num": _normalize_load_day_num(entry.get("load_day_num")),
+                "action": str(entry.get("action") or ""),
+                "ts": str(entry.get("ts") or ""),
+            }
+        )
+
+    return sorted(
+        out,
+        key=lambda row: (
+            str(row.get("day") or ""),
+            int(row.get("truck_num") or 0),
+        ),
+    )
+
+
+def _batch_wearers_truck_filter_options(days_back: int | None = 30, day_filter: str | None = "Show All") -> list[str]:
+    rows = _batch_wearers_rows(days_back, day_filter=day_filter)
+    options = sorted({str(row.get("truck") or "Unknown") for row in (rows or [])})
+    return ["Show All"] + options
+
+
+def _batch_wearers_batch_filter_options(days_back: int | None = 30, day_filter: str | None = "Show All") -> list[str]:
+    rows = _batch_wearers_rows(days_back, day_filter=day_filter)
+    options = sorted({str(row.get("batch") or "Unknown") for row in (rows or [])})
+    return ["Show All"] + options
+
+
 def _audit_pace_trend(
     days_back: int | None = 14,
     *,
@@ -2167,6 +2490,24 @@ def _render_audit_trends_selection_details_panel():
     )
 
 
+def _render_audit_trends_selection_details_dialog_if_needed():
+    open_key = "sup_audit_trends_mobile_details_dialog_open"
+    if not bool(st.session_state.get(open_key)):
+        return
+
+    def _dismiss_trends_details_dialog():
+        st.session_state[open_key] = False
+
+    @st.dialog("Selection Details", width="small", on_dismiss=_dismiss_trends_details_dialog)
+    def _render_trends_details_dialog():
+        _render_audit_trends_selection_details_panel()
+        if st.button("Close", width="stretch", key="sup_audit_trends_mobile_details_close"):
+            st.session_state[open_key] = False
+            st.rerun()
+
+    _render_trends_details_dialog()
+
+
 def _render_supervisor_audit_trends(
     show_header: bool = True,
     render_details_panel: bool = True,
@@ -2181,6 +2522,78 @@ def _render_supervisor_audit_trends(
     if bool(show_header):
         st.markdown("#### Audit Trends")
 
+    def _placeholder_pace_rows() -> list[dict]:
+        today = date.today()
+        samples = [(6, 11.3, 8), (5, 10.9, 9), (4, 10.2, 10), (3, 9.7, 11), (2, 9.4, 10), (1, 9.8, 9), (0, 9.1, 12)]
+        out: list[dict] = []
+        for days_ago, avg_minutes, loads in samples:
+            day_val = today - timedelta(days=int(days_ago))
+            out.append(
+                {
+                    "day": day_val.isoformat(),
+                    "avg_seconds": float(avg_minutes) * 60.0,
+                    "avg_minutes": float(avg_minutes),
+                    "loads": int(loads),
+                }
+            )
+        return out
+
+    def _placeholder_wearers_rows() -> list[dict]:
+        sample_day = date.today().isoformat()
+        return [
+            {"day": sample_day, "truck": "82", "truck_num": 82, "route": "82", "batch": "Batch 1", "wearers": 112, "load_day_num": 1},
+            {"day": sample_day, "truck": "84", "truck_num": 84, "route": "84", "batch": "Batch 2", "wearers": 126, "load_day_num": 1},
+            {"day": sample_day, "truck": "88", "truck_num": 88, "route": "88", "batch": "Batch 3", "wearers": 98, "load_day_num": 1},
+            {"day": sample_day, "truck": "90", "truck_num": 90, "route": "90", "batch": "Batch 4", "wearers": 134, "load_day_num": 1},
+        ]
+
+    def _placeholder_route_category_rows(shortages_view: bool) -> list[dict]:
+        if shortages_view:
+            return [
+                {"route": "82", "category": "Bulk", "qty": 14, "route_total": 21},
+                {"route": "82", "category": "3x10", "qty": 7, "route_total": 21},
+                {"route": "84", "category": "Bulk", "qty": 9, "route_total": 16},
+                {"route": "84", "category": "Shirts", "qty": 7, "route_total": 16},
+                {"route": "88", "category": "Pants", "qty": 6, "route_total": 10},
+                {"route": "88", "category": "3x10", "qty": 4, "route_total": 10},
+            ]
+        return [
+            {"route": "82", "category": "Bulk", "qty": 12, "route_total": 20},
+            {"route": "82", "category": "3x10", "qty": 8, "route_total": 20},
+            {"route": "84", "category": "Shirts", "qty": 11, "route_total": 18},
+            {"route": "84", "category": "Bulk", "qty": 7, "route_total": 18},
+            {"route": "88", "category": "Pants", "qty": 9, "route_total": 14},
+            {"route": "88", "category": "Bulk", "qty": 5, "route_total": 14},
+        ]
+
+    def _with_example_watermark(spec: dict) -> dict:
+        # Layer a subtle EXAMPLE watermark over placeholder-only charts.
+        base_layer = {k: v for k, v in dict(spec or {}).items() if k != "$schema"}
+        return {
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "layer": [
+                base_layer,
+                {
+                    "data": {"values": [{"wm": "EXAMPLE"}]},
+                    "mark": {
+                        "type": "text",
+                        "align": "center",
+                        "baseline": "middle",
+                        "fontSize": 72,
+                        "fontWeight": "bold",
+                        "angle": -24,
+                        "opacity": 0.12,
+                        "color": "#94a3b8",
+                    },
+                    "encoding": {
+                        "text": {"field": "wm", "type": "nominal"},
+                        "x": {"value": 260},
+                        "y": {"value": 150},
+                    },
+                },
+            ],
+        }
+
     if external_days_back is None:
         trend_window_options = ["Show All", 7, 14, 30]
         window_pick = st.selectbox("Trend window", options=trend_window_options, index=0, key="sup_audit_trend_days")
@@ -2188,7 +2601,7 @@ def _render_supervisor_audit_trends(
     else:
         days = int(external_days_back)
 
-    trend_view_options = ["Removals", "Pace", "Shortages"]
+    trend_view_options = ["Removals", "Pace", "Shortages", "Wearers"]
     selected_trend_view = str(external_trend_view or "Removals")
     if selected_trend_view not in trend_view_options:
         selected_trend_view = "Removals"
@@ -2197,6 +2610,8 @@ def _render_supervisor_audit_trends(
         st.caption("Load-duration pace trend over time.")
     elif selected_trend_view == "Shortages":
         st.caption("Recorded shortages by route and category.")
+    elif selected_trend_view == "Wearers":
+        st.caption("Wearers batched by truck and load day.")
     else:
         st.caption("Requests to remove leftover truck stock to reduce next-week loading.")
 
@@ -2218,6 +2633,10 @@ def _render_supervisor_audit_trends(
             st.metric("Loads in view", int(total_loads))
 
         pace_daily_rows = _audit_pace_daily_rows(int(days))
+        using_placeholder_pace = len([r for r in pace_daily_rows if int(r.get("loads") or 0) > 0]) == 0
+        if using_placeholder_pace:
+            pace_daily_rows = _placeholder_pace_rows()
+            st.caption("Showing example data until pace history is available.")
         pace_chart_spec = {
             "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
             "title": "Load Duration Pace Trend (Minutes)",
@@ -2235,7 +2654,173 @@ def _render_supervisor_audit_trends(
             },
             "height": 320,
         }
+        if using_placeholder_pace:
+            pace_chart_spec = _with_example_watermark(pace_chart_spec)
         st.vega_lite_chart(pace_chart_spec, width="stretch")
+        return
+
+    if selected_trend_view == "Wearers":
+        day_filter_options = _audit_day_filter_options()
+        if external_day_filter is None:
+            selected_day_filter = str(
+                st.selectbox(
+                    "DAY",
+                    options=day_filter_options,
+                    index=0,
+                    key="sup_wearers_trend_day_switcher",
+                )
+            )
+        else:
+            selected_day_filter = str(external_day_filter)
+            if selected_day_filter not in day_filter_options:
+                selected_day_filter = "Show All"
+
+        truck_options = _batch_wearers_truck_filter_options(int(days), day_filter=selected_day_filter)
+        if external_route_filter is None:
+            selected_truck = st.selectbox(
+                "Truck",
+                options=truck_options,
+                index=0,
+                key="sup_wearers_trend_truck_switcher",
+            )
+        else:
+            selected_truck = str(external_route_filter)
+            if selected_truck not in truck_options:
+                selected_truck = "Show All"
+
+        batch_options = _batch_wearers_batch_filter_options(int(days), day_filter=selected_day_filter)
+        if external_category_filter is None:
+            selected_batch = st.selectbox(
+                "Batch",
+                options=batch_options,
+                index=0,
+                key="sup_wearers_trend_batch_switcher",
+            )
+        else:
+            selected_batch = str(external_category_filter)
+            if selected_batch not in batch_options:
+                selected_batch = "Show All"
+
+        wearers_rows = _batch_wearers_rows(
+            int(days),
+            day_filter=selected_day_filter,
+            truck_filter=selected_truck,
+            batch_filter=selected_batch,
+        )
+        using_placeholder_wearers = False
+        if not wearers_rows:
+            wearers_rows = _placeholder_wearers_rows()
+            using_placeholder_wearers = True
+            st.caption("Showing example data until batch wearers history is available.")
+
+        total_wearers = int(sum(int(r.get("wearers") or 0) for r in wearers_rows))
+        unique_trucks = len({int(r.get("truck_num") or 0) for r in wearers_rows})
+        unique_days = len({str(r.get("day") or "") for r in wearers_rows})
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Wearers in view", total_wearers)
+        with c2:
+            st.metric("Trucks in view", unique_trucks)
+        with c3:
+            st.metric("Days in view", unique_days)
+
+        wearers_chart_spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "title": "Batched Wearers by Truck",
+            "data": {"values": wearers_rows},
+            "params": [
+                {
+                    "name": "wearers_pick",
+                    "select": {"type": "point", "on": "click", "clear": "dblclick"},
+                }
+            ],
+            "mark": {"type": "bar", "cornerRadiusEnd": 3},
+            "encoding": {
+                "x": {
+                    "field": "truck",
+                    "type": "nominal",
+                    "sort": {"op": "sum", "field": "wearers", "order": "descending"},
+                    "title": "Truck",
+                    "axis": {"labelAngle": -35},
+                },
+                "y": {
+                    "field": "wearers",
+                    "type": "quantitative",
+                    "title": "Wearers",
+                    "stack": "zero",
+                    "axis": {"format": ",d"},
+                },
+                "color": {
+                    "field": "batch",
+                    "type": "nominal",
+                    "title": "Batch",
+                },
+                "stroke": {
+                    "condition": {
+                        "param": "wearers_pick",
+                        "value": "#f8fafc",
+                    },
+                    "value": "#00000000",
+                },
+                "strokeWidth": {
+                    "condition": {
+                        "param": "wearers_pick",
+                        "value": 2.5,
+                    },
+                    "value": 0,
+                },
+                "tooltip": [
+                    {"field": "day", "type": "temporal", "title": "Run Date"},
+                    {"field": "truck", "type": "nominal", "title": "Truck"},
+                    {"field": "route", "type": "nominal", "title": "Route"},
+                    {"field": "batch", "type": "nominal", "title": "Batch"},
+                    {"field": "wearers", "type": "quantitative", "title": "Wearers"},
+                    {"field": "load_day_num", "type": "quantitative", "title": "Load Day"},
+                ],
+            },
+            "height": 320,
+        }
+        if using_placeholder_wearers:
+            wearers_chart_spec = _with_example_watermark(wearers_chart_spec)
+
+        wearers_event = None
+        try:
+            wearers_event = st.vega_lite_chart(
+                wearers_chart_spec,
+                width="stretch",
+                key="sup_wearers_trend_chart",
+                on_select="rerun",
+                selection_mode=["wearers_pick"],
+            )
+        except TypeError:
+            st.vega_lite_chart(wearers_chart_spec, width="stretch")
+
+        if bool(render_details_panel):
+            details_state_key = "sup_audit_trends_selected_details"
+            selected_point = None
+            if isinstance(wearers_event, dict):
+                selected_raw = ((wearers_event.get("selection") or {}).get("wearers_pick") or [])
+                if isinstance(selected_raw, list) and selected_raw:
+                    selected_point = selected_raw[0]
+
+            if (not using_placeholder_wearers) and isinstance(selected_point, dict) and selected_point:
+                details_payload = {
+                    "chart": "Batched Wearers by Truck",
+                    "route": selected_point.get("route"),
+                    "category": selected_point.get("batch"),
+                    "qty": selected_point.get("wearers"),
+                    "route_total": None,
+                    "qty_pct": None,
+                    "metric_mode": "Qty",
+                    "load_day": f"Day {int(selected_point.get('load_day_num') or 0)}",
+                    "removal_day": "-",
+                }
+                prev_payload = st.session_state.get(details_state_key)
+                st.session_state[details_state_key] = details_payload
+                if prev_payload != details_payload:
+                    if _is_mobile_client() and str(st.session_state.get("active_screen") or "").upper() == "TRENDS":
+                        st.session_state["sup_audit_trends_mobile_details_dialog_open"] = True
+                    st.rerun()
         return
 
     is_shortages_view = selected_trend_view == "Shortages"
@@ -2280,13 +2865,15 @@ def _render_supervisor_audit_trends(
     else:
         route_category_rows = _audit_route_category_rows(int(days), day_filter=selected_day_filter)
     has_any_data = any(int(r.get("qty") or 0) > 0 for r in (route_category_rows or []))
+    using_placeholder_route_rows = False
 
     if not has_any_data:
+        route_category_rows = _placeholder_route_category_rows(is_shortages_view)
+        using_placeholder_route_rows = True
         if is_shortages_view:
-            st.caption("No shortages history yet. Save short sheets to populate this trend.")
+            st.caption("Showing example data until shortages history is available.")
         else:
-            st.caption("No audit history yet. Add requests from In Progress or Shorts to populate trends.")
-        return
+            st.caption("Showing example data until audit history is available.")
 
     chart_rows = [
         {
@@ -2475,8 +3062,11 @@ def _render_supervisor_audit_trends(
             ]
 
         if not filtered_route_rows:
-            st.caption("No entries for the selected route/category filter.")
-            return
+            if using_placeholder_route_rows:
+                filtered_route_rows = chart_rows
+            else:
+                st.caption("No entries for the selected route/category filter.")
+                return
 
         route_chart_spec = {
             "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -2563,6 +3153,8 @@ def _render_supervisor_audit_trends(
             },
             "height": 280,
         }
+        if using_placeholder_route_rows:
+            route_chart_spec = _with_example_watermark(route_chart_spec)
 
         route_event = None
         try:
@@ -2577,7 +3169,7 @@ def _render_supervisor_audit_trends(
             st.vega_lite_chart(route_chart_spec, width="stretch")
 
         route_point = _extract_selected_point(route_event, "route_bar_pick")
-        if isinstance(route_point, dict) and route_point:
+        if (not using_placeholder_route_rows) and isinstance(route_point, dict) and route_point:
             selected_route = str(route_point.get("route") or "").strip()
             selected_category = str(route_point.get("category") or "").strip()
             try:
@@ -2617,6 +3209,8 @@ def _render_supervisor_audit_trends(
             prev_payload = st.session_state.get(details_state_key)
             st.session_state[details_state_key] = details_payload
             if prev_payload != details_payload:
+                if _is_mobile_client() and str(st.session_state.get("active_screen") or "").upper() == "TRENDS":
+                    st.session_state["sup_audit_trends_mobile_details_dialog_open"] = True
                 st.rerun()
 
 
@@ -4284,6 +4878,7 @@ def _deserialize_state_payload(data: dict) -> dict:
             "off_set",
             "spare_set",
             "special_set",
+            "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
             "unload_completed_routes_today",
@@ -4318,6 +4913,7 @@ def _deserialize_state_payload(data: dict) -> dict:
             "batches",
             "off_schedule",
             "shop_prev_status",
+            "unload_request_meta",
             "shorts_button_state",
         }:
             if isinstance(v, dict):
@@ -4379,6 +4975,7 @@ def _serialize_state() -> dict:
             "off_set",
             "spare_set",
             "special_set",
+            "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
             "unload_completed_routes_today",
@@ -4392,6 +4989,11 @@ def _serialize_state() -> dict:
         elif k == "ship_dates":
             data[k] = [d.isoformat() for d in v]
         elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "oos_spare_assignments", "route_swap_assignments", "sup_notes_global", "sup_notes_daily", "shorts_initials", "load_durations", "truck_load_day_by_truck", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
+            ser = {}
+            for kk, vv in (v or {}).items():
+                ser[str(kk)] = vv
+            data[k] = ser
+        elif k in {"unload_request_meta"}:
             ser = {}
             for kk, vv in (v or {}).items():
                 ser[str(kk)] = vv
@@ -5487,7 +6089,9 @@ def _render_user_management_dropdown():
                 line-height: 1.1;
             }
             div[class*="st-key-mgmt_user_card_select_"] button p {
-                white-space: pre-line;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
                 margin: 0;
             }
             div[class*="st-key-mgmt_user_card_select_"] button:hover {
@@ -5540,8 +6144,7 @@ def _render_user_management_dropdown():
                     AUTH_ROLE_GUEST: "⬛",
                 }.get(role_value, "⬛")
                 card_label = (
-                    f"{display_name}\n"
-                    f"{role_badge_symbol} {role_label.upper()} · @{username} · {enabled_label}"
+                    f"{role_badge_symbol} {role_label.upper()} · {display_name} · {enabled_label}"
                 )
                 if st.button(
                     card_label,
@@ -5860,6 +6463,7 @@ def _restore_day_state_from_archive(archived_state: dict, run_date: date, ship_d
         "shorts_mode",
         "shorts_disabled",
         "batching_disabled",
+        "skip_batching_disabled",
         "role_workflow_settings",
         "pace_avg_override_enabled",
         "pace_avg_override_seconds",
@@ -5982,6 +6586,7 @@ if "shorts_button_state" not in loaded:
 if "shorts_mode" not in loaded:
     loaded["shorts_mode"] = SHORTS_MODE_DISABLE if loaded.get("shorts_disabled") else SHORTS_MODE_BUTTONS
 loaded["role_workflow_settings"] = _normalize_role_workflow_settings(loaded.get("role_workflow_settings"))
+loaded["skip_batching_disabled"] = _to_bool(loaded.get("skip_batching_disabled"), False)
 loaded["pace_avg_override_enabled"] = _to_bool(loaded.get("pace_avg_override_enabled"), False)
 loaded_legacy_checked_before = _to_bool(loaded.get("pace_avg_override_legacy_checked"), False)
 loaded["pace_avg_override_legacy_checked"] = bool(loaded_legacy_checked_before)
@@ -6056,6 +6661,8 @@ defaults = {
     "shop_prev_status": {},          # {truck: status}
     "shop_notice_log": [],
     "special_set": set(),
+    "unload_request_set": set(),     # explicit unload requests from Fleet
+    "unload_request_meta": {},       # {truck: {mark_shop: bool, load_on: str}}
     "dust_garment_trucks": set(),
     "dust_garment_set_day_key": "",
 
@@ -6124,6 +6731,7 @@ defaults = {
     "shorts_disabled": False,
     "tracked_items_map": _clone_json_compatible(SHORTS_BUTTON_MAP),
     "batching_disabled": False,
+    "skip_batching_disabled": False,
 
     # warning threshold
     "warn_seconds": DEFAULT_WARN_MIN * 60,
@@ -6872,7 +7480,26 @@ st.markdown(
             }
         }
         @media (max-width: 980px) {
-            .stButton > button[kind="primary"] {
+            /* Default mobile button layout: two columns to reduce scrolling. */
+            [data-testid="stAppViewContainer"] .main [data-testid="stButton"] {
+                display: inline-block !important;
+                width: 49% !important;
+                vertical-align: top !important;
+                margin: 0 0.5% 0.45rem 0.5% !important;
+            }
+            [data-testid="stAppViewContainer"] .main [data-testid="stButton"] > button,
+            [data-testid="stAppViewContainer"] .main .stButton > button[kind="primary"] {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            /* Sidebar should stay full-width and unchanged on mobile. */
+            [data-testid="stSidebar"] [data-testid="stButton"] {
+                display: block !important;
+                width: 100% !important;
+                margin: 0 0 0.45rem 0 !important;
+            }
+            [data-testid="stSidebar"] [data-testid="stButton"] > button,
+            [data-testid="stSidebar"] .stButton > button[kind="primary"] {
                 width: 100% !important;
                 max-width: 100% !important;
             }
@@ -7507,6 +8134,12 @@ def render_holiday_load_day_picker(run_date: date, key_prefix: str) -> tuple[lis
         + ", ".join(f"{load_day_label(ship_day_number(d) or 1)} ({d.isoformat()})" for d in ship_dates)
     )
     return ship_dates, True
+
+
+def _default_holiday_ship_dates_for_run_date(run_date: date) -> list[date]:
+    tomorrow_num = ship_day_number(run_date + timedelta(days=1)) or 1
+    second_day_num = _next_ship_day_num(tomorrow_num) or 1
+    return _holiday_ship_dates_for_days(run_date, [int(tomorrow_num), int(second_day_num)])
 
 def off_trucks_for_day(day_num: int | None) -> set[int]:
     if not day_num:
@@ -8706,7 +9339,7 @@ def _inject_mobile_query_hint() -> None:
             var touchPoints = Number((root.navigator && root.navigator.maxTouchPoints) || 0);
             var vw = Math.max(0, root.innerWidth || (root.document && root.document.documentElement && root.document.documentElement.clientWidth) || 0);
 
-            var uaMobile = /android|iphone|ipad|ipod|mobile|samsungbrowser|firefox\//.test(ua);
+            var uaMobile = /android|iphone|ipad|ipod|mobile|samsungbrowser|firefox\\//.test(ua);
             var likelyHandheld = uaMobile || ((touchPoints >= 2) && (vw > 0 && vw <= 1100) && (platform.indexOf('linux') >= 0 || platform.indexOf('android') >= 0));
             if (!likelyHandheld) return;
 
@@ -8721,6 +9354,95 @@ def _inject_mobile_query_hint() -> None:
 
 
 _inject_mobile_query_hint()
+
+
+def _enable_mobile_numeric_keypad() -> None:
+        # Mobile-only: improve keypad choice for numeric inputs and number-like text fields.
+        components.html(
+                """
+                <script>
+                (function () {
+                    try {
+                        const rootWin = window.parent || window;
+                        const rootDoc = rootWin.document;
+                        if (!rootDoc) return;
+
+                        const isMobileViewport = () => {
+                            try {
+                                return rootWin.matchMedia('(max-width: 980px)').matches || rootWin.innerWidth <= 980;
+                            } catch (e) {
+                                return (rootWin.innerWidth || window.innerWidth || 1200) <= 980;
+                            }
+                        };
+                        if (!isMobileViewport()) return;
+
+                        const numberLikeLabel = /(^|\\b)(wearers?|qty|quantity|number|truck|route|day|loaders?|seconds?|minutes?|percent|batch|count|capacity|total)($|\\b)/i;
+                        const textLikeExclusion = /(^|\\b)(note|reason|search|username|password|message|category|word|name|comment|chat)($|\\b)/i;
+
+                        const normalize = (v) => String(v || '').replace(/\\u2063/g, '').trim();
+                        const getTextContext = (input) => {
+                            const attrs = [
+                                input.getAttribute('aria-label'),
+                                input.getAttribute('placeholder'),
+                                input.getAttribute('name'),
+                                input.getAttribute('id')
+                            ];
+                            const labelEl = input.closest('[data-testid="stTextInput"], [data-testid="stNumberInput"]');
+                            if (labelEl) attrs.push(labelEl.textContent || '');
+                            return normalize(attrs.filter(Boolean).join(' ')).toLowerCase();
+                        };
+
+                        const applyNumericHints = (input) => {
+                            if (!input || input.disabled || input.readOnly) return;
+                            const typeAttr = String(input.getAttribute('type') || '').toLowerCase();
+                            if (typeAttr === 'password') return;
+
+                            const inNumberWidget = !!input.closest('[data-testid="stNumberInput"]');
+                            const inTextWidget = !!input.closest('[data-testid="stTextInput"]');
+
+                            let shouldForceNumeric = inNumberWidget || typeAttr === 'number';
+                            if (!shouldForceNumeric && inTextWidget && typeAttr === 'text') {
+                                const textContext = getTextContext(input);
+                                if (numberLikeLabel.test(textContext) && !textLikeExclusion.test(textContext)) {
+                                    shouldForceNumeric = true;
+                                }
+                            }
+                            if (!shouldForceNumeric) return;
+
+                            input.setAttribute('inputmode', 'numeric');
+                            input.setAttribute('pattern', '[0-9]*');
+                            input.setAttribute('enterkeyhint', 'done');
+                        };
+
+                        const applyAll = () => {
+                            try {
+                                if (!isMobileViewport()) return;
+                                const inputs = rootDoc.querySelectorAll('input');
+                                inputs.forEach(applyNumericHints);
+                            } catch (e) {}
+                        };
+
+                        applyAll();
+                        setTimeout(applyAll, 80);
+                        setTimeout(applyAll, 260);
+                        setTimeout(applyAll, 640);
+
+                        if (!rootWin.__numericKeypadObserverBound) {
+                            const observer = new MutationObserver(() => applyAll());
+                            observer.observe(rootDoc.body || rootDoc.documentElement, { childList: true, subtree: true });
+                            rootWin.__numericKeypadObserverBound = true;
+                            rootWin.__numericKeypadObserverRef = observer;
+                        }
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+        )
+
+
+_enable_mobile_numeric_keypad()
 
 def _truck_grid_columns(default_cols: int = 8) -> int:
     base_cols = max(1, int(default_cols))
@@ -8848,6 +9570,7 @@ def _force_mobile_button_grid(
                     const mobile = isMobileViewport();
                     const buttons = Array.from(root.querySelectorAll(selector));
                     const matched = buttons.filter((btn) => {{
+                        if (btn.closest('[data-testid="stSidebar"]')) return false;
                         const label = canonicalLabel(btn.innerText || btn.textContent || '');
                         return !!label && expected.has(label);
                     }});
@@ -8879,19 +9602,21 @@ def _force_mobile_button_grid(
                         const slots = activeSlots.length ? activeSlots : rowSlots;
 
                         if (mobile) {{
-                            const targetWidth = slots.length === 1 ? '100%' : cellWidth;
-                            container.style.setProperty('display', 'flex', 'important');
-                            container.style.setProperty('flex-direction', 'row', 'important');
-                            container.style.setProperty('flex-wrap', 'wrap', 'important');
+                            const gridCols = Math.max(1, Math.min(cols, slots.length || cols));
+                            container.style.setProperty('display', 'grid', 'important');
+                            container.style.setProperty('grid-template-columns', `repeat(${{gridCols}}, minmax(0, 1fr))`, 'important');
                             container.style.setProperty('align-items', 'stretch', 'important');
-                            container.style.setProperty('justify-content', 'flex-start', 'important');
+                            container.style.setProperty('justify-items', 'stretch', 'important');
                             container.style.setProperty('column-gap', gapCss, 'important');
                             container.style.setProperty('row-gap', gapCss, 'important');
-                            slots.forEach((slot) => {{
+                            slots.forEach((slot, idx) => {{
+                                const col = (idx % gridCols) + 1;
+                                const row = Math.floor(idx / gridCols) + 1;
                                 slot.style.setProperty('min-width', '0', 'important');
-                                slot.style.setProperty('flex', `0 0 ${{targetWidth}}`, 'important');
-                                slot.style.setProperty('width', targetWidth, 'important');
-                                slot.style.setProperty('max-width', targetWidth, 'important');
+                                slot.style.setProperty('width', '100%', 'important');
+                                slot.style.setProperty('max-width', '100%', 'important');
+                                slot.style.setProperty('grid-column', `${{col}} / span 1`, 'important');
+                                slot.style.setProperty('grid-row', String(row), 'important');
                             }});
                             uniqueButtons.forEach((btn) => {{
                                 btn.style.setProperty('width', '100%', 'important');
@@ -9320,6 +10045,21 @@ def _color_darken(bg_hex: str, factor: float = 0.62) -> str:
         return "#1e293b"
 
 
+def _color_lighten(bg_hex: str, factor: float = 0.34) -> str:
+    normalized = _normalize_hex_color(bg_hex, "#334155")
+    try:
+        mix = max(0.0, min(1.0, float(factor)))
+        r = int(normalized[1:3], 16)
+        g = int(normalized[3:5], 16)
+        b = int(normalized[5:7], 16)
+        r = max(0, min(255, int(r + (255 - r) * mix)))
+        g = max(0, min(255, int(g + (255 - g) * mix)))
+        b = max(0, min(255, int(b + (255 - b) * mix)))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception:
+        return "#94a3b8"
+
+
 def _truck_status_colors(truck_num: int, badge_colors: dict[str, str] | None = None) -> tuple[str, str, str]:
     colors = badge_colors or _get_status_badge_colors()
     status = current_status_label(int(truck_num))
@@ -9637,11 +10377,6 @@ def render_numeric_truck_buttons(
                             if (!match) {{
                                 if (trailingLabels.has(raw)) {{
                                     const trailingSig = `trailing|${{forceTextColor || ''}}`;
-                                    const wrapper = btn.closest('[data-testid="stButton"]');
-                                    if (wrapper) {{
-                                        wrapper.style.setProperty('width', '100%', 'important');
-                                        wrapper.style.setProperty('display', 'block', 'important');
-                                    }}
                                     btn.style.setProperty('display', 'flex', 'important');
                                     btn.style.setProperty('align-items', 'center', 'important');
                                     btn.style.setProperty('justify-content', 'center', 'important');
@@ -9675,11 +10410,6 @@ def render_numeric_truck_buttons(
                             const truckLabel = match[1];
                             const colors = colorMap[truckLabel];
                             if (!colors) return;
-                            const wrapper = btn.closest('[data-testid="stButton"]');
-                            if (wrapper) {{
-                                wrapper.style.setProperty('width', '100%', 'important');
-                                wrapper.style.setProperty('display', 'block', 'important');
-                            }}
                             const fg = forceTextColor || colors.fg || '#000000';
                             const isDisabledTruck = disabledLabels.has(truckLabel);
                             btn.style.setProperty('background', colors.bg, 'important');
@@ -10403,9 +11133,6 @@ def _render_add_truck_to_fleet_form(number_key: str, button_key: str) -> int | N
 
 
 def _render_fleet_left_rail_actions():
-    if _is_mobile_client():
-        return
-
     selected = st.session_state.get("sup_manage_truck")
     if selected is not None:
         return
@@ -10414,19 +11141,140 @@ def _render_fleet_left_rail_actions():
     swap_route_input_key = "sup_manage_swap_dialog_truck"
     swap_load_input_key = "sup_manage_swap_dialog_load_on"
     swap_feedback_key = "sup_manage_swap_feedback"
+    unload_request_dialog_open_key = "sup_manage_unload_request_dialog_open"
+    unload_request_pick_key = "sup_manage_unload_request_pick"
+    unload_request_feedback_key = "sup_manage_unload_request_feedback"
+    unload_request_mark_shop_key = "sup_manage_unload_request_mark_shop"
+    unload_request_load_on_pick_key = "sup_manage_unload_request_load_on_pick"
+    unload_request_last_pick_key = "sup_manage_unload_request_last_pick"
     selected_trucks_key = "sup_manage_multi_selected_trucks"
     if selected_trucks_key not in st.session_state:
         st.session_state[selected_trucks_key] = []
 
     multi_mode_active = bool(st.session_state.get("sup_manage_multi_mode"))
+    pending_unload_request_feedback = st.session_state.pop(unload_request_feedback_key, None)
+    if pending_unload_request_feedback:
+        if hasattr(st, "toast"):
+            st.toast(str(pending_unload_request_feedback))
+        else:
+            st.success(str(pending_unload_request_feedback))
 
-    st.markdown("<h4 style='text-align:center; margin:0 0 0.45rem 0;'>Actions</h4>", unsafe_allow_html=True)
+    def _render_unload_request_dialog_if_needed():
+        if not bool(st.session_state.get(unload_request_dialog_open_key)):
+            return
+
+        requestable_trucks: list[int] = []
+        for truck_num in sorted({int(t) for t in FLEET}):
+            status_now = str(current_status_label(int(truck_num)) or "").strip()
+            if status_now in {"Dirty", "Spare"}:
+                requestable_trucks.append(int(truck_num))
+        unload_request_meta = _normalize_unload_request_meta(st.session_state.get("unload_request_meta") or {})
+        st.session_state.unload_request_meta = unload_request_meta
+
+        label_map = {
+            int(truck_num): f"Truck {int(truck_num)} - {current_status_label(int(truck_num))}"
+            for truck_num in requestable_trucks
+        }
+
+        if requestable_trucks:
+            current_pick = st.session_state.get(unload_request_pick_key)
+            try:
+                current_pick_int = int(current_pick)
+            except Exception:
+                current_pick_int = int(requestable_trucks[0])
+            if current_pick_int not in requestable_trucks:
+                current_pick_int = int(requestable_trucks[0])
+            st.session_state[unload_request_pick_key] = int(current_pick_int)
+
+            last_pick_raw = st.session_state.get(unload_request_last_pick_key)
+            try:
+                last_pick = int(last_pick_raw)
+            except Exception:
+                last_pick = None
+            if last_pick != int(current_pick_int):
+                existing_meta = unload_request_meta.get(int(current_pick_int), {})
+                st.session_state[unload_request_mark_shop_key] = bool(existing_meta.get("mark_shop", False))
+                st.session_state.pop(unload_request_load_on_pick_key, None)
+                st.session_state[unload_request_last_pick_key] = int(current_pick_int)
+
+        def _close_unload_request_dialog():
+            st.session_state[unload_request_dialog_open_key] = False
+            st.session_state.pop(unload_request_pick_key, None)
+            st.session_state.pop(unload_request_mark_shop_key, None)
+            st.session_state.pop(unload_request_load_on_pick_key, None)
+            st.session_state.pop(unload_request_last_pick_key, None)
+
+        def _render_unload_request_dialog_body():
+            if not requestable_trucks:
+                st.info("No Dirty or Spare trucks are currently available for unload request.")
+                if st.button("Close", width="stretch", key="sup_manage_unload_request_close_empty"):
+                    _close_unload_request_dialog()
+                    st.rerun()
+                return
+
+            st.selectbox(
+                "Truck",
+                options=requestable_trucks,
+                key=unload_request_pick_key,
+                format_func=lambda t: label_map.get(int(t), f"Truck {int(t)}"),
+            )
+
+            selected_truck_num = int(st.session_state.get(unload_request_pick_key))
+            selected_meta = unload_request_meta.get(int(selected_truck_num), {})
+            mark_shop_after = bool(
+                st.checkbox(
+                    "Mark as Shop after Unloaded",
+                    value=bool(st.session_state.get(unload_request_mark_shop_key, selected_meta.get("mark_shop", False))),
+                    key=unload_request_mark_shop_key,
+                )
+            )
+            load_on_pick = ""
+            if mark_shop_after:
+                load_on_pick = _render_shop_load_on_dropdown(
+                    "Load On",
+                    key=unload_request_load_on_pick_key,
+                    source_truck=int(selected_truck_num),
+                    current_value=str(selected_meta.get("load_on") or ""),
+                )
+
+            c_req, c_cancel = st.columns([1, 1])
+            with c_req:
+                if st.button("Request Unload", width="stretch", key="sup_manage_unload_request_submit"):
+                    truck_num = int(st.session_state.get(unload_request_pick_key))
+                    unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+                    unload_request_set.add(int(truck_num))
+                    st.session_state.unload_request_set = unload_request_set
+                    unload_request_meta[int(truck_num)] = {
+                        "mark_shop": bool(mark_shop_after),
+                        "load_on": str(load_on_pick or "").strip(),
+                    }
+                    st.session_state.unload_request_meta = unload_request_meta
+                    log_action(f"Unload request added for Truck {int(truck_num)}")
+                    _mark_and_save()
+                    st.session_state[unload_request_feedback_key] = f"Unload request sent for Truck {int(truck_num)}."
+                    _close_unload_request_dialog()
+                    st.rerun()
+            with c_cancel:
+                if st.button("Cancel", width="stretch", key="sup_manage_unload_request_cancel"):
+                    _close_unload_request_dialog()
+                    st.rerun()
+
+        dialog_api = getattr(st, "dialog", None)
+        if callable(dialog_api):
+            @dialog_api("Unload Request", width="small")
+            def _render_unload_request_dialog():
+                _render_unload_request_dialog_body()
+
+            _render_unload_request_dialog()
+        else:
+            st.markdown("### Unload Request")
+            _render_unload_request_dialog_body()
+
     if not multi_mode_active:
-        if st.button("New", width="stretch", key="fleet_left_new_mode"):
-            st.session_state["sup_manage_new_dialog_open"] = True
+        if st.button("Unload Request", width="stretch", key="fleet_left_unload_request_mode"):
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = False
-            st.session_state.sup_manage_multi_selected_trucks = []
+            st.session_state.sup_manage_truck = None
             st.session_state.sup_manage_action = None
             st.session_state.sup_manage_pref_action = None
             st.session_state["sup_manage_option_dialog_open"] = False
@@ -10436,6 +11284,7 @@ def _render_fleet_left_rail_actions():
             st.session_state.pop(swap_route_input_key, None)
             st.session_state.pop(swap_load_input_key, None)
             st.session_state[swap_feedback_key] = None
+            st.session_state[unload_request_dialog_open_key] = True
             st.rerun()
 
         if st.button("Multi", width="stretch", key="fleet_left_multi_mode"):
@@ -10467,8 +11316,25 @@ def _render_fleet_left_rail_actions():
             st.session_state[swap_route_input_key] = None
             st.session_state[swap_load_input_key] = None
             st.rerun()
+
+        if st.button("New", width="stretch", key="fleet_left_new_mode"):
+            st.session_state["sup_manage_new_dialog_open"] = True
+            st.session_state.sup_manage_new_mode = False
+            st.session_state.sup_manage_multi_mode = False
+            st.session_state.sup_manage_multi_selected_trucks = []
+            st.session_state.sup_manage_action = None
+            st.session_state.sup_manage_pref_action = None
+            st.session_state["sup_manage_option_dialog_open"] = False
+            st.session_state["sup_manage_option_dialog_action"] = None
+            st.session_state["sup_manage_option_dialog_truck"] = None
+            st.session_state[swap_dialog_open_key] = False
+            st.session_state.pop(swap_route_input_key, None)
+            st.session_state.pop(swap_load_input_key, None)
+            st.session_state[swap_feedback_key] = None
+            st.rerun()
+
+        _render_unload_request_dialog_if_needed()
     else:
-        st.markdown("<h4 style='text-align:center; margin:0 0 0.45rem 0;'>Multi Actions</h4>", unsafe_allow_html=True)
         target_trucks = sorted({
             int(t) for t in (st.session_state.get(selected_trucks_key) or []) if int(t) in set(FLEET)
         })
@@ -10534,50 +11400,51 @@ def _render_fleet_left_rail_actions():
             st.session_state[selected_trucks_key] = []
             st.rerun()
 
-        components.html(
-            """
-            <script>
-            (function() {
-                try {
-                    const root = window.parent.document;
-                    const retryDelays = [40, 140, 320];
-                    const styleId = 'fleet-left-multi-outline-style';
-                    if (!root.getElementById(styleId)) {
-                        const styleEl = root.createElement('style');
-                        styleEl.id = styleId;
-                        styleEl.textContent = `
-                        button[kind="secondary"].fleet-multi-active-outline,
-                        button[kind="primary"].fleet-multi-active-outline {
-                            outline: 2px solid rgba(59, 130, 246, 0.98) !important;
-                            outline-offset: -2px !important;
-                            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45), 0 0 0 4px rgba(29, 78, 216, 0.2) !important;
-                        }`;
-                        root.head.appendChild(styleEl);
-                    }
+        if not _is_mobile_client():
+            components.html(
+                """
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const retryDelays = [40, 140, 320];
+                        const styleId = 'fleet-left-multi-outline-style';
+                        if (!root.getElementById(styleId)) {
+                            const styleEl = root.createElement('style');
+                            styleEl.id = styleId;
+                            styleEl.textContent = `
+                            button[kind="secondary"].fleet-multi-active-outline,
+                            button[kind="primary"].fleet-multi-active-outline {
+                                outline: 2px solid rgba(59, 130, 246, 0.98) !important;
+                                outline-offset: -2px !important;
+                                box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45), 0 0 0 4px rgba(29, 78, 216, 0.2) !important;
+                            }`;
+                            root.head.appendChild(styleEl);
+                        }
 
-                    const applyMultiButtonOutline = () => {
-                        const buttons = root.querySelectorAll('button[kind="primary"], button[kind="secondary"]');
-                        buttons.forEach((btn) => {
-                            const label = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
-                            if (label === 'Exit Mutli') {
-                                btn.classList.add('fleet-multi-active-outline');
-                            } else {
-                                btn.classList.remove('fleet-multi-active-outline');
-                            }
+                        const applyMultiButtonOutline = () => {
+                            const buttons = root.querySelectorAll('button[kind="primary"], button[kind="secondary"]');
+                            buttons.forEach((btn) => {
+                                const label = (btn.innerText || btn.textContent || '').replace(/\u2063/g, '').trim();
+                                if (label === 'Exit Mutli') {
+                                    btn.classList.add('fleet-multi-active-outline');
+                                } else {
+                                    btn.classList.remove('fleet-multi-active-outline');
+                                }
+                            });
+                        };
+
+                        applyMultiButtonOutline();
+                        retryDelays.forEach((delay) => {
+                            setTimeout(applyMultiButtonOutline, Math.max(0, Number(delay) || 0));
                         });
-                    };
-
-                    applyMultiButtonOutline();
-                    retryDelays.forEach((delay) => {
-                        setTimeout(applyMultiButtonOutline, Math.max(0, Number(delay) || 0));
-                    });
-                } catch (e) {}
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
 
 
 def _apply_truck_status_change(
@@ -10704,6 +11571,12 @@ def _return_truck_from_shop(truck: int) -> tuple[bool, str | None]:
         return False, None
 
     st.session_state.shop_set.discard(t)
+    unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+    unload_request_set.discard(t)
+    st.session_state.unload_request_set = unload_request_set
+    unload_request_meta = _normalize_unload_request_meta(st.session_state.get("unload_request_meta") or {})
+    unload_request_meta.pop(int(t), None)
+    st.session_state.unload_request_meta = unload_request_meta
     st.session_state.shop_notes.pop(t, None)
     st.session_state.shop_spares.pop(t, None)
     _set_shop_load_on_route_assignment(t, "")
@@ -10805,12 +11678,12 @@ def render_fleet_management():
         clicked_truck = render_numeric_truck_buttons(
             FLEET,
             "sup_manage_pick",
-            default_cols=8,
+            default_cols=2,
             flash_trucks=flash_trucks,
             button_badges=fleet_badges if fleet_badges else None,
             outlined_trucks=(
                 set(st.session_state.get(selected_trucks_key) or [])
-                if multi_mode_active and bool(st.session_state.get(selected_trucks_key))
+                if multi_mode_active
                 else None
             ),
         )
@@ -10829,10 +11702,10 @@ def render_fleet_management():
                 st.session_state.sup_manage_multi_selected_trucks = []
                 st.session_state.sup_manage_truck = int(clicked_num)
                 st.session_state.sup_manage_action = None
-                st.session_state.sup_manage_pref_action = None
                 st.session_state["sup_manage_option_dialog_open"] = False
                 st.session_state["sup_manage_option_dialog_action"] = None
                 st.session_state["sup_manage_option_dialog_truck"] = None
+                st.session_state.sup_manage_pref_action = None
                 st.session_state[swap_dialog_open_key] = False
                 st.session_state.pop(swap_route_input_key, None)
                 st.session_state.pop(swap_load_input_key, None)
@@ -10990,7 +11863,7 @@ def render_fleet_management():
         st.session_state["sup_manage_swap_dialog_load_on"] = None
         st.rerun()
 
-    dialog_actions = {"Shop", "Status", "Notes", "Ran Special", "Add/Remove", "In Progress", "Assign"}
+    dialog_actions = {"Shop", "Status", "Notes", "Ran Special", "Request Unload", "Add/Remove", "In Progress", "Assign"}
     if action in dialog_actions:
         st.session_state.sup_manage_action = None
         action = None
@@ -11223,6 +12096,29 @@ def render_fleet_management():
                             st.session_state.ran_special_confirm = None
                             st.rerun()
 
+            elif dialog_action == "Request Unload":
+                unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+                already_requested = int(sel) in unload_request_set
+                st.caption(f"Current status: {current_status_label(int(sel))}")
+                if int(sel) in set(st.session_state.get("shop_set") or set()):
+                    st.info("This truck is in Shop. Requesting unload will add it to the Unload Route Card.")
+                if already_requested:
+                    st.success(f"Truck {int(sel)} already has an active unload request.")
+
+                if st.button(
+                    "Request Unload",
+                    width="stretch",
+                    key=f"sup_manage_dialog_request_unload_{int(sel)}",
+                    disabled=already_requested,
+                ):
+                    unload_request_set.add(int(sel))
+                    st.session_state.unload_request_set = unload_request_set
+                    log_action(f"Unload request added for Truck {int(sel)}")
+                    _mark_and_save()
+                    st.session_state["sup_manage_option_feedback"] = f"Unload request sent for Truck {int(sel)}."
+                    _close_option_dialog()
+                    st.rerun()
+
             elif dialog_action == "Add/Remove":
                 st.write("### Remove truck from fleet")
                 if st.button("Remove truck", key=f"sup_manage_dialog_remove_{int(sel)}", width="stretch"):
@@ -11364,7 +12260,7 @@ def render_fleet_management():
 
     if not action:
         st.markdown("<div style='text-align:center; font-weight:800; font-size:22px;'>Step 2 - Choose option</div>", unsafe_allow_html=True)
-        action_labels = ["Shop", "Status", "Notes", "Ran Special", "Add/Remove"]
+        action_labels = ["Shop", "Status", "Notes", "Ran Special", "Request Unload", "Add/Remove"]
         if needs_route_assignment:
             action_labels.append("Assign")
         if sel in st.session_state.inprog_set:
@@ -11528,8 +12424,23 @@ def render_fleet_management():
                 c1, c2 = st.columns([1, 1])
                 with c1:
                     if st.button("Confirm assign", key="sup_manage_confirm_assign"):
+                        exceeds_cap, current_total = _would_exceed_batch_cap(
+                            int(pending_a.get("batch") or 0),
+                            int(pending_a.get("wearers") or 0),
+                        )
+                        if exceeds_cap:
+                            _queue_batch_capacity_warning(
+                                batch_id=int(pending_a.get("batch") or 0),
+                                current_total=int(current_total),
+                                incoming_wearers=int(pending_a.get("wearers") or 0),
+                            )
+                            st.session_state.sup_pending_assign = None
+                            st.rerun()
                         st.session_state.wearers[sel] = int(pending_a.get("wearers"))
-                        batch_assign(sel, int(pending_a.get("wearers")), int(pending_a.get("batch")))
+                        assigned_ok = batch_assign(sel, int(pending_a.get("wearers")), int(pending_a.get("batch")))
+                        if not assigned_ok:
+                            st.session_state.sup_pending_assign = None
+                            st.rerun()
                         post_unload_status = _mark_truck_unloaded_after_batch(sel)
                         _mark_and_save()
                         if post_unload_status == "Spare":
@@ -11653,6 +12564,21 @@ def render_fleet_management():
                 if st.button("Cancel", width="stretch", key="sup_manage_special_cancel"):
                     st.session_state.ran_special_confirm = None
                     st.rerun()
+
+    elif action == "Request Unload":
+        st.write("### Request Unload")
+        unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+        already_requested = int(sel) in unload_request_set
+        st.caption(f"Current status: {current_status_label(int(sel))}")
+        if already_requested:
+            st.success(f"Truck {int(sel)} already has an active unload request.")
+        if st.button("Request Unload", width="stretch", key="sup_manage_request_unload", disabled=already_requested):
+            unload_request_set.add(int(sel))
+            st.session_state.unload_request_set = unload_request_set
+            log_action(f"Unload request added for Truck {int(sel)}")
+            _mark_and_save()
+            st.success(f"Unload request sent for Truck {int(sel)}.")
+            st.rerun()
 
     elif action == "Swap":
         st.write("### Swap routes")
@@ -12730,7 +13656,13 @@ def _render_route_card_assign_dialog_if_needed():
                 _close_dialog()
 
 
-def _render_route_card(*, always_show: bool = False, dock_left: bool = True, expanded: bool = True):
+def _render_route_card(
+    *,
+    always_show: bool = False,
+    dock_left: bool = True,
+    expanded: bool = True,
+    mobile_docked: bool = False,
+):
     off_today_routes = {int(t) for t in (off_trucks_for_today() or [])}
     shop_routes = sorted({int(t) for t in (st.session_state.get("shop_set") or set())})
     oos_assignments = {
@@ -12798,6 +13730,8 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
     pending_return_spares = {int(t) for t in _spares_needing_return_set()}
     can_open_route_assignment = _screen_allowed_for_current_user("STATUS_UNLOADED")
+    docked_content_align = "center" if bool(mobile_docked) else "flex-start"
+    docked_text_align = "center" if bool(mobile_docked) else "left"
     route_assign_click_targets: set[int] = set()
     def _live_status_chip(truck_num: int) -> tuple[str, str, str]:
         status_raw = str(current_status_label(int(truck_num)) or "").strip()
@@ -12921,11 +13855,11 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
                     row_bg = "rgba(154,52,18,0.22)"
                     warning_label = "Potential Crossload"
                 row_html = (
-                    "<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:flex-start; gap:0; box-sizing:border-box; "
+                    f"<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:{docked_content_align}; gap:0; box-sizing:border-box; "
                     "padding:7px 10px; margin-top:6px; border-radius:14px; "
                     f"border:{row_border}; background:{row_bg};'>"
-                    "<div style='display:flex; flex-direction:column; gap:4px; width:100%; min-width:0;'>"
-                    "<div style='display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0;'>"
+                    f"<div style='display:flex; flex-direction:column; gap:4px; width:100%; min-width:0; align-items:{docked_content_align}; text-align:{docked_text_align};'>"
+                    f"<div style='display:flex; align-items:center; justify-content:{docked_content_align}; gap:6px; flex-wrap:wrap; min-width:0;'>"
                     f"<span style='font-size:1.42rem; font-weight:900; color:#93c5fd; line-height:1.0; white-space:nowrap;'>#{route_value}</span>"
                     f"<span style='{route_pill_style}'>{route_kind}</span>"
                     f"<span style='{warning_tag_style}'>{warning_label}</span>"
@@ -12989,7 +13923,7 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
 
                 pair_row_html = (
                     (
-                        "<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:flex-start; gap:0; box-sizing:border-box; position:relative; "
+                        f"<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:{docked_content_align}; gap:0; box-sizing:border-box; position:relative; "
                         "padding:7px 10px; margin-top:6px; border-radius:14px; "
                         f"border:{pair_row_border}; background:{pair_row_bg};'>"
                         f"{pair_loaded_corner_html}"
@@ -13071,7 +14005,7 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
             loaded_corner_html = _loaded_corner_check_html() if truck_live_status == "Loaded" else ""
             row_html = (
                 (
-                    "<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:flex-start; gap:0; box-sizing:border-box; position:relative; "
+                    f"<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:{docked_content_align}; gap:0; box-sizing:border-box; position:relative; "
                     "padding:7px 10px; margin-top:6px; border-radius:14px; "
                     f"border:{single_row_border}; background:{single_row_bg};'>"
                     f"{loaded_corner_html}"
@@ -13122,7 +14056,7 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
     route_card_body_html = (
         "<div style='display:block; width:100%; max-width:100%; min-width:0; box-sizing:border-box; "
         "border-radius:16px; overflow:hidden;'>"
-        "<div style='padding:7px 8px 10px 8px; display:flex; flex-direction:column; align-items:flex-start;'>"
+        f"<div style='padding:7px 8px 10px 8px; display:flex; flex-direction:column; align-items:{docked_content_align}; text-align:{docked_text_align};'>"
         f"{assignment_rows}"
         "</div>"
         "</div>"
@@ -13130,12 +14064,15 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
 
     collapse_scope_raw = str(st.session_state.get("active_screen") or "global").strip().lower()
     collapse_scope = "".join(ch for ch in collapse_scope_raw if ch.isalnum() or ch in {"_", "-"}) or "global"
+    if mobile_docked:
+        collapse_scope = f"{collapse_scope}_mobiledock"
     storage_key = f"routeCardCollapsed_{collapse_scope}"
     route_header_gradient = "linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2))"
+    mobile_dock_class = " route-mobile-dock" if bool(mobile_docked) else ""
 
     route_card_wrap_html = (
         "<style>"
-        ".route-collapse-wrap{margin:8px 0 10px 0;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);width:100%;max-width:100%;box-sizing:border-box;}"
+        ".route-collapse-wrap{margin:4px 0 6px 0;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);width:100%;max-width:100%;box-sizing:border-box;}"
         ".route-collapse-label{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 42px 9px 42px;text-align:center;cursor:pointer;user-select:none;box-sizing:border-box;width:100%;}"
         ".route-collapse-title{display:block;width:100%;font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;line-height:1.0;}"
         ".route-collapse-mini{display:block;width:100%;margin-top:6px;font-weight:900;font-size:1rem;opacity:0.92;line-height:1.05;}"
@@ -13143,9 +14080,15 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
         ".route-collapse-body{max-height:1400px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
         ".route-collapse-wrap.collapsed .route-collapse-chevron{transform:translateY(-50%) rotate(-90deg);}"
         ".route-collapse-wrap.collapsed .route-collapse-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
+        "@media (max-width:980px){.route-collapse-wrap{margin:2px 0 4px 0;}.route-collapse-label{padding:8px 34px 7px 34px;}}"
+        "@media (max-width:980px){.route-collapse-wrap.route-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}"
+        ".route-collapse-wrap.route-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}"
+        ".route-collapse-wrap.route-mobile-dock.collapsed{background:transparent !important;}"
+        ".route-collapse-wrap.route-mobile-dock .route-collapse-body{max-height:min(56vh,460px);overflow:auto;}"
+        ".route-collapse-wrap.route-mobile-dock.collapsed .route-collapse-body{max-height:0 !important;overflow:hidden;}}"
         "@media (max-width:1024px){.route-collapse-title{font-size:16px;letter-spacing:0.10em;}.route-collapse-mini{font-size:0.92rem;}}"
         "</style>"
-        f"<div class='route-collapse-wrap' data-route-card='1' data-route-card-scope='{collapse_scope}' style='border:2px solid rgba(37,99,235,0.42);'>"
+        f"<div class='route-collapse-wrap{mobile_dock_class}' data-route-card='1' data-route-card-scope='{collapse_scope}' style='border:2px solid rgba(37,99,235,0.42);'>"
         f"  <div class='route-collapse-label' data-route-card-header='1' data-route-card-scope='{collapse_scope}' role='button' tabindex='0' style='background:{route_header_gradient};'>"
         "    <span class='route-collapse-title'>Route Card</span>"
         f"    <span class='route-collapse-mini'>{html.escape(f'{assignment_count} {assignment_label}')}</span>"
@@ -13193,6 +14136,13 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
                     const card = cards[cards.length - 1];
                     const header = card.querySelector(`[data-route-card-header="1"][data-route-card-scope="${{scope}}"]`);
                     if (!header) return;
+                    const isMobile = (() => {{
+                        try {{
+                            return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                        }} catch (e) {{
+                            return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                        }}
+                    }})();
 
                     const storage = (() => {{
                         try {{ return window.parent.localStorage; }} catch (e) {{ return null; }}
@@ -13231,12 +14181,24 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
                         }});
                     }};
 
-                    applyCollapsed();
+                    const mobileDocked = {str(bool(mobile_docked)).lower()};
+                    if (isMobile && !mobileDocked) {{
+                        card.classList.remove('collapsed');
+                        setCollapsed(false);
+                        header.style.setProperty('cursor', 'default', 'important');
+                        const chev = card.querySelector('.route-collapse-chevron');
+                        if (chev) chev.style.setProperty('display', 'none', 'important');
+                    }} else {{
+                        if (mobileDocked) {{
+                            card.classList.add('route-mobile-dock');
+                        }}
+                        applyCollapsed();
+                    }}
                     hideRouteAssignTriggerButtons();
                     setTimeout(hideRouteAssignTriggerButtons, 60);
                     setTimeout(hideRouteAssignTriggerButtons, 220);
 
-                    if (!header.dataset.boundRouteCardToggle) {{
+                    if ((mobileDocked || !isMobile) && !header.dataset.boundRouteCardToggle) {{
                         const toggle = () => {{
                             const willCollapse = !card.classList.contains('collapsed');
                             card.classList.toggle('collapsed', willCollapse);
@@ -13322,23 +14284,35 @@ def _render_route_card(*, always_show: bool = False, dock_left: bool = True, exp
 
 def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = True):
     shop_trucks = sorted({int(t) for t in (st.session_state.get("shop_set") or set())})
-    special_trucks = sorted({int(t) for t in (st.session_state.get("special_set") or set())})
-    spare_return_trucks = sorted({int(t) for t in _spares_needing_return_set()})
-    allow_special_click = str(st.session_state.get("active_screen") or "").strip().upper() == "UNLOAD"
+    shop_prev_status_raw = st.session_state.get("shop_prev_status") or {}
+    shop_prev_status: dict[int, str] = {}
+    for truck_key, prev_status in (shop_prev_status_raw or {}).items():
+        try:
+            shop_prev_status[int(truck_key)] = str(prev_status or "")
+        except Exception:
+            continue
+    dirty_shop_trucks = [
+        int(truck_num)
+        for truck_num in shop_trucks
+        if str(shop_prev_status.get(int(truck_num), "")).strip().lower() == "dirty"
+    ]
+    unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+    st.session_state.unload_request_set = unload_request_set
+    request_trucks = sorted(int(t) for t in unload_request_set)
+    mobile_docked = _is_mobile_client() and str(st.session_state.get("active_screen") or "").strip().upper() == "UNLOAD"
+    watch_row_align = "center" if mobile_docked else "flex-start"
+    watch_text_align = "center" if mobile_docked else "left"
 
     watch_by_truck: dict[int, set[str]] = {}
-    special_click_targets: set[int] = set()
 
     def _add_watch(truck_num: int, watch_kind: str):
         t = int(truck_num)
         watch_by_truck.setdefault(t, set()).add(str(watch_kind))
 
-    for truck_num in shop_trucks:
-        _add_watch(int(truck_num), "shop")
-    for truck_num in special_trucks:
-        _add_watch(int(truck_num), "special")
-    for truck_num in spare_return_trucks:
-        _add_watch(int(truck_num), "spare_return")
+    for truck_num in dirty_shop_trucks:
+        _add_watch(int(truck_num), "shop_dirty")
+    for truck_num in request_trucks:
+        _add_watch(int(truck_num), "request")
 
     if not always_show and not watch_by_truck:
         return
@@ -13355,38 +14329,28 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
         categories = set(watch_by_truck.get(int(truck_num)) or set())
         chips: list[str] = []
         note_text = "Needs unload."
-        row_is_special_clickable = False
 
-        if "shop" in categories:
+        if "shop_dirty" in categories:
             chips.append(
-                f"<span style='{_chip_style('rgba(124,58,237,0.34)', 'rgba(167,139,250,0.62)', '#ddd6fe')}'>Shop</span>"
+                f"<span style='{_chip_style('rgba(124,58,237,0.34)', 'rgba(167,139,250,0.62)', '#ddd6fe')}'>Shop Dirty</span>"
             )
-            note_text = "Sent to Shop."
+            note_text = "Dirty truck was sent to Shop."
 
-        if "special" in categories:
-            if allow_special_click:
-                special_click_targets.add(int(truck_num))
-                row_is_special_clickable = True
+        if "request" in categories:
             chips.append(
-                f"<span style='{_chip_style('rgba(190,24,93,0.34)', 'rgba(244,114,182,0.62)', '#fbcfe8')}'>Ran Special</span>"
+                f"<span style='{_chip_style('rgba(30,58,138,0.38)', 'rgba(147,197,253,0.66)', '#dbeafe')}'>Unload Request</span>"
             )
-            note_text = "Ran Special needs unload."
+            note_text = "Unload requested from Fleet Management."
 
-        if "spare_return" in categories:
-            chips.append(
-                f"<span style='{_chip_style('rgba(55,65,81,0.42)', 'rgba(156,163,175,0.62)', '#e5e7eb')}'>Spare Return</span>"
-            )
-            chips.append(
-                f"<span style='{_chip_style('rgba(127,29,29,0.44)', 'rgba(248,113,113,0.62)', '#fecaca')}'>Dirty</span>"
-            )
-            note_text = "Spare ran previous day; unload to return it to Spare."
+        if "shop_dirty" in categories and "request" in categories:
+            note_text = "Shop dirty truck with unload request."
 
         row_html = (
-            "<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:flex-start; gap:0; box-sizing:border-box; "
+            f"<div style='display:flex; width:100%; max-width:100%; align-items:center; justify-content:{watch_row_align}; gap:0; box-sizing:border-box; "
             "padding:7px 10px; margin-top:6px; border-radius:14px; "
             "border:1px solid rgba(148,163,184,0.36); background:rgba(15,23,42,0.46);'>"
-            "<div style='display:flex; flex-direction:column; gap:4px; width:100%; min-width:0;'>"
-            "<div style='display:flex; align-items:center; gap:6px; flex-wrap:wrap;'>"
+            f"<div style='display:flex; flex-direction:column; gap:4px; width:100%; min-width:0; align-items:{watch_row_align}; text-align:{watch_text_align};'>"
+            f"<div style='display:flex; align-items:center; justify-content:{watch_row_align}; gap:6px; flex-wrap:wrap;'>"
             f"<span style='font-size:1.42rem; font-weight:900; color:#93c5fd; line-height:1.0; white-space:nowrap;'>#{int(truck_num)}</span>"
             f"{''.join(chips)}"
             "</div>"
@@ -13394,13 +14358,6 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
             "</div>"
             "</div>"
         )
-        if row_is_special_clickable:
-            row_html = (
-                f"<div data-unload-watch-special='{int(truck_num)}' role='button' tabindex='0' title='Open batch/unload for truck #{int(truck_num)}' "
-                "style='display:block; text-decoration:none; color:inherit; cursor:pointer;'>"
-                f"{row_html}"
-                "</div>"
-            )
         row_blocks.append(row_html)
 
     if row_blocks:
@@ -13419,7 +14376,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
     card_body_html = (
         "<div style='display:block; width:100%; max-width:100%; min-width:0; box-sizing:border-box; "
         "border-radius:16px; overflow:hidden;'>"
-        "<div style='padding:7px 8px 10px 8px; display:flex; flex-direction:column; align-items:flex-start;'>"
+        f"<div style='padding:7px 8px 10px 8px; display:flex; flex-direction:column; align-items:{watch_row_align}; text-align:{watch_text_align};'>"
         f"{card_rows_html}"
         "</div>"
         "</div>"
@@ -13429,6 +14386,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
     collapse_scope = "".join(ch for ch in collapse_scope_raw if ch.isalnum() or ch in {"_", "-"}) or "global"
     storage_key = f"unloadWatchCardCollapsed_{collapse_scope}"
     header_gradient = "linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2))"
+    mobile_dock_class = " unload-watch-mobile-dock" if mobile_docked else ""
 
     card_wrap_html = (
         "<style>"
@@ -13440,9 +14398,10 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
         ".unload-watch-collapse-body{max-height:1400px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
         ".unload-watch-collapse-wrap.collapsed .unload-watch-collapse-chevron{transform:translateY(-50%) rotate(-90deg);}"
         ".unload-watch-collapse-wrap.collapsed .unload-watch-collapse-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
+        "@media (max-width:980px){.unload-watch-collapse-wrap.unload-watch-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}.unload-watch-collapse-wrap.unload-watch-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}.unload-watch-collapse-wrap.unload-watch-mobile-dock.collapsed{background:transparent !important;}.unload-watch-collapse-wrap.unload-watch-mobile-dock .unload-watch-collapse-body{max-height:min(58vh,500px);overflow:auto;}.unload-watch-collapse-wrap.unload-watch-mobile-dock.collapsed .unload-watch-collapse-body{max-height:0 !important;overflow:hidden;}}"
         "@media (max-width:1024px){.unload-watch-collapse-title{font-size:16px;letter-spacing:0.10em;}.unload-watch-collapse-mini{font-size:0.92rem;}}"
         "</style>"
-        f"<div class='unload-watch-collapse-wrap' data-unload-watch-card='1' data-unload-watch-scope='{collapse_scope}' style='border:2px solid rgba(37,99,235,0.42);'>"
+        f"<div class='unload-watch-collapse-wrap{mobile_dock_class}' data-unload-watch-card='1' data-unload-watch-scope='{collapse_scope}' style='border:2px solid rgba(37,99,235,0.42);'>"
         f"  <div class='unload-watch-collapse-label' data-unload-watch-header='1' data-unload-watch-scope='{collapse_scope}' role='button' tabindex='0' style='background:{header_gradient};'>"
         "    <span class='unload-watch-collapse-title'>Route Card</span>"
         f"    <span class='unload-watch-collapse-mini'>{html.escape(f'{watch_count} {watch_label} to watch')}</span>"
@@ -13452,7 +14411,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
         "</div>"
     )
 
-    special_trigger_trucks = sorted(special_click_targets)
+    special_trigger_trucks: list[int] = []
 
     def _render_unload_special_trigger_buttons():
         if not special_trigger_trucks:
@@ -13492,11 +14451,16 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
                 const scope = {json.dumps(collapse_scope)};
                 const storageKey = {json.dumps(storage_key)};
                 const defaultCollapsed = {str(not bool(expanded)).lower()};
+                const mobileDocked = {str(bool(mobile_docked)).lower()};
                 const cards = root.querySelectorAll(`[data-unload-watch-card="1"][data-unload-watch-scope="${{scope}}"]`);
                 if (!cards || !cards.length) return;
                 const card = cards[cards.length - 1];
                 const header = card.querySelector(`[data-unload-watch-header="1"][data-unload-watch-scope="${{scope}}"]`);
                 if (!header) return;
+
+                if (mobileDocked) {{
+                    card.classList.add('unload-watch-mobile-dock');
+                }}
 
                 const storage = (() => {{
                     try {{ return window.parent.localStorage; }} catch (e) {{ return null; }}
@@ -13632,6 +14596,23 @@ def _normalize_spare_tracking_set(raw_value) -> set[int]:
     return normalized
 
 
+def _normalize_unload_request_meta(raw_value) -> dict[int, dict[str, object]]:
+    normalized: dict[int, dict[str, object]] = {}
+    if not isinstance(raw_value, dict):
+        return normalized
+    for truck_key, payload in raw_value.items():
+        try:
+            truck_num = int(truck_key)
+        except Exception:
+            continue
+        payload_dict = payload if isinstance(payload, dict) else {}
+        normalized[int(truck_num)] = {
+            "mark_shop": bool(payload_dict.get("mark_shop", False)),
+            "load_on": str(payload_dict.get("load_on") or "").strip(),
+        }
+    return normalized
+
+
 def _spares_needing_return_set() -> set[int]:
     normalized = _normalize_spare_tracking_set(
         st.session_state.get("spares_needing_return") or set()
@@ -13642,6 +14623,13 @@ def _spares_needing_return_set() -> set[int]:
 
 def _mark_truck_unloaded_after_batch(truck: int) -> str:
     t = int(truck)
+    unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
+    unload_request_meta = _normalize_unload_request_meta(st.session_state.get("unload_request_meta") or {})
+    request_meta = unload_request_meta.pop(int(t), None)
+    st.session_state.unload_request_meta = unload_request_meta
+    unload_request_set.discard(t)
+    st.session_state.unload_request_set = unload_request_set
+
     pending_return = _spares_needing_return_set()
     if t in pending_return:
         pending_return.discard(t)
@@ -13660,11 +14648,18 @@ def _mark_truck_unloaded_after_batch(truck: int) -> str:
         st.session_state.shop_set.discard(t)
         st.session_state.off_set.discard(t)
         st.session_state.special_set.discard(t)
-        return "Spare"
+        base_status = "Spare"
+        if request_meta and bool(request_meta.get("mark_shop")):
+            _send_truck_to_shop(int(t), reason="", load_on=str(request_meta.get("load_on") or ""))
+            return "Shop"
+        return base_status
 
     st.session_state.special_set.discard(t)
     st.session_state.cleaned_set.add(t)
     _record_unload_completed_route_for_current_day(t)
+    if request_meta and bool(request_meta.get("mark_shop")):
+        _send_truck_to_shop(int(t), reason="", load_on=str(request_meta.get("load_on") or ""))
+        return "Shop"
     return "Unloaded"
 
 
@@ -14453,9 +15448,6 @@ def reset_status_for_new_day(day_num: int | None):
             previous_day_num,
             exclude_trucks=used_for_route_oos_coverage,
         )
-        # Current-day OFF routes should start as Unloaded unless blocked by
-        # explicit OOS/Shop/Special status.
-        apply_off_schedule(current_or_selected_day_num)
 
     # Force previously used special/coverage trucks to start Dirty on the new day.
     # These trucks should not begin as Unloaded.
@@ -14487,6 +15479,7 @@ def remove_truck_entirely(truck: int):
         "off_set",
         "spare_set",
         "special_set",
+        "unload_request_set",
         "used_spares_today",
         "spares_needing_return",
     ):
@@ -14515,6 +15508,13 @@ def remove_truck_entirely(truck: int):
     st.session_state.shop_notes.pop(t, None)
     st.session_state.shop_spares.pop(t, None)
     st.session_state.shop_prev_status.pop(t, None)
+    try:
+        unload_meta = dict(st.session_state.get("unload_request_meta") or {})
+        unload_meta.pop(int(t), None)
+        unload_meta.pop(str(int(t)), None)
+        st.session_state.unload_request_meta = unload_meta
+    except Exception:
+        pass
     st.session_state.off_notes.pop(t, None)
     st.session_state.sup_notes_global.pop(t, None)
     st.session_state.sup_notes_daily.pop(t, None)
@@ -14550,14 +15550,97 @@ def batch_allowed_ids(wearers_needed: int) -> list[int]:
             allowed.append(i)
     return allowed
 
+
+def _queue_batch_capacity_warning(*, batch_id: int, current_total: int, incoming_wearers: int):
+    payload = {
+        "batch_id": int(batch_id),
+        "current_total": int(current_total),
+        "incoming_wearers": int(incoming_wearers),
+        "cap": int(BATCH_CAP),
+    }
+    st.session_state["batch_capacity_warning_payload"] = payload
+
+    # Streamlit does not allow opening a second dialog while the BATCH dialog is active.
+    if str(st.session_state.get("active_screen") or "").upper() == "BATCH":
+        st.session_state["batch_capacity_warning_inline_payload"] = payload
+        st.session_state["batch_capacity_warning_dialog_open"] = False
+        return
+
+    st.session_state["batch_capacity_warning_dialog_open"] = True
+
+
+def _would_exceed_batch_cap(batch_id: int, incoming_wearers: int) -> tuple[bool, int]:
+    b = int(batch_id)
+    w = max(0, int(incoming_wearers))
+    current_total = int((st.session_state.get("batches") or {}).get(b, {}).get("total") or 0)
+    projected = int(current_total) + int(w)
+    return bool(projected > int(BATCH_CAP)), int(current_total)
+
+
+def _render_batch_capacity_warning_dialog_if_needed():
+    if str(st.session_state.get("active_screen") or "").upper() == "BATCH":
+        # If a popup warning was queued before entering BATCH, move it inline.
+        payload = st.session_state.get("batch_capacity_warning_payload")
+        if isinstance(payload, dict):
+            st.session_state["batch_capacity_warning_inline_payload"] = payload
+        st.session_state["batch_capacity_warning_dialog_open"] = False
+        return
+
+    if not bool(st.session_state.get("batch_capacity_warning_dialog_open")):
+        return
+
+    payload = st.session_state.get("batch_capacity_warning_payload")
+    if not isinstance(payload, dict):
+        st.session_state["batch_capacity_warning_dialog_open"] = False
+        return
+
+    def _dismiss_batch_capacity_warning_dialog():
+        st.session_state["batch_capacity_warning_dialog_open"] = False
+
+    @st.dialog("Batch Limit Reached", width="small", on_dismiss=_dismiss_batch_capacity_warning_dialog)
+    def _batch_capacity_warning_dialog():
+        batch_id = int(payload.get("batch_id") or 0)
+        current_total = int(payload.get("current_total") or 0)
+        incoming_wearers = int(payload.get("incoming_wearers") or 0)
+        cap = int(payload.get("cap") or BATCH_CAP)
+        projected_total = int(current_total) + int(incoming_wearers)
+        st.warning(
+            f"Batch {batch_id} cannot accept this truck. "
+            f"Current {current_total}/{cap}, incoming {incoming_wearers}, projected {projected_total}/{cap}."
+        )
+        st.caption("Use a new batch for this truck.")
+        if st.button("OK", width="stretch", key="batch_capacity_warning_ok"):
+            st.session_state["batch_capacity_warning_dialog_open"] = False
+            st.rerun()
+
+    _batch_capacity_warning_dialog()
+
+
+def _render_batch_capacity_warning_inline_if_needed(*, key_suffix: str = "main") -> None:
+    payload = st.session_state.get("batch_capacity_warning_inline_payload")
+    if not isinstance(payload, dict):
+        return
+
+    # Keep inline warning state silent in BATCH UI; the red cap-error panel
+    # below already communicates the actionable blocking condition.
+    return
+
 def batch_assign(truck: int, wearers: int, batch_id: int):
     t = int(truck)
-    w = int(wearers)
+    w = max(0, int(wearers))
     b = int(batch_id)
+
+    exceeds_cap, current_total = _would_exceed_batch_cap(b, w)
+    if exceeds_cap:
+        _queue_batch_capacity_warning(batch_id=b, current_total=current_total, incoming_wearers=w)
+        return False
+
     remove_truck_from_batches(t)
     st.session_state.batches[b]["trucks"].append(t)
     st.session_state.batches[b]["total"] += w
+    _append_batch_history_entry(truck=t, batch_id=b, wearers=w, action="assign")
     log_action(f"Assign Truck {t} to Batch {b} ({w} wearers)")
+    return True
 
 def ensure_shorts_model(truck: int):
     t = int(truck)
@@ -14956,6 +16039,15 @@ def go(screen: str):
     st.rerun()
 
 
+def _clear_transient_trends_selection_state() -> None:
+    for key in (
+        "sup_audit_trends_selected_details",
+        "sup_audit_trends_mobile_details_dialog_open",
+        "sup_audit_route_click_chart",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _mark_and_save():
     if bool(st.session_state.get("archive_view_mode")):
         return
@@ -14985,14 +16077,1242 @@ def _restore_state_from_snapshot(snapshot_payload: dict) -> bool:
 
 def render_page_heading(title: str):
     safe_title = html.escape(str(title or ""))
+    title_slug = re.sub(r"[^a-z0-9]+", "-", str(title or "").strip().lower()).strip("-") or "page"
+    chip_slugs = {
+        "fleet-management",
+        "unload-management",
+        "load-management",
+        "trends",
+        "management",
+        "management-admin",
+        "auditing",
+        "dirty",
+        "unloaded",
+        "loaded",
+        "shop",
+        "off",
+        "oos-spare",
+    }
+    if title_slug in chip_slugs:
+        status_color_map = _get_status_badge_colors()
+        chip_border = None
+        heading_text_color = "#f8fafc"
+        slug_status_key = {
+            "dirty": "dirty",
+            "unloaded": "unloaded",
+            "loaded": "loaded",
+            "shop": "shop",
+            "off": "off",
+            "oos-spare": "oos_spare",
+        }
+        if title_slug == "load-management":
+            chip_bg = _normalize_hex_color(status_color_map.get("loaded"), DEFAULT_STATUS_BADGE_COLORS["loaded"])
+        elif title_slug == "unload-management":
+            chip_bg = _normalize_hex_color(status_color_map.get("dirty"), DEFAULT_STATUS_BADGE_COLORS["dirty"])
+        elif title_slug == "fleet-management":
+            chip_bg = "#2563eb"
+            chip_border = "#dbeafe"
+            heading_text_color = "#ffffff"
+        elif title_slug == "trends":
+            chip_bg = "#0369a1"
+        elif title_slug in {"management", "management-admin"}:
+            chip_bg = "#1d4ed8"
+        elif title_slug == "auditing":
+            chip_bg = "#0f766e"
+        else:
+            status_key = slug_status_key.get(title_slug)
+            chip_bg = _normalize_hex_color(
+                status_color_map.get(status_key) if status_key else "#1e293b",
+                DEFAULT_STATUS_BADGE_COLORS.get(status_key, "#1e293b") if status_key else "#1e293b",
+            )
+
+        chip_bg_dark = _color_darken(chip_bg, factor=0.78)
+        if chip_border is None:
+            chip_border = _color_lighten(chip_bg, factor=0.36)
+        heading_style = (
+            "display:flex; align-items:center; justify-content:center; width:max-content; max-width:calc(100vw - 28px); "
+            "margin:-0.16rem auto 0.50rem auto; padding:0.42rem 1.12rem; border-radius:999px; "
+            f"border:2px solid {chip_border}; background:linear-gradient(90deg, {chip_bg}, {chip_bg_dark}); "
+            "box-shadow:0 10px 22px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.08); "
+            f"text-align:center; color:{heading_text_color}; font-size:30px; font-weight:800; line-height:1.02; letter-spacing:0.02em;"
+        )
+    else:
+        heading_style = "text-align:center; font-size:30px; font-weight:800; line-height:1.1; margin:-0.24rem 0 0.44rem 0;"
     st.markdown(
         (
-            "<div style='text-align:center; font-size:30px; font-weight:800; "
-            "line-height:1.1; margin:-0.24rem 0 0.44rem 0;'>"
+            f"<div class='page-heading page-heading-{title_slug}' style='{heading_style}'>"
             f"{safe_title}"
             "</div>"
         ),
         unsafe_allow_html=True,
+    )
+    fleet_like_status_slugs = {"dirty", "unloaded", "off", "oos-spare"}
+    if title_slug in fleet_like_status_slugs:
+        _compress_mobile_fleet_like_status_heading_gap(title_slug)
+
+    # Load/Fleet and Fleet-like status pages use dedicated compactors for deterministic spacing.
+    if title_slug not in {"load-management", "fleet-management", *fleet_like_status_slugs}:
+        _compress_mobile_notice_to_heading_gap(title_slug)
+        _compress_mobile_heading_to_content_gap(title_slug)
+
+
+def _compress_mobile_notice_to_heading_gap(heading_slug: str) -> None:
+    safe_slug = re.sub(r"[^a-z0-9\-]", "", str(heading_slug or "").strip().lower())
+    if not safe_slug:
+        return
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            try {{
+                const root = window.parent.document;
+                const isMobile = () => {{
+                    try {{
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    }} catch (e) {{
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }}
+                }};
+                if (!isMobile()) return;
+
+                const apply = () => {{
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const headingDiv = main.querySelector('.page-heading-{safe_slug}');
+                    if (!headingDiv) return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    if ('{safe_slug}' === 'load-management' && headingDiv.dataset.loadNoticeGapLocked === '1') return;
+                    if ('{safe_slug}' === 'unload-management' && headingDiv.dataset.unloadNoticeGapLocked === '1') return;
+                    if ('{safe_slug}' === 'loaded' && headingDiv.dataset.loadedNoticeGapLocked === '1') return;
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    let prev = headingHost.previousElementSibling;
+                    while (prev) {{
+                        const hasInteractive = !!prev.querySelector(
+                            '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"]'
+                        );
+                        if (hasInteractive) break;
+
+                        const txt = normalize(prev.innerText || prev.textContent || '');
+                        const iframeCount = prev.querySelectorAll('iframe').length;
+                        const spacerLike = !txt || (iframeCount > 0 && !hasInteractive);
+                        if (!spacerLike) break;
+
+                        prev.style.setProperty('display', 'none', 'important');
+                        prev.style.setProperty('margin', '0', 'important');
+                        prev.style.setProperty('padding', '0', 'important');
+                        prev.style.setProperty('min-height', '0', 'important');
+                        prev.style.setProperty('height', '0', 'important');
+                        prev = prev.previousElementSibling;
+                    }}
+
+                    headingDiv.style.setProperty('margin-top', '0', 'important');
+
+                    if ('{safe_slug}' === 'load-management') {{
+                        const notice =
+                            root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .notice-bar')?.closest('.shop-notice');
+                        const dustHost = main.querySelector('[class*="st-key-load_set_dust_clothes_toggle"]');
+                        if (notice && dustHost) {{
+                            const nrect = notice.getBoundingClientRect();
+                            const brect = dustHost.getBoundingClientRect();
+                            const hrect = headingDiv.getBoundingClientRect();
+                            const targetCenter = Math.round((nrect.bottom + brect.top) / 2);
+                            const currentCenter = Math.round(hrect.top + (hrect.height / 2));
+                            const shift = Math.round(targetCenter - currentCenter);
+                            if (Math.abs(shift) > 2 && Math.abs(shift) < 320) {{
+                                headingDiv.style.setProperty('margin-top', `${{shift}}px`, 'important');
+                            }}
+                        }}
+                        headingDiv.style.setProperty('margin-bottom', '0.48rem', 'important');
+                        headingDiv.dataset.loadNoticeGapLocked = '1';
+                        return;
+                    }}
+
+                    if ('{safe_slug}' === 'unload-management') {{
+                        const notice =
+                            root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .notice-bar')?.closest('.shop-notice');
+                        const unloadTopHost =
+                            main.querySelector('[class*="st-key-dirty_truck_mobile_"]') ||
+                            main.querySelector('[class*="st-key-dirty_truck_"]') ||
+                            main.querySelector('[data-testid="stAlert"]');
+                        if (notice && unloadTopHost) {{
+                            const nrect = notice.getBoundingClientRect();
+                            const brect = unloadTopHost.getBoundingClientRect();
+                            const hrect = headingDiv.getBoundingClientRect();
+                            const targetCenter = Math.round((nrect.bottom + brect.top) / 2);
+                            const currentCenter = Math.round(hrect.top + (hrect.height / 2));
+                            const shift = Math.round(targetCenter - currentCenter);
+                            if (Math.abs(shift) > 2 && Math.abs(shift) < 320) {{
+                                headingDiv.style.setProperty('margin-top', `${{shift}}px`, 'important');
+                            }}
+                        }}
+                        headingDiv.style.setProperty('margin-bottom', '0.44rem', 'important');
+                        headingDiv.dataset.unloadNoticeGapLocked = '1';
+                        return;
+                    }}
+
+                    if ('{safe_slug}' === 'loaded') {{
+                        const notice =
+                            root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice') ||
+                            root.querySelector('#shop-notice-overlay-host .notice-bar')?.closest('.shop-notice');
+                        const firstLoadedHost =
+                            main.querySelector('[class*="st-key-bubble_status_loaded_"] button') ||
+                            main.querySelector('[class*="st-key-bubble_status_loaded_"]') ||
+                            main.querySelector('[data-testid="stButton"] button') ||
+                            main.querySelector('[data-testid="stButton"]');
+                        if (notice && firstLoadedHost) {{
+                            const nrect = notice.getBoundingClientRect();
+                            const brect = firstLoadedHost.getBoundingClientRect();
+                            const hrect = headingDiv.getBoundingClientRect();
+                            const targetCenter = Math.round((nrect.bottom + brect.top) / 2);
+                            const currentCenter = Math.round(hrect.top + (hrect.height / 2));
+                            const shift = Math.round(targetCenter - currentCenter);
+                            if (Math.abs(shift) > 2 && Math.abs(shift) < 320) {{
+                                headingDiv.style.setProperty('margin-top', `${{shift}}px`, 'important');
+                            }}
+                        }}
+                        headingDiv.style.setProperty('margin-bottom', '0.44rem', 'important');
+                        headingDiv.dataset.loadedNoticeGapLocked = '1';
+                        return;
+                    }}
+
+                    const notice = root.querySelector('#shop-notice-overlay-host .shop-notice');
+                    if (!notice) return;
+
+                    const nrect = notice.getBoundingClientRect();
+                    const hrect = headingDiv.getBoundingClientRect();
+                    const desiredTop = Math.round(nrect.bottom + 8);
+                    const delta = Math.round(hrect.top - desiredTop);
+                    if (delta > 10 && delta < 420) {{
+                        headingDiv.style.setProperty('margin-top', `${{-delta}}px`, 'important');
+                    }}
+                }};
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+                setTimeout(apply, 800);
+            }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_mobile_heading_to_content_gap(heading_slug: str) -> None:
+    safe_slug = re.sub(r"[^a-z0-9\-]", "", str(heading_slug or "").strip().lower())
+    if not safe_slug or safe_slug == "shop":
+        return
+
+    script = """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+                if (!isMobile()) return;
+
+                const headingSlug = '__SLUG__';
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const aggressiveSlugs = new Set(['unloaded', 'loaded', 'off', 'oos-spare']);
+                    const isAggressive = aggressiveSlugs.has(headingSlug);
+
+                    const headingDiv = main.querySelector('.page-heading-' + headingSlug);
+                    if (!headingDiv) return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    const hasInteractive = (node) => !!node.querySelector(
+                        '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                    );
+
+                    let prev = headingHost.previousElementSibling;
+                    while (prev) {
+                        const txt = normalize(prev.innerText || prev.textContent || '');
+                        const interactive = hasInteractive(prev);
+                        const iframeCount = prev.querySelectorAll('iframe').length;
+                        const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                        if (!spacerLike) break;
+                        prev.style.setProperty('display', 'none', 'important');
+                        prev.style.setProperty('margin', '0', 'important');
+                        prev.style.setProperty('padding', '0', 'important');
+                        prev.style.setProperty('min-height', '0', 'important');
+                        prev.style.setProperty('height', '0', 'important');
+                        prev = prev.previousElementSibling;
+                    }
+
+                    headingDiv.style.setProperty('margin-top', '0', 'important');
+
+                    let targetHost = null;
+                    let node = headingHost.nextElementSibling;
+                    while (node) {
+                        const txt = normalize(node.innerText || node.textContent || '');
+                        const interactive = hasInteractive(node);
+                        const iframeCount = node.querySelectorAll('iframe').length;
+                        const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                        if (spacerLike) {
+                            node.style.setProperty('display', 'none', 'important');
+                            node.style.setProperty('margin', '0', 'important');
+                            node.style.setProperty('padding', '0', 'important');
+                            node.style.setProperty('min-height', '0', 'important');
+                            node.style.setProperty('height', '0', 'important');
+                            node = node.nextElementSibling;
+                            continue;
+                        }
+                        targetHost = node;
+                        break;
+                    }
+
+                    if (!targetHost) return;
+
+                    if (headingSlug === 'fleet-management') {
+                        const fleetButtonHost =
+                            main.querySelector('[class*="st-key-sup_manage_pick_"]') ||
+                            main.querySelector('[class*="st-key-fleet_left_"]');
+                        if (fleetButtonHost) {
+                            const fleetRowHost =
+                                fleetButtonHost.closest('[data-testid="stHorizontalBlock"]') ||
+                                fleetButtonHost.closest('[data-testid="element-container"]') ||
+                                fleetButtonHost;
+                            if (fleetRowHost) {
+                                targetHost = fleetRowHost;
+                            }
+                        }
+                    }
+
+                    const targetRowHost =
+                        targetHost.closest('[data-testid="stHorizontalBlock"]') ||
+                        targetHost;
+
+                    let betweenNode = headingHost.nextElementSibling;
+                    while (betweenNode && betweenNode !== targetRowHost) {
+                        const txt = normalize(betweenNode.innerText || betweenNode.textContent || '');
+                        const interactive = hasInteractive(betweenNode);
+                        const iframeCount = betweenNode.querySelectorAll('iframe').length;
+                        const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                        if (spacerLike) {
+                            betweenNode.style.setProperty('display', 'none', 'important');
+                            betweenNode.style.setProperty('margin', '0', 'important');
+                            betweenNode.style.setProperty('padding', '0', 'important');
+                            betweenNode.style.setProperty('min-height', '0', 'important');
+                            betweenNode.style.setProperty('height', '0', 'important');
+                        }
+                        betweenNode = betweenNode.nextElementSibling;
+                    }
+
+                    targetRowHost.style.setProperty('margin-top', '0', 'important');
+                    targetRowHost.style.setProperty('padding-top', '0', 'important');
+
+                    const headingRect = headingDiv.getBoundingClientRect();
+                    const targetRect = targetRowHost.getBoundingClientRect();
+                    const currentGap = Math.round(targetRect.top - headingRect.bottom);
+                    const isFleet = headingSlug === 'fleet-management';
+                    const minGap = isAggressive ? 8 : (isFleet ? 8 : 18);
+                    const desiredGap = isAggressive ? 4 : (isFleet ? 5 : 8);
+                    const maxReduce = isAggressive ? 320 : (isFleet ? 320 : 220);
+                    if (currentGap > minGap && currentGap < 520) {
+                        const reduceBy = Math.min(currentGap - desiredGap, maxReduce);
+                        targetRowHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+                setTimeout(apply, 800);
+                setTimeout(apply, 1300);
+                setTimeout(apply, 2000);
+            } catch (e) {}
+        })();
+        </script>
+    """.replace("__SLUG__", safe_slug)
+
+    components.html(
+        script,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_status_shop_mobile_header_gap() -> None:
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+                if (!isMobile()) return;
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    const headingDiv = main.querySelector('.page-heading-shop') || Array.from(main.querySelectorAll('div')).find((el) => normalize(el.innerText || el.textContent || '') === 'Shop');
+                    if (!headingDiv) return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    let prev = headingHost.previousElementSibling;
+                    while (prev) {
+                        const hasInteractive = !!prev.querySelector(
+                            '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"]'
+                        );
+                        if (hasInteractive) break;
+
+                        const txt = normalize(prev.innerText || prev.textContent || '');
+                        const iframeCount = prev.querySelectorAll('iframe').length;
+                        const spacerLike = !txt || (iframeCount > 0 && !hasInteractive);
+                        if (!spacerLike) break;
+
+                        prev.style.setProperty('display', 'none', 'important');
+                        prev.style.setProperty('margin', '0', 'important');
+                        prev.style.setProperty('padding', '0', 'important');
+                        prev.style.setProperty('min-height', '0', 'important');
+                        prev.style.setProperty('height', '0', 'important');
+                        prev = prev.previousElementSibling;
+                    }
+
+                    headingDiv.style.setProperty('margin-top', '0', 'important');
+                    headingDiv.style.setProperty('margin-bottom', '0.35rem', 'important');
+
+                    const notice =
+                        root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .notice-bar')?.closest('.shop-notice');
+                    if (notice) {
+                        const nrect = notice.getBoundingClientRect();
+                        const hrect = headingDiv.getBoundingClientRect();
+                        const desiredTop = Math.round(nrect.bottom + 8);
+                        const delta = Math.round(hrect.top - desiredTop);
+                        if (delta > 8 && delta < 520) {
+                            headingDiv.style.setProperty('margin-top', `${-delta}px`, 'important');
+                        }
+                    }
+
+                    const sendKeyHost = main.querySelector('[class*="st-key-status_shop_mode_send_btn"]');
+                    const sendButton = sendKeyHost?.querySelector('button') || main.querySelector('button[aria-label="Send"]');
+                    const sendHost = sendKeyHost || (sendButton ? (sendButton.closest('[data-testid="element-container"]') || sendButton.closest('[class*="st-key-status_shop_mode_send_btn"]')) : null);
+                    if (sendHost) {
+                        sendHost.style.setProperty('margin-top', '0', 'important');
+                        sendHost.style.setProperty('padding-top', '0', 'important');
+
+                        let node = headingHost.nextElementSibling;
+                        while (node && node !== sendHost) {
+                            const hasInteractive = !!node.querySelector(
+                                '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"]'
+                            );
+                            const txt = normalize(node.innerText || node.textContent || '');
+                            const spacerLike = !hasInteractive && !txt;
+                            if (spacerLike) {
+                                node.style.setProperty('display', 'none', 'important');
+                                node.style.setProperty('margin', '0', 'important');
+                                node.style.setProperty('padding', '0', 'important');
+                                node.style.setProperty('min-height', '0', 'important');
+                                node.style.setProperty('height', '0', 'important');
+                            }
+                            node = node.nextElementSibling;
+                        }
+
+                        const headingRect = headingDiv.getBoundingClientRect();
+                        const sendRect = sendHost.getBoundingClientRect();
+                        const currentGap = Math.round(sendRect.top - headingRect.bottom);
+                        if (currentGap > 22 && currentGap < 420) {
+                            const reduceBy = Math.min(currentGap - 10, 220);
+                            sendHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                        }
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+                setTimeout(apply, 800);
+                setTimeout(apply, 1300);
+                setTimeout(apply, 2000);
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_mobile_notice_to_communications_head_gap() -> None:
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+
+                const apply = () => {
+                    const mobile = isMobile();
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const notice =
+                        root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice');
+                    if (!notice) return;
+
+                    const commsHead = main.querySelector('.comms-head');
+                    if (!commsHead) return;
+                    const stableAttr = mobile ? 'data-comms-head-stable-mobile' : 'data-comms-head-stable-desktop';
+                    if (commsHead.getAttribute(stableAttr) === '1') return;
+
+                    const headHost = commsHead.closest('[data-testid="element-container"]') || commsHead.parentElement;
+                    if (!headHost) return;
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    const isSpacerLike = (node) => {
+                        const hasInteractive = !!node.querySelector(
+                            '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                        );
+                        if (hasInteractive) return false;
+                        const txt = normalize(node.innerText || node.textContent || '');
+                        if (txt) return false;
+                        return true;
+                    };
+                    const hideNode = (node) => {
+                        node.style.setProperty('display', 'none', 'important');
+                        node.style.setProperty('margin', '0', 'important');
+                        node.style.setProperty('padding', '0', 'important');
+                        node.style.setProperty('min-height', '0', 'important');
+                        node.style.setProperty('height', '0', 'important');
+                    };
+
+                    let prev = headHost.previousElementSibling;
+                    while (prev && isSpacerLike(prev)) {
+                        hideNode(prev);
+                        prev = prev.previousElementSibling;
+                    }
+
+                    headHost.style.setProperty('margin-top', '0', 'important');
+                    headHost.style.setProperty('padding-top', '0', 'important');
+                    commsHead.style.setProperty('margin-top', '0', 'important');
+
+                    const nrect = notice.getBoundingClientRect();
+                    const hrect = commsHead.getBoundingClientRect();
+                    const desiredTop = Math.round(nrect.bottom + (mobile ? 14 : 14));
+                    const delta = Math.round(hrect.top - desiredTop);
+                    if (delta > 2 && delta < 700) {
+                        commsHead.style.setProperty('margin-top', `${-delta}px`, 'important');
+                    }
+
+                    commsHead.setAttribute(stableAttr, '1');
+                };
+
+                apply();
+                setTimeout(apply, 80);
+                setTimeout(apply, 220);
+                setTimeout(apply, 520);
+                setTimeout(apply, 950);
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_mobile_notice_to_inprogress_current_truck_gap() -> None:
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+                if (!isMobile()) return;
+
+                const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                const isSpacerLike = (node) => {
+                    if (!node) return false;
+                    const hasInteractive = !!node.querySelector(
+                        '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                    );
+                    if (hasInteractive) return false;
+                    const txt = normalize(node.innerText || node.textContent || '');
+                    if (txt) return false;
+                    return true;
+                };
+                const hideNode = (node) => {
+                    node.style.setProperty('display', 'none', 'important');
+                    node.style.setProperty('margin', '0', 'important');
+                    node.style.setProperty('padding', '0', 'important');
+                    node.style.setProperty('min-height', '0', 'important');
+                    node.style.setProperty('height', '0', 'important');
+                };
+
+                const apply = () => {
+                    const notice =
+                        root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice');
+                    if (!notice) return;
+
+                    const currentTruck = root.getElementById('inprog-current-truck-card');
+                    if (!currentTruck) return;
+
+                    const host = currentTruck.closest('[data-testid="element-container"]') || currentTruck.parentElement;
+                    if (!host) return;
+
+                    let prev = host.previousElementSibling;
+                    while (prev && isSpacerLike(prev)) {
+                        hideNode(prev);
+                        prev = prev.previousElementSibling;
+                    }
+
+                    host.style.setProperty('margin-top', '0', 'important');
+                    host.style.setProperty('padding-top', '0', 'important');
+                    currentTruck.style.setProperty('margin-top', '0', 'important');
+
+                    const nrect = notice.getBoundingClientRect();
+                    const crect = currentTruck.getBoundingClientRect();
+                    const desiredTop = Math.round(nrect.bottom + 4);
+                    const delta = Math.round(crect.top - desiredTop);
+                    if (delta > 2 && delta < 700) {
+                        host.style.setProperty('margin-top', `${-delta}px`, 'important');
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_load_heading_to_actions_gap() -> None:
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const headingDiv = main.querySelector('.page-heading-load-management');
+                    if (!headingDiv) return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    const actionHost =
+                        main.querySelector('[class*="st-key-load_set_dust_clothes_toggle"]') ||
+                        main.querySelector('[class*="st-key-load_open_audit_fleet_screen"]') ||
+                        main.querySelector('[class*="st-key-load_set_next_up_toggle"]');
+
+                    if (isMobile()) {
+                        if (headingDiv.getAttribute('data-load-actions-stable') === '1') return;
+                        const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                        const isSpacerLike = (node) => {
+                            const hasInteractive = !!node.querySelector(
+                                '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                            );
+                            if (hasInteractive) return false;
+                            const hasStyleOnly = !!node.querySelector('style, script, link[rel="stylesheet"]');
+                            if (hasStyleOnly) return true;
+                            const txt = normalize(node.innerText || node.textContent || '');
+                            if (txt) return false;
+                            return true;
+                        };
+                        const hideNode = (node) => {
+                            node.style.setProperty('display', 'none', 'important');
+                            node.style.setProperty('margin', '0', 'important');
+                            node.style.setProperty('padding', '0', 'important');
+                            node.style.setProperty('min-height', '0', 'important');
+                            node.style.setProperty('height', '0', 'important');
+                        };
+
+                        /* Hide spacer-like elements before the heading */
+                        let prev = headingHost.previousElementSibling;
+                        while (prev && isSpacerLike(prev)) {
+                            hideNode(prev);
+                            prev = prev.previousElementSibling;
+                        }
+
+                        headingHost.style.setProperty('margin-top', '0', 'important');
+                        headingHost.style.setProperty('padding-top', '0', 'important');
+                        headingDiv.style.setProperty('margin-top', '0', 'important');
+
+                        /* Keep deterministic spacing from heading to first action and between actions */
+                        const containers = Array.from(main.querySelectorAll('[data-testid="element-container"]'));
+                        const headingIdx = containers.indexOf(headingHost);
+                        const toHost = (node) => node ? (node.closest('[data-testid="element-container"]') || node) : null;
+                        const actionKeySelectors = [
+                            '[class*="st-key-load_set_dust_clothes_toggle"]',
+                            '[class*="st-key-load_open_audit_fleet_screen"]',
+                            '[class*="st-key-load_set_next_up_toggle"]',
+                        ];
+                        const actionHosts = actionKeySelectors
+                            .map((sel) => toHost(main.querySelector(sel)))
+                            .filter((node) => !!node)
+                            .filter((node, idx, arr) => arr.indexOf(node) === idx);
+
+                        if (actionHosts.length >= 3) {
+                            const desiredHeadingGap = 10;
+                            const desiredActionGap = 10;
+
+                            const actionIdxs = actionHosts
+                                .map((node) => containers.indexOf(node))
+                                .filter((idx) => idx >= 0)
+                                .sort((a, b) => a - b);
+
+                            if (actionIdxs.length) {
+                                for (let i = headingIdx + 1; i < actionIdxs[0]; i += 1) {
+                                    const node = containers[i];
+                                    if (node && isSpacerLike(node)) hideNode(node);
+                                }
+                                for (let i = 0; i < actionIdxs.length - 1; i += 1) {
+                                    for (let j = actionIdxs[i] + 1; j < actionIdxs[i + 1]; j += 1) {
+                                        const node = containers[j];
+                                        if (node && isSpacerLike(node)) hideNode(node);
+                                    }
+                                }
+                            }
+
+                            actionHosts.forEach((host) => {
+                                host.style.setProperty('padding-top', '0', 'important');
+                                host.style.setProperty('padding-bottom', '0', 'important');
+                                host.style.setProperty('margin-bottom', '0', 'important');
+                                host.style.setProperty('margin-top', '0', 'important');
+                            });
+
+                            const enforceGap = (upperNode, lowerHost, gapPx) => {
+                                if (!upperNode || !lowerHost) return;
+                                const upperRect = upperNode.getBoundingClientRect();
+                                const lowerRect = lowerHost.getBoundingClientRect();
+                                const currentGap = Math.round(lowerRect.top - upperRect.bottom);
+                                if (!Number.isFinite(currentGap)) return;
+                                const delta = Math.round(gapPx - currentGap);
+                                lowerHost.style.setProperty('margin-top', `${delta}px`, 'important');
+                            };
+
+                            enforceGap(headingDiv, actionHosts[0], desiredHeadingGap);
+                            enforceGap(actionHosts[0], actionHosts[1], desiredActionGap);
+                            enforceGap(actionHosts[1], actionHosts[2], desiredActionGap);
+
+                            headingDiv.setAttribute('data-load-actions-stable', '1');
+                        }
+                    } else {
+                        /* ---- Desktop: compress gap between heading and action button row ---- */
+                        if (!actionHost) return;
+                        const rowHost =
+                            actionHost.closest('[data-testid="stHorizontalBlock"]') ||
+                            actionHost.parentElement ||
+                            actionHost;
+                        if (!rowHost) return;
+
+                        rowHost.style.setProperty('margin-top', '0', 'important');
+                        rowHost.style.setProperty('padding-top', '0', 'important');
+
+                        const headingRect = headingDiv.getBoundingClientRect();
+                        const rowRect = rowHost.getBoundingClientRect();
+                        const currentGap = Math.round(rowRect.top - headingRect.bottom);
+                        if (currentGap > 10 && currentGap < 560) {
+                            const reduceBy = Math.min(currentGap - 4, 260);
+                            rowHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                        }
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+                setTimeout(apply, 800);
+                setTimeout(apply, 1300);
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_fleet_heading_to_grid_gap() -> None:
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const headingDiv = main.querySelector('.page-heading-fleet-management');
+                    if (!headingDiv) return;
+                    if (headingDiv.getAttribute('data-fleet-chip-stable') === '1') return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    const firstFleetButton =
+                        main.querySelector('.st-key-fleet_left_new_mode button') ||
+                        main.querySelector('.st-key-fleet_left_multi_mode button') ||
+                        main.querySelector('.st-key-fleet_left_swap_mode button') ||
+                        main.querySelector('.st-key-fleet_left_multi_select_all button') ||
+                        main.querySelector('[class*="st-key-sup_manage_pick_"] button') ||
+                        main.querySelector('[class*="st-key-sup_manage_pick_"]');
+                    if (!firstFleetButton) return;
+
+                    const firstButtonHost =
+                        firstFleetButton.closest('[data-testid="element-container"]') ||
+                        firstFleetButton.closest('[class*="st-key-sup_manage_pick_"]') ||
+                        firstFleetButton;
+                    if (!firstButtonHost) return;
+
+                    const rowHost =
+                        firstButtonHost.closest('[data-testid="stHorizontalBlock"]') ||
+                        firstButtonHost;
+
+                    const firstPass = headingDiv.getAttribute('data-fleet-chip-stable') !== '1';
+                    if (firstPass) {
+                        headingDiv.style.setProperty('visibility', 'hidden', 'important');
+                        firstButtonHost.style.setProperty('visibility', 'hidden', 'important');
+                    }
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    const hasInteractive = (node) => !!node.querySelector(
+                        '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                    );
+
+                    const containers = Array.from(main.querySelectorAll('[data-testid="element-container"]'));
+                    const headingIdx = containers.indexOf(headingHost);
+                    const firstIdx = containers.indexOf(firstButtonHost);
+                    if (headingIdx >= 0 && firstIdx > headingIdx) {
+                        for (let i = headingIdx + 1; i < firstIdx; i += 1) {
+                            const node = containers[i];
+                            if (!node) continue;
+                            const txt = normalize(node.innerText || node.textContent || '');
+                            const interactive = hasInteractive(node);
+                            const iframeCount = node.querySelectorAll('iframe').length;
+                            const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                            if (spacerLike) {
+                                node.style.setProperty('display', 'none', 'important');
+                                node.style.setProperty('margin', '0', 'important');
+                                node.style.setProperty('padding', '0', 'important');
+                                node.style.setProperty('min-height', '0', 'important');
+                                node.style.setProperty('height', '0', 'important');
+                            }
+                        }
+                    }
+
+                    firstButtonHost.style.setProperty('margin-top', '0', 'important');
+                    firstButtonHost.style.setProperty('padding-top', '0', 'important');
+                    rowHost.style.setProperty('margin-top', '0', 'important');
+                    rowHost.style.setProperty('padding-top', '0', 'important');
+
+                    const headingRect = headingDiv.getBoundingClientRect();
+                    const firstRect = firstFleetButton.getBoundingClientRect();
+                    const currentGap = Math.round(firstRect.top - headingRect.bottom);
+                    if (currentGap > 10 && currentGap < 700) {
+                        const desiredGapUnderHeader = 30;
+                        const reduceBy = Math.min(Math.max(0, currentGap - desiredGapUnderHeader), 420);
+                        firstButtonHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                    }
+
+                    const notice =
+                        root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice');
+                    if (notice) {
+                        const nrect = notice.getBoundingClientRect();
+                        const hrect = headingDiv.getBoundingClientRect();
+                        const brect = firstFleetButton.getBoundingClientRect();
+                        const noticeBottom = Math.round(nrect.bottom + 8);
+                        const buttonTop = Math.round(brect.top);
+                        const available = Math.max(0, buttonTop - noticeBottom);
+                        if (available > (Math.round(hrect.height) + 10)) {
+                            const freeSpace = Math.max(0, buttonTop - noticeBottom - Math.round(hrect.height));
+                            // Strong top bias: keep Fleet heading closer to Notices than truck buttons.
+                            const targetTop = Math.round(noticeBottom + (freeSpace * 0.20));
+                            const delta = Math.round(hrect.top - targetTop);
+                            if (Math.abs(delta) > 2 && Math.abs(delta) < 420) {
+                                headingDiv.style.setProperty('margin-top', `${-delta}px`, 'important');
+                            }
+                        }
+                    }
+
+                    if (firstPass) {
+                        requestAnimationFrame(() => {
+                            headingDiv.style.setProperty('visibility', 'visible', 'important');
+                            firstButtonHost.style.setProperty('visibility', 'visible', 'important');
+                            headingDiv.setAttribute('data-fleet-chip-stable', '1');
+                        });
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 40);
+                setTimeout(apply, 120);
+                setTimeout(apply, 260);
+                setTimeout(apply, 520);
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_mobile_fleet_like_status_heading_gap(heading_slug: str) -> None:
+    safe_slug = re.sub(r"[^a-z0-9\-]", "", str(heading_slug or "").strip().lower())
+    if safe_slug not in {"dirty", "unloaded", "off", "oos-spare"}:
+        return
+
+    key_fragment_map = {
+        "dirty": "st-key-bubble_status_dirty_",
+        "unloaded": "st-key-bubble_status_unloaded_",
+        "off": "st-key-bubble_status_off_",
+        "oos-spare": "st-key-bubble_status_oos_",
+    }
+    key_fragment = key_fragment_map.get(safe_slug, "")
+
+    script = """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+                if (!isMobile()) return;
+
+                const headingSlug = '__SLUG__';
+                const keyFragment = '__KEY_FRAGMENT__';
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const headingDiv = main.querySelector('.page-heading-' + headingSlug);
+                    if (!headingDiv) return;
+                    if (headingDiv.getAttribute('data-fleet-like-chip-stable') === '1') return;
+
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    headingHost.style.setProperty('margin-top', '0', 'important');
+                    headingHost.style.setProperty('padding-top', '0', 'important');
+                    headingDiv.style.setProperty('margin-top', '0', 'important');
+
+                    const firstButton =
+                        (keyFragment ? main.querySelector('[class*="' + keyFragment + '"] button') : null) ||
+                        (keyFragment ? main.querySelector('[class*="' + keyFragment + '"]') : null) ||
+                        main.querySelector('[data-testid="stButton"] button');
+
+                    const firstButtonHost =
+                        firstButton
+                            ? (
+                                firstButton.closest('[data-testid="element-container"]') ||
+                                firstButton.closest('[class*="' + keyFragment + '"]') ||
+                                firstButton
+                            )
+                            : null;
+
+                    const rowHost =
+                        firstButtonHost
+                            ? (firstButtonHost.closest('[data-testid="stHorizontalBlock"]') || firstButtonHost)
+                            : null;
+
+                    const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                    const hasInteractive = (node) => !!node.querySelector(
+                        '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                    );
+
+                    const firstPass = headingDiv.getAttribute('data-fleet-like-chip-stable') !== '1';
+                    if (firstPass) {
+                        headingDiv.style.setProperty('visibility', 'hidden', 'important');
+                        if (firstButtonHost) {
+                            firstButtonHost.style.setProperty('visibility', 'hidden', 'important');
+                        }
+                    }
+
+                    let prev = headingHost.previousElementSibling;
+                    while (prev) {
+                        const txt = normalize(prev.innerText || prev.textContent || '');
+                        const interactive = hasInteractive(prev);
+                        const iframeCount = prev.querySelectorAll('iframe').length;
+                        const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                        if (!spacerLike) break;
+                        prev.style.setProperty('display', 'none', 'important');
+                        prev.style.setProperty('margin', '0', 'important');
+                        prev.style.setProperty('padding', '0', 'important');
+                        prev.style.setProperty('min-height', '0', 'important');
+                        prev.style.setProperty('height', '0', 'important');
+                        prev = prev.previousElementSibling;
+                    }
+
+                    const containers = Array.from(main.querySelectorAll('[data-testid="element-container"]'));
+                    const headingIdx = containers.indexOf(headingHost);
+                    const firstIdx = firstButtonHost ? containers.indexOf(firstButtonHost) : -1;
+                    if (headingIdx >= 0 && firstIdx > headingIdx) {
+                        for (let i = headingIdx + 1; i < firstIdx; i += 1) {
+                            const node = containers[i];
+                            if (!node) continue;
+                            const txt = normalize(node.innerText || node.textContent || '');
+                            const interactive = hasInteractive(node);
+                            const iframeCount = node.querySelectorAll('iframe').length;
+                            const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                            if (spacerLike) {
+                                node.style.setProperty('display', 'none', 'important');
+                                node.style.setProperty('margin', '0', 'important');
+                                node.style.setProperty('padding', '0', 'important');
+                                node.style.setProperty('min-height', '0', 'important');
+                                node.style.setProperty('height', '0', 'important');
+                            }
+                        }
+                    }
+
+                    if (firstButtonHost) {
+                        firstButtonHost.style.setProperty('margin-top', '0', 'important');
+                        firstButtonHost.style.setProperty('padding-top', '0', 'important');
+                    }
+                    if (rowHost) {
+                        rowHost.style.setProperty('margin-top', '0', 'important');
+                        rowHost.style.setProperty('padding-top', '0', 'important');
+                    }
+
+                    if (firstButton && firstButtonHost) {
+                        const headingRect = headingDiv.getBoundingClientRect();
+                        const firstRect = firstButton.getBoundingClientRect();
+                        const currentGap = Math.round(firstRect.top - headingRect.bottom);
+                        if (currentGap > 10 && currentGap < 700) {
+                            const desiredGapUnderHeader = 30;
+                            const reduceBy = Math.min(Math.max(0, currentGap - desiredGapUnderHeader), 420);
+                            firstButtonHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                        }
+                    }
+
+                    const notice =
+                        root.querySelector('#shop-notice-overlay-host .shop-notice') ||
+                        root.querySelector('#shop-notice-overlay-host .shop-notice-wrap .shop-notice');
+                    if (notice) {
+                        const nrect = notice.getBoundingClientRect();
+                        const hrect = headingDiv.getBoundingClientRect();
+                        const noticeBottom = Math.round(nrect.bottom + 8);
+                        if (headingSlug === 'oos-spare') {
+                            const targetTop = Math.round(noticeBottom + 6);
+                            const delta = Math.round(hrect.top - targetTop);
+                            if (Math.abs(delta) > 1 && Math.abs(delta) < 420) {
+                                headingDiv.style.setProperty('margin-top', `${-delta}px`, 'important');
+                            }
+                        } else if (firstButton) {
+                            const brect = firstButton.getBoundingClientRect();
+                            const buttonTop = Math.round(brect.top);
+                            const available = Math.max(0, buttonTop - noticeBottom);
+                            if (available > (Math.round(hrect.height) + 10)) {
+                                const freeSpace = Math.max(0, buttonTop - noticeBottom - Math.round(hrect.height));
+                                const ratioBySlug = {
+                                    'off': 0.28,
+                                };
+                                const ratio = Number.isFinite(ratioBySlug[headingSlug]) ? ratioBySlug[headingSlug] : 0.20;
+                                const targetTop = Math.round(noticeBottom + (freeSpace * ratio));
+                                const delta = Math.round(hrect.top - targetTop);
+                                if (Math.abs(delta) > 2 && Math.abs(delta) < 420) {
+                                    headingDiv.style.setProperty('margin-top', `${-delta}px`, 'important');
+                                }
+                            }
+                        }
+                    }
+
+                    if (firstPass) {
+                        requestAnimationFrame(() => {
+                            headingDiv.style.setProperty('visibility', 'visible', 'important');
+                            if (firstButtonHost) {
+                                firstButtonHost.style.setProperty('visibility', 'visible', 'important');
+                            }
+                            headingDiv.setAttribute('data-fleet-like-chip-stable', '1');
+                        });
+                    }
+                };
+
+                apply();
+                setTimeout(apply, 40);
+                setTimeout(apply, 120);
+                setTimeout(apply, 260);
+                setTimeout(apply, 520);
+            } catch (e) {}
+        })();
+        </script>
+    """.replace("__SLUG__", safe_slug).replace("__KEY_FRAGMENT__", key_fragment)
+
+    components.html(
+        script,
+        height=0,
+        width=0,
+    )
+
+
+def _compress_mobile_auditing_heading_to_buttons_gap() -> None:
+    script = """
+        <script>
+        (function() {
+            try {
+                const root = window.parent.document;
+                const isMobile = () => {
+                    try {
+                        return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                    } catch (e) {
+                        return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                    }
+                };
+                if (!isMobile()) return;
+
+                const normalize = (v) => String(v || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
+                const hasInteractive = (node) => !!node.querySelector(
+                    '[data-testid="stButton"], button, input, textarea, [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stAlert"], [data-testid="stExpander"], [data-testid="stDataFrame"], [data-testid="stTable"]'
+                );
+
+                const apply = () => {
+                    const main =
+                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
+                        root.querySelector('section.main > div.block-container') ||
+                        root.querySelector('.main .block-container');
+                    if (!main) return;
+
+                    const headingDiv = main.querySelector('.page-heading-auditing');
+                    if (!headingDiv) return;
+                    const headingHost = headingDiv.closest('[data-testid="element-container"]') || headingDiv.parentElement;
+                    if (!headingHost) return;
+
+                    const firstAuditButtonHost =
+                        main.querySelector('[class*="st-key-audit_fleet_pick_"]') ||
+                        main.querySelector('[class*="st-key-audit_fleet_change_truck"]');
+                    if (!firstAuditButtonHost) return;
+
+                    const targetHost =
+                        firstAuditButtonHost.closest('[data-testid="stHorizontalBlock"]') ||
+                        firstAuditButtonHost.closest('[data-testid="element-container"]') ||
+                        firstAuditButtonHost;
+
+                    let between = headingHost.nextElementSibling;
+                    while (between && between !== targetHost) {
+                        const txt = normalize(between.innerText || between.textContent || '');
+                        const interactive = hasInteractive(between);
+                        const iframeCount = between.querySelectorAll('iframe').length;
+                        const spacerLike = (!txt && !interactive) || (iframeCount > 0 && !interactive && !txt);
+                        if (spacerLike) {
+                            between.style.setProperty('display', 'none', 'important');
+                            between.style.setProperty('margin', '0', 'important');
+                            between.style.setProperty('padding', '0', 'important');
+                            between.style.setProperty('min-height', '0', 'important');
+                            between.style.setProperty('height', '0', 'important');
+                        }
+                        between = between.nextElementSibling;
+                    }
+
+                    headingDiv.style.setProperty('margin-bottom', '0.24rem', 'important');
+                    targetHost.style.setProperty('margin-top', '0', 'important');
+                    targetHost.style.setProperty('padding-top', '0', 'important');
+                };
+
+                apply();
+                setTimeout(apply, 60);
+                setTimeout(apply, 180);
+                setTimeout(apply, 420);
+                setTimeout(apply, 800);
+                setTimeout(apply, 1300);
+                setTimeout(apply, 2000);
+            } catch (e) {}
+        })();
+        </script>
+    """
+    components.html(
+        script,
+        height=0,
+        width=0,
     )
 
 
@@ -15490,9 +17810,7 @@ def render_truck_bubbles(
     if clicked_truck is not None:
         t = int(clicked_truck)
         if from_page == "UNLOAD":
-            st.session_state["unload_truck_select"] = int(t)
-            st.session_state.active_screen = "BATCH"
-            _set_query_params(page="BATCH", pick=str(int(t)))
+            _start_batch_flow_for_dirty_truck(int(t))
         elif from_page == "STATUS_UNLOADED":
             st.session_state.selected_truck = int(t)
             if int(t) in st.session_state.off_set:
@@ -15511,13 +17829,7 @@ def render_truck_bubbles(
                 start=None,
             )
         elif from_page == "STATUS_DIRTY":
-            if st.session_state.get("batching_disabled"):
-                _complete_unload_with_batching_disabled(int(t), redirect_screen="UNLOAD")
-                _set_query_params(page="UNLOAD", pick=None, start=None, truck=None)
-            else:
-                st.session_state["unload_truck_select"] = int(t)
-                st.session_state.active_screen = "BATCH"
-                _set_query_params(page="BATCH", pick=str(int(t)))
+            _start_batch_flow_for_dirty_truck(int(t), set_unload_url_when_disabled=True)
         elif from_page == "STATUS_SHOP":
             if bool(st.session_state.get("status_shop_return_mode", False)):
                 ok_returned, _ = _return_truck_from_shop(int(t))
@@ -15539,6 +17851,64 @@ def render_truck_bubbles(
             st.session_state.active_screen = "TRUCK"
         _mark_and_save()
         st.rerun()
+
+
+def _start_batch_flow_for_dirty_truck(truck: int, *, set_unload_url_when_disabled: bool = False) -> None:
+    truck_num = int(truck)
+    if bool(st.session_state.get("batching_disabled")):
+        _complete_unload_with_batching_disabled(int(truck_num), redirect_screen="UNLOAD")
+        if bool(set_unload_url_when_disabled):
+            try:
+                _set_query_params(page="UNLOAD", pick=None, start=None, truck=None)
+            except Exception:
+                pass
+        return
+
+    st.session_state["unload_truck_select"] = int(truck_num)
+    st.session_state.active_screen = "BATCH"
+    _set_query_params(page="BATCH", pick=str(int(truck_num)))
+
+
+def _render_batching_information_panel(*, include_info_text: bool = False) -> None:
+    if bool(include_info_text):
+        st.info("Select a truck to begin unloading.")
+
+    st.divider()
+    batch_cols = _truck_grid_columns(3)
+    cols = st.columns(batch_cols)
+    for i in range(1, BATCH_COUNT + 1):
+        col = cols[(i - 1) % batch_cols]
+        if (i - 1) % batch_cols == 0 and i != 1:
+            cols = st.columns(batch_cols)
+            col = cols[(i - 1) % batch_cols]
+        with col:
+            with st.container(border=True):
+                trucks = st.session_state.batches[i]['trucks']
+                total = st.session_state.batches[i]['total']
+                if total < BATCH_CAP * 0.7:
+                    color = GREEN
+                elif total < BATCH_CAP * 0.95:
+                    color = ORANGE
+                else:
+                    color = RED
+                st.markdown(f"""
+                <div style='border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.08); padding:18px 10px 14px 10px; background:rgba(255,255,255,0.08);'>
+                    <div style='text-align:center; font-size:20px; font-weight:700; margin-bottom:8px;'>Batch {i}</div>
+                    <div style='font-size:15px; margin-bottom:6px;'><b>{trucks}</b></div>
+                    <div style='font-size:15px;'>
+                        Total wearers: <span style='font-weight:800; color:{color}; font-size:18px;'>{total}</span> / {BATCH_CAP}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.write("### Batch cards PDF")
+    st.download_button(
+        "Download batch cards",
+        data=_get_cached_batch_cards_pdf_bytes(),
+        file_name=f"batch_cards_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf",
+        mime="application/pdf",
+        width="stretch",
+    )
 
 
 def _pdf_route_shop_snapshot_rows() -> list[tuple[str, bool]]:
@@ -15930,6 +18300,46 @@ def _get_cached_batch_cards_pdf_bytes() -> bytes:
     return pdf_bytes
 
 
+def _eod_activity_time_summary() -> dict[str, float | None]:
+    run_raw = st.session_state.get("run_date")
+    run_date_key = run_raw.isoformat() if isinstance(run_raw, date) else date.today().isoformat()
+
+    load_ts_values: list[float] = []
+    for entry in load_duration_history():
+        if str((entry or {}).get("run_date") or "").strip() != run_date_key:
+            continue
+        try:
+            ts_val = float((entry or {}).get("ts") or 0.0)
+        except Exception:
+            ts_val = 0.0
+        if ts_val > 0:
+            load_ts_values.append(float(ts_val))
+
+    batch_ts_values: list[float] = []
+    for entry in _load_batch_history():
+        if str((entry or {}).get("run_date") or "").strip() != run_date_key:
+            continue
+        ts_raw = str((entry or {}).get("ts") or "").strip()
+        if not ts_raw:
+            continue
+        try:
+            if "T" in ts_raw:
+                batch_ts = datetime.fromisoformat(ts_raw).timestamp()
+            else:
+                batch_ts = float(ts_raw)
+        except Exception:
+            continue
+        if batch_ts > 0:
+            batch_ts_values.append(float(batch_ts))
+
+    return {
+        "first_load_ts": min(load_ts_values) if load_ts_values else None,
+        "last_load_ts": max(load_ts_values) if load_ts_values else None,
+        "first_batch_ts": min(batch_ts_values) if batch_ts_values else None,
+        "last_batch_ts": max(batch_ts_values) if batch_ts_values else None,
+    }
+
+
 def generate_end_of_day_pdf_bytes() -> bytes:
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -15969,6 +18379,19 @@ def generate_end_of_day_pdf_bytes() -> bytes:
 
     draw("End of Day Summary", bold=True)
     draw(f"Run date: {fmt_long_date(run) if run else 'N/A'}")
+
+    activity_times = _eod_activity_time_summary()
+
+    draw(" ")
+    draw("Activity timing:", bold=True)
+    first_load_ts = activity_times.get("first_load_ts")
+    last_load_ts = activity_times.get("last_load_ts")
+    first_batch_ts = activity_times.get("first_batch_ts")
+    last_batch_ts = activity_times.get("last_batch_ts")
+    draw(f"First load: {_format_ts(float(first_load_ts)) if first_load_ts else 'N/A'}")
+    draw(f"Last load: {_format_ts(float(last_load_ts)) if last_load_ts else 'N/A'}")
+    draw(f"First batch: {_format_ts(float(first_batch_ts)) if first_batch_ts else 'N/A'}")
+    draw(f"Last batch: {_format_ts(float(last_batch_ts)) if last_batch_ts else 'N/A'}")
 
     if ship_dates:
         ship_str = ", ".join(
@@ -16852,6 +19275,7 @@ if _is_mobile_client():
                         const doc = root.document;
                         const getSidebar = () => doc.querySelector('section[data-testid="stSidebar"]');
                         if (!getSidebar()) return;
+                        let suppressOutsideCloseUntil = 0;
 
                         const collapseSidebar = () => {
                             const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
@@ -16864,6 +19288,39 @@ if _is_mobile_client():
                             if (!sidebar) return;
                             sidebar.setAttribute('aria-expanded', 'false');
                             sidebar.style.setProperty('transform', 'translateX(-102%)', 'important');
+                        };
+
+                        const openSidebar = () => {
+                            suppressOutsideCloseUntil = Date.now() + 700;
+                            const selectors = [
+                                '[data-testid="stSidebarCollapseButton"] button',
+                                '[data-testid="stSidebarNav"] button',
+                                '[data-testid="stSidebarCollapsedControl"] button',
+                                '[data-testid="collapsedControl"] button',
+                                '[aria-label="Open sidebar"]',
+                                '[title="Open sidebar"]'
+                            ];
+                            for (const sel of selectors) {
+                                const btn = doc.querySelector(sel);
+                                if (btn) {
+                                    btn.click();
+                                    return;
+                                }
+                            }
+                            const textBtn = Array.from(doc.querySelectorAll('button')).find((btn) => {
+                                const label = String(btn.getAttribute('aria-label') || btn.getAttribute('title') || btn.textContent || '').toLowerCase();
+                                if (!label) return false;
+                                return label.includes('open sidebar') || label.includes('show sidebar') || label.includes('expand sidebar') || label.includes('sidebar');
+                            });
+                            if (textBtn) {
+                                textBtn.click();
+                                return;
+                            }
+                            // Fallback for mobile webviews where Streamlit expand control is not exposed.
+                            const sidebar = getSidebar();
+                            if (!sidebar) return;
+                            sidebar.setAttribute('aria-expanded', 'true');
+                            sidebar.style.setProperty('transform', 'translateX(0%)', 'important');
                         };
 
                         const bindBtn = (btn) => {
@@ -16890,6 +19347,7 @@ if _is_mobile_client():
                                 try {
                                     const viewportW = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
                                     if (viewportW > 980) return;
+                                    if (Date.now() < suppressOutsideCloseUntil) return;
                                     const sidebar = getSidebar();
                                     if (!sidebar) return;
                                     const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
@@ -16908,6 +19366,110 @@ if _is_mobile_client():
 
                             doc.addEventListener('click', onOutsideTap, true);
                             doc.addEventListener('touchend', onOutsideTap, true);
+                        }
+
+                        if (!root.__truckSidebarSwipeCloseBound) {
+                            root.__truckSidebarSwipeCloseBound = true;
+                            let swipeActive = false;
+                            let swipeMode = '';
+                            let swipeOpened = false;
+                            let swipeStartX = 0;
+                            let swipeStartY = 0;
+
+                            const resetSwipe = () => {
+                                swipeActive = false;
+                                swipeMode = '';
+                                swipeOpened = false;
+                                swipeStartX = 0;
+                                swipeStartY = 0;
+                            };
+
+                            const shouldTrackSwipe = (target) => {
+                                if (!target) return false;
+                                const sidebar = getSidebar();
+                                if (!sidebar) return false;
+                                const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                                if (!expanded) return false;
+                                if (!sidebar.contains(target)) return false;
+                                const interactive = target.closest('input, textarea, [contenteditable="true"], [data-baseweb="select"], [role="combobox"]');
+                                return !interactive;
+                            };
+
+                            const onTouchStart = (ev) => {
+                                try {
+                                    const viewportW = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
+                                    if (viewportW > 980) return;
+                                    const touch = ev && ev.touches && ev.touches[0] ? ev.touches[0] : null;
+                                    if (!touch) return;
+                                    const target = ev && ev.target ? ev.target : null;
+                                    const sidebar = getSidebar();
+                                    const expanded = sidebar && String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                                    const startX = Number(touch.clientX || 0);
+                                    const startY = Number(touch.clientY || 0);
+                                    const edgeThreshold = 88;
+
+                                    if (expanded) {
+                                        if (!shouldTrackSwipe(target)) return;
+                                        swipeMode = 'close';
+                                        swipeActive = true;
+                                        swipeStartX = startX;
+                                        swipeStartY = startY;
+                                        return;
+                                    }
+
+                                    if (startX <= edgeThreshold) {
+                                        swipeMode = 'open';
+                                        swipeActive = true;
+                                        swipeStartX = startX;
+                                        swipeStartY = startY;
+                                    }
+                                } catch (e) {
+                                    resetSwipe();
+                                }
+                            };
+
+                            const onTouchMove = (ev) => {
+                                try {
+                                    if (!swipeActive || swipeMode !== 'open' || swipeOpened) return;
+                                    const touch = ev && ev.touches && ev.touches[0] ? ev.touches[0] : null;
+                                    if (!touch) return;
+                                    const dx = Number(touch.clientX || 0) - swipeStartX;
+                                    const dy = Number(touch.clientY || 0) - swipeStartY;
+                                    const openDrag = dx >= 44 && Math.abs(dy) <= 64 && Math.abs(dx) > Math.abs(dy) * 1.1;
+                                    if (openDrag) {
+                                        swipeOpened = true;
+                                        openSidebar();
+                                    }
+                                } catch (e) {}
+                            };
+
+                            const onTouchEnd = (ev) => {
+                                try {
+                                    if (!swipeActive) return;
+                                    const touch = ev && ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0] : null;
+                                    if (!touch) {
+                                        resetSwipe();
+                                        return;
+                                    }
+                                    const endX = Number(touch.clientX || 0);
+                                    const endY = Number(touch.clientY || 0);
+                                    const dx = endX - swipeStartX;
+                                    const dy = endY - swipeStartY;
+                                    const isLeftSwipe = dx <= -72 && Math.abs(dy) <= 52 && Math.abs(dx) > Math.abs(dy) * 1.25;
+                                    const isRightSwipe = dx >= 40 && Math.abs(dy) <= 64 && Math.abs(dx) > Math.abs(dy) * 1.1;
+                                    if (swipeMode === 'close' && isLeftSwipe) {
+                                        collapseSidebar();
+                                    } else if (swipeMode === 'open' && isRightSwipe && !swipeOpened) {
+                                        openSidebar();
+                                    }
+                                } catch (e) {}
+                                resetSwipe();
+                            };
+
+                            doc.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+                            doc.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
+                            doc.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+                            doc.addEventListener('touchcancel', resetSwipe, { passive: true, capture: true });
                         }
                     } catch (e) {}
                 })();
@@ -17203,13 +19765,16 @@ if st.session_state.setup_done:
     )
     st.sidebar.markdown(
         (
-            "<div style='margin-top:8px; padding:7px 10px; border-radius:999px; "
-            "border:1px solid rgba(148,163,184,0.45); background:rgba(15,23,42,0.35); "
-            "font-size:0.78rem; line-height:1.2; text-align:center;'>"
-            f"Signed in: <strong>{signed_in_user}</strong> "
+            "<div style='margin-top:8px; text-align:center;'>"
+            "<div style='font-size:0.72rem; opacity:0.82; margin-bottom:4px;'>Signed in as:</div>"
+            "<div style='display:inline-flex; align-items:center; justify-content:center; width:fit-content; max-width:100%; "
+            "padding:7px 10px; border-radius:999px; border:1px solid rgba(148,163,184,0.45); background:rgba(15,23,42,0.35); "
+            "font-size:0.78rem; line-height:1.2;'>"
+            f"<strong>{signed_in_user}</strong>"
             f"<span style='display:inline-block; margin-left:6px; padding:2px 8px; border-radius:999px; "
             f"background:{role_chip_bg}; color:{role_chip_fg}; border:1px solid {role_chip_border}; "
             f"font-weight:800; font-size:0.72rem; letter-spacing:0.01em;'>{signed_in_role}</span>"
+            "</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -17218,10 +19783,6 @@ if st.session_state.setup_done:
     version_label = str(_APP_VERSION).strip()
     if version_label and not version_label.lower().startswith("v"):
         version_label = f"v{version_label}"
-    st.sidebar.markdown(
-        f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label)}</div>",
-        unsafe_allow_html=True,
-    )
 
 if (
     _auth_enabled()
@@ -17250,10 +19811,25 @@ if (
         st.session_state.auth_request_portal_pending = False
         st.rerun()
 
+version_label_footer = str(_APP_VERSION).strip()
+if version_label_footer and not version_label_footer.lower().startswith("v"):
+    version_label_footer = f"v{version_label_footer}"
+st.sidebar.markdown(
+    f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label_footer)}</div>",
+    unsafe_allow_html=True,
+)
+
 nav_active_labels = set()
 nav_flash_labels = set()
 current_screen = str(st.session_state.get("active_screen") or "").upper()
 _apply_soft_auto_refresh(current_screen)
+
+prev_screen_key = "_last_active_screen_for_transient_cleanup"
+previous_screen = str(st.session_state.get(prev_screen_key) or "").upper()
+if previous_screen == "TRENDS" and current_screen != "TRENDS":
+    _clear_transient_trends_selection_state()
+st.session_state[prev_screen_key] = current_screen
+
 if current_screen in {"UNLOAD", "BATCH"}:
     nav_active_labels.add("Unload")
     nav_active_labels.add("Dirty")
@@ -17391,7 +19967,42 @@ if st.session_state.active_screen.startswith("STATUS_"):
         title = "OOS/SPARE"
     if st.session_state.active_screen == "STATUS_OFF":
         title = "OFF"
-    render_page_heading(title)
+
+    if st.session_state.active_screen == "STATUS_OOS":
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS {
+                margin: 0 !important;
+                padding: 0 !important;
+                min-height: 0 !important;
+                height: 0 !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS > div {
+                margin: 0 !important;
+                padding: 0 !important;
+                min-height: 0 !important;
+                height: 0 !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS iframe {
+                margin: 0 !important;
+                padding: 0 !important;
+                min-height: 0 !important;
+                height: 0 !important;
+                border: 0 !important;
+                display: block !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if st.session_state.active_screen != "STATUS_OOS":
+        render_page_heading(title)
+    if st.session_state.active_screen == "STATUS_SHOP" and _is_mobile_client():
+        _compress_status_shop_mobile_header_gap()
 
 
     mapping = {
@@ -17428,10 +20039,11 @@ if st.session_state.active_screen.startswith("STATUS_"):
             "STATUS_OOS": len(oos_spare_set),
             "STATUS_SHOP": len(shop_list),
         }
+        status_shell_left_col = None
+        status_shell_right_col = None
         if _is_mobile_client():
-            status_shell_left_col = st.container()
+            # On mobile status pages, render only main content to avoid empty shell blocks.
             status_shell_main_col = st.container()
-            status_shell_right_col = st.container()
         else:
             status_shell_widths = [0.95, 3.1, 0.95]
             if st.session_state.active_screen == "STATUS_UNLOADED":
@@ -17439,98 +20051,104 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 status_shell_widths = [1.2, 3.1, 0.7]
             status_shell_left_col, status_shell_main_col, status_shell_right_col = st.columns(status_shell_widths, gap="large")
 
-        with status_shell_left_col:
-            if st.session_state.active_screen == "STATUS_UNLOADED":
-                _render_route_card(always_show=True, dock_left=False, expanded=True)
-                st.divider()
+        if status_shell_left_col is not None:
+            with status_shell_left_col:
+                if st.session_state.active_screen == "STATUS_UNLOADED":
+                    _render_route_card(always_show=True, dock_left=False, expanded=True)
+                    st.divider()
 
-            if st.session_state.active_screen == "STATUS_SHOP":
-                send_btn_type = "primary" if status_shop_active_mode == "send" else "secondary"
-                return_btn_type = "primary" if status_shop_active_mode == "return" else "secondary"
-                selected_send_css = (
-                    "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
-                    if status_shop_active_mode == "send"
-                    else "border:1px solid rgba(148,163,184,0.42) !important;"
-                )
-                selected_return_css = (
-                    "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
-                    if status_shop_active_mode == "return"
-                    else "border:1px solid rgba(148,163,184,0.42) !important;"
-                )
-                st.markdown(
-                    f"""
-                    <style>
-                    div.st-key-status_shop_mode_send_btn button {{
-                        {selected_send_css}
-                        border-radius:10px !important;
-                    }}
-                    div.st-key-status_shop_mode_return_btn button {{
-                        {selected_return_css}
-                        border-radius:10px !important;
-                    }}
-                    </style>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                if st.button(
-                    "Send",
-                    width="stretch",
-                    key="status_shop_mode_send_btn",
-                    type=send_btn_type,
+                if st.session_state.active_screen == "STATUS_SHOP" and not _is_mobile_client():
+                    send_btn_type = "primary" if status_shop_active_mode == "send" else "secondary"
+                    return_btn_type = "primary" if status_shop_active_mode == "return" else "secondary"
+                    selected_send_css = (
+                        "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
+                        if status_shop_active_mode == "send"
+                        else "border:1px solid rgba(148,163,184,0.42) !important;"
+                    )
+                    selected_return_css = (
+                        "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
+                        if status_shop_active_mode == "return"
+                        else "border:1px solid rgba(148,163,184,0.42) !important;"
+                    )
+                    st.markdown(
+                        f"""
+                        <style>
+                        div.st-key-status_shop_mode_send_btn button {{
+                            {selected_send_css}
+                            border-radius:10px !important;
+                        }}
+                        div.st-key-status_shop_mode_return_btn button {{
+                            {selected_return_css}
+                            border-radius:10px !important;
+                        }}
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "Send",
+                        width="stretch",
+                        key="status_shop_mode_send_btn",
+                        type=send_btn_type,
+                    ):
+                        st.session_state[status_shop_mode_key] = "send"
+                        st.session_state[status_shop_legacy_return_mode_key] = False
+                        st.rerun()
+                    if st.button(
+                        "Return",
+                        width="stretch",
+                        key="status_shop_mode_return_btn",
+                        type=return_btn_type,
+                    ):
+                        st.session_state[status_shop_mode_key] = "return"
+                        st.session_state[status_shop_legacy_return_mode_key] = True
+                        st.rerun()
+
+                    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+                if (
+                    st.session_state.active_screen != "STATUS_LOADED"
+                    and not (st.session_state.active_screen == "STATUS_SHOP" and _is_mobile_client())
                 ):
-                    st.session_state[status_shop_mode_key] = "send"
-                    st.session_state[status_shop_legacy_return_mode_key] = False
-                    st.rerun()
-                if st.button(
-                    "Return",
-                    width="stretch",
-                    key="status_shop_mode_return_btn",
-                    type=return_btn_type,
-                ):
-                    st.session_state[status_shop_mode_key] = "return"
-                    st.session_state[status_shop_legacy_return_mode_key] = True
-                    st.rerun()
+                    st.caption(f"Dirty: {int(shell_counts.get('STATUS_DIRTY', 0))}")
+                    st.caption(f"Unloaded: {int(shell_counts.get('STATUS_UNLOADED', 0))}")
+                    st.caption(f"Loaded: {int(shell_counts.get('STATUS_LOADED', 0))}")
+                    st.caption(f"OFF: {int(shell_counts.get('STATUS_OFF', 0))}")
+                    st.caption(f"OOS/SPARE: {int(shell_counts.get('STATUS_OOS', 0))}")
+                    st.caption(f"Shop: {int(shell_counts.get('STATUS_SHOP', 0))}")
 
-                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-            st.caption(f"Dirty: {int(shell_counts.get('STATUS_DIRTY', 0))}")
-            st.caption(f"Unloaded: {int(shell_counts.get('STATUS_UNLOADED', 0))}")
-            st.caption(f"Loaded: {int(shell_counts.get('STATUS_LOADED', 0))}")
-            st.caption(f"OFF: {int(shell_counts.get('STATUS_OFF', 0))}")
-            st.caption(f"OOS/SPARE: {int(shell_counts.get('STATUS_OOS', 0))}")
-            st.caption(f"Shop: {int(shell_counts.get('STATUS_SHOP', 0))}")
-
-        with status_shell_right_col:
-            if st.session_state.active_screen != "STATUS_SHOP":
-                shell_day_num = _current_ship_day_num()
-                shell_off_header = f"Off Day {int(shell_day_num)}" if shell_day_num else "Off"
-                shell_off_today_list = sorted({int(t) for t in (off_trucks_for_today() or [])})
-                with st.expander(shell_off_header, expanded=(not _is_mobile_client())):
-                    if shell_off_today_list:
-                        shell_off_rows_html = "".join(
-                            (
-                                f"<tr style='background:{'rgba(148,163,184,0.10)' if idx % 2 == 0 else 'rgba(148,163,184,0.22)'};'>"
-                                f"<td style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:700;'>{int(truck)}</td></tr>"
+        if status_shell_right_col is not None:
+            with status_shell_right_col:
+                if st.session_state.active_screen != "STATUS_SHOP":
+                    shell_day_num = _current_ship_day_num()
+                    shell_off_header = f"Off Day {int(shell_day_num)}" if shell_day_num else "Off"
+                    shell_off_today_list = sorted({int(t) for t in (off_trucks_for_today() or [])})
+                    with st.expander(shell_off_header, expanded=(not _is_mobile_client())):
+                        if shell_off_today_list:
+                            shell_off_rows_html = "".join(
+                                (
+                                    f"<tr style='background:{'rgba(148,163,184,0.10)' if idx % 2 == 0 else 'rgba(148,163,184,0.22)'};'>"
+                                    f"<td style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:700;'>{int(truck)}</td></tr>"
+                                )
+                                for idx, truck in enumerate(shell_off_today_list)
                             )
-                            for idx, truck in enumerate(shell_off_today_list)
-                        )
-                        st.markdown(
-                            (
-                                "<div style='border:1px solid rgba(148,163,184,0.35); border-radius:8px; overflow:hidden;'>"
-                                "<table style='width:100%; border-collapse:collapse;'>"
-                                "<thead><tr style='background:rgba(15,23,42,0.75);'>"
-                                "<th style='padding:6px 8px; border:1px solid rgba(148,163,184,0.35); text-align:center;'>Truck</th>"
-                                "</tr></thead>"
-                                f"<tbody>{shell_off_rows_html}</tbody>"
-                                "</table></div>"
-                            ),
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.caption("No trucks scheduled off.")
+                            st.markdown(
+                                (
+                                    "<div style='border:1px solid rgba(148,163,184,0.35); border-radius:8px; overflow:hidden;'>"
+                                    "<table style='width:100%; border-collapse:collapse;'>"
+                                    "<thead><tr style='background:rgba(15,23,42,0.75);'>"
+                                    "<th style='padding:6px 8px; border:1px solid rgba(148,163,184,0.35); text-align:center;'>Truck</th>"
+                                    "</tr></thead>"
+                                    f"<tbody>{shell_off_rows_html}</tbody>"
+                                    "</table></div>"
+                                ),
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.caption("No trucks scheduled off.")
 
-            if st.session_state.active_screen == "STATUS_SHOP":
-                _render_route_card(always_show=True, dock_left=False, expanded=True)
+                if st.session_state.active_screen == "STATUS_SHOP" and not _is_mobile_client():
+                    _render_route_card(always_show=True, dock_left=False, expanded=True)
 
     status_unloaded_main_col = None
     if st.session_state.active_screen == "STATUS_UNLOADED" and status_shell_main_col is None:
@@ -17552,6 +20170,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
         if (
             st.session_state.active_screen == "STATUS_LOADED"
             and status_shell_main_col is not None
+            and status_shell_left_col is not None
         )
         else st.container()
     )
@@ -17635,6 +20254,54 @@ if st.session_state.active_screen.startswith("STATUS_"):
 
         status_shop_main_host = status_shell_main_col if status_shell_main_col is not None else st.container()
         with status_shop_main_host:
+            if _is_mobile_client():
+                send_btn_type = "primary" if status_shop_active_mode == "send" else "secondary"
+                return_btn_type = "primary" if status_shop_active_mode == "return" else "secondary"
+                selected_send_css = (
+                    "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
+                    if status_shop_active_mode == "send"
+                    else "border:1px solid rgba(148,163,184,0.42) !important;"
+                )
+                selected_return_css = (
+                    "border:2px solid #f59e0b !important; box-shadow:0 0 0 2px rgba(245,158,11,0.26), 0 0 12px rgba(245,158,11,0.18) !important;"
+                    if status_shop_active_mode == "return"
+                    else "border:1px solid rgba(148,163,184,0.42) !important;"
+                )
+                st.markdown(
+                    f"""
+                    <style>
+                    div.st-key-status_shop_mode_send_btn button {{
+                        {selected_send_css}
+                        border-radius:10px !important;
+                    }}
+                    div.st-key-status_shop_mode_return_btn button {{
+                        {selected_return_css}
+                        border-radius:10px !important;
+                    }}
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "Send",
+                    width="stretch",
+                    key="status_shop_mode_send_btn",
+                    type=send_btn_type,
+                ):
+                    st.session_state[status_shop_mode_key] = "send"
+                    st.session_state[status_shop_legacy_return_mode_key] = False
+                    st.rerun()
+                if st.button(
+                    "Return",
+                    width="stretch",
+                    key="status_shop_mode_return_btn",
+                    type=return_btn_type,
+                ):
+                    st.session_state[status_shop_mode_key] = "return"
+                    st.session_state[status_shop_legacy_return_mode_key] = True
+                    st.rerun()
+                st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+
             clicked_shop_truck = render_numeric_truck_buttons(
                 fleet_trucks,
                 shop_grid_key,
@@ -17754,11 +20421,76 @@ if st.session_state.active_screen.startswith("STATUS_"):
     status_content_host = status_shell_main_col if status_shell_main_col is not None else st.container()
     with status_content_host:
         if st.session_state.active_screen == "STATUS_OOS":
+            status_color_map = _get_status_badge_colors()
+            spare_chip_bg = "#475569"
+            spare_chip_bg_dark = _color_darken(spare_chip_bg, factor=0.78)
+            spare_chip_border = _color_lighten(spare_chip_bg, factor=0.34)
+            oos_chip_bg = _normalize_hex_color(status_color_map.get("off"), DEFAULT_STATUS_BADGE_COLORS["off"])
+            oos_chip_bg_dark = _color_darken(oos_chip_bg, factor=0.78)
+            oos_chip_border = _color_lighten(oos_chip_bg, factor=0.34)
+            oos_chip_css = """
+                <style>
+                .status-oos-chip-stack {
+                    margin: -0.92rem 0 0.22rem 0;
+                }
+                .status-oos-chip {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: max-content;
+                    max-width: calc(100vw - 28px);
+                    margin: 0.02rem auto 0.34rem auto;
+                    padding: 0.46rem 1.24rem;
+                    border-radius: 999px;
+                    border: 2px solid rgba(148, 163, 184, 0.45);
+                    box-shadow: 0 8px 18px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+                    font-size: 1.42rem;
+                    font-weight: 900;
+                    letter-spacing: 0.07em;
+                    line-height: 1.05;
+                    text-transform: uppercase;
+                    color: #f8fafc;
+                }
+                @media (max-width: 980px) {
+                    .status-oos-chip-stack {
+                        margin-top: -0.56rem;
+                    }
+                    .status-oos-chip {
+                        font-size: 1.2rem;
+                        padding: 0.38rem 1.02rem;
+                    }
+                }
+                .status-oos-chip-spare {
+                    margin-top: 0 !important;
+                    border-color: __SPARE_BORDER__;
+                    background: linear-gradient(90deg, __SPARE_BG__, __SPARE_BG_DARK__);
+                }
+                .status-oos-chip-oos {
+                    border-color: __OOS_BORDER__;
+                    background: linear-gradient(90deg, __OOS_BG__, __OOS_BG_DARK__);
+                }
+                </style>
+            """
+            oos_chip_css = (
+                oos_chip_css
+                .replace("__SPARE_BORDER__", spare_chip_border)
+                .replace("__SPARE_BG__", spare_chip_bg)
+                .replace("__SPARE_BG_DARK__", spare_chip_bg_dark)
+                .replace("__OOS_BORDER__", oos_chip_border)
+                .replace("__OOS_BG__", oos_chip_bg)
+                .replace("__OOS_BG_DARK__", oos_chip_bg_dark)
+            )
+            st.markdown(
+                oos_chip_css,
+                unsafe_allow_html=True,
+            )
             oos_only = sorted(list(st.session_state.off_set))
             spare_only = sorted(list(st.session_state.get("spare_set", set())))
-            st.write("### Spare")
+            st.markdown("<div class='status-oos-chip-stack'>", unsafe_allow_html=True)
+            st.markdown("<div class='status-oos-chip status-oos-chip-spare'>SPARE</div>", unsafe_allow_html=True)
             render_truck_bubbles(spare_only, st.session_state.active_screen)
-            st.write("### Out Of Service")
+            st.markdown("<div class='status-oos-chip status-oos-chip-oos'>OOS</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
             add_mode_key = "status_oos_add_mode"
             oos_add_options = sorted({int(t) for t in FLEET} - {int(t) for t in oos_only})
 
@@ -17867,6 +20599,8 @@ if st.session_state.active_screen.startswith("STATUS_"):
         else:
             # Always show the truck bubbles list
             render_truck_bubbles(trucks, st.session_state.active_screen)
+            if st.session_state.active_screen == "STATUS_DIRTY":
+                _render_batching_information_panel(include_info_text=True)
 
     if st.session_state.active_screen == "STATUS_SHOP" and trucks:
         active_swaps = _active_route_swap_assignments()
@@ -17964,6 +20698,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             time_saved_text = "N/A"
                             time_saved_color = None
                     wearers_text = str(int(st.session_state.wearers.get(truck_num, 0) or 0))
+                    total_removal_qty_text = str(int(_audit_today_total_qty_for_truck(truck_num)))
                     start_ts = st.session_state.load_start_times.get(truck_num)
                     finish_ts = st.session_state.load_finish_times.get(truck_num)
                     route_target = int(route_targets_map.get(int(truck_num), int(truck_num)))
@@ -18004,6 +20739,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             _status_loaded_stat_cell("Route", route_info_text),
                             _status_loaded_stat_cell("Batch", str(batch_id) if batch_id else "-"),
                             _status_loaded_stat_cell("Wearers", wearers_text),
+                            _status_loaded_stat_cell("Total Removal Qty", total_removal_qty_text),
                             _status_loaded_stat_cell("Duration", duration_text),
                             _status_loaded_stat_cell("Time Saved", time_saved_text, time_saved_color),
                             _status_loaded_stat_cell(
@@ -18102,7 +20838,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         st.rerun()
                 else:
                     st.caption("Short sheet access is restricted for your role.")
-                if st.button("Go to Unloaded trucks", width="stretch"):
+                if st.button("Go to Unloaded", width="stretch"):
                     st.session_state.shorts_pending_next_up_confirm_for_truck = None
                     st.session_state.active_screen = "STATUS_UNLOADED"
                     _mark_and_save()
@@ -18695,6 +21431,10 @@ if st.session_state.active_screen.startswith("STATUS_"):
             with status_unloaded_host:
                 _render_start_blocked_dialog_body()
 
+    if st.session_state.active_screen == "STATUS_UNLOADED" and _is_mobile_client():
+        st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
+        _render_route_card(always_show=True, dock_left=False, expanded=False, mobile_docked=True)
+
 # --------------------------
 # In Progress
 # --------------------------
@@ -18798,6 +21538,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
     inprog_layout_is_original = inprog_layout_style == INPROG_LAYOUT_ORIGINAL
     current_truck_margin_top = "-88px" if not is_mobile_inprog else "0px"
     right_rail_top_pull = "-132px" if not is_mobile_inprog else "0px"
+    desktop_timer_top_pull = "-96px" if ((not is_mobile_inprog) and (not inprog_layout_is_original)) else "0px"
 
     def _render_inprog_daily_notes_panel():
         if not show_daily_notes_panel:
@@ -18897,7 +21638,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     const normalize = (value) =>
                         String(value || '')
                             .replace(/\u2063/g, '')
-                            .replace(/\s+/g, ' ')
+                            .replace(/\\s+/g, ' ')
                             .trim()
                             .toLowerCase();
 
@@ -19095,8 +21836,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             )
 
         if not guest_read_only:
-            manage_col = st.columns([1, 2, 1])[1]
-            with manage_col:
+            if is_mobile_inprog:
                 if st.button(
                     next_up_button_label,
                     width="stretch",
@@ -19104,6 +21844,16 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 ):
                     st.session_state["inprog_manage_next_up_dialog_open"] = True
                     st.rerun()
+            else:
+                manage_col = st.columns([1, 2, 1])[1]
+                with manage_col:
+                    if st.button(
+                        next_up_button_label,
+                        width="stretch",
+                        key=set_button_key,
+                    ):
+                        st.session_state["inprog_manage_next_up_dialog_open"] = True
+                        st.rerun()
 
     with left_col:
         st.markdown("<div id='inprog-left-col-anchor' style='display:none;'></div>", unsafe_allow_html=True)
@@ -19148,7 +21898,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
             st.markdown(
                 (
-                    f"<div style='width:100%; max-width:360px; margin:{current_truck_margin_top} auto 6px auto; text-align:center;'>"
+                    f"<div id='inprog-current-truck-card' style='width:100%; max-width:360px; margin:{current_truck_margin_top} auto 6px auto; text-align:center;'>"
                     "  <div style='font-size:19px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
                     f"  <div style='font-size:78px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                     f"{route_target_chip_html_left}"
@@ -19161,30 +21911,31 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             global_note_left, daily_note_left, note_text_left = get_truck_notes(inprog_truck)
             safe_note_left = ""
 
-            _render_inprog_next_up_controls(
-                set_button_key="inprog_manage_next_up_button",
-            )
+            if not is_mobile_inprog:
+                _render_inprog_next_up_controls(
+                    set_button_key="inprog_manage_next_up_button",
+                )
 
-            if not guest_read_only:
-                audit_col = st.columns([1, 2, 1])[1]
-                with audit_col:
-                    if st.button(
-                        "Audit",
-                        width="stretch",
-                        key="inprog_open_audit_dialog_left",
-                    ):
-                        st.session_state["inprog_audit_dialog_open"] = True
-                        st.rerun()
-
-                if st.session_state.get("inprog_audit_dialog_open"):
-                    @st.dialog("Audit Requests", width="small")
-                    def _render_inprog_audit_dialog_left():
-                        _render_audit_capture_panel(int(inprog_truck), show_header=False, source="IN_PROGRESS")
-                        if st.button("Close", width="stretch", key="inprog_close_audit_dialog_left"):
-                            st.session_state["inprog_audit_dialog_open"] = False
+                if not guest_read_only:
+                    audit_col = st.columns([1, 2, 1])[1]
+                    with audit_col:
+                        if st.button(
+                            "Audit",
+                            width="stretch",
+                            key="inprog_open_audit_dialog_left",
+                        ):
+                            st.session_state["inprog_audit_dialog_open"] = True
                             st.rerun()
 
-                    _render_inprog_audit_dialog_left()
+                    if st.session_state.get("inprog_audit_dialog_open"):
+                        @st.dialog("Audit Requests", width="small")
+                        def _render_inprog_audit_dialog_left():
+                            _render_audit_capture_panel(int(inprog_truck), show_header=False, source="IN_PROGRESS")
+                            if st.button("Close", width="stretch", key="inprog_close_audit_dialog_left"):
+                                st.session_state["inprog_audit_dialog_open"] = False
+                                st.rerun()
+
+                        _render_inprog_audit_dialog_left()
 
             if int(inprog_truck_num_left) in dust_garment_trucks_left:
                 st.markdown(
@@ -19342,7 +22093,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
                 st.markdown(
                     (
-                        "<div style='width:100%; max-width:600px; margin:0 auto 6px auto; text-align:center;'>"
+                        "<div id='inprog-current-truck-card' style='width:100%; max-width:600px; margin:0 auto 6px auto; text-align:center;'>"
                         "  <div style='font-size:19px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.85; font-weight:900;'>Current Truck</div>"
                         f"  <div style='font-size:82px; font-weight:900; line-height:1.0; color:#facc15;'>#{inprog_truck}</div>"
                         f"{route_target_chip_html_right}"
@@ -19380,6 +22131,11 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             start_epoch = int(st.session_state.inprog_start_time or time.time())
             warn_threshold = int(st.session_state.warn_seconds or 0)
             flash_threshold = 20 * 60
+            if desktop_timer_top_pull != "0px":
+                st.markdown(
+                    f"<div style='margin-top:{desktop_timer_top_pull};'></div>",
+                    unsafe_allow_html=True,
+                )
             timer_html = f"""
                     <div style='position:relative; width:100%; margin:0 0 4px 0;'>
                         <style>
@@ -19688,6 +22444,32 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     width=0,
                 )
 
+                if is_mobile_inprog and not inprog_layout_is_original:
+                    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+                    _render_inprog_next_up_controls(
+                        set_button_key="inprog_manage_next_up_button_mobile",
+                    )
+
+                if is_mobile_inprog and not guest_read_only:
+                    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+                    if st.button(
+                        "Audit",
+                        width="stretch",
+                        key="inprog_open_audit_dialog_mobile",
+                    ):
+                        st.session_state["inprog_audit_dialog_open"] = True
+                        st.rerun()
+
+                    if st.session_state.get("inprog_audit_dialog_open"):
+                        @st.dialog("Audit Requests", width="small")
+                        def _render_inprog_audit_dialog_mobile():
+                            _render_audit_capture_panel(int(inprog_truck), show_header=False, source="IN_PROGRESS")
+                            if st.button("Close", width="stretch", key="inprog_close_audit_dialog_mobile"):
+                                st.session_state["inprog_audit_dialog_open"] = False
+                                st.rerun()
+
+                        _render_inprog_audit_dialog_mobile()
+
             if inprog_layout_is_original:
                 st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
                 _render_inprog_next_up_controls(
@@ -19758,6 +22540,9 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         height=0,
         width=0,
     )
+
+    if is_mobile_inprog and inprog_truck:
+        _compress_mobile_notice_to_inprogress_current_truck_gap()
 
     # Keep this at the end of the IN_PROGRESS layout so any component spacing
     # does not create a visual gap above the main cards.
@@ -20035,35 +22820,66 @@ elif st.session_state.active_screen == "FLEET":
     )
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
     render_page_heading("Fleet Management")
+    _render_batch_capacity_warning_dialog_if_needed()
     is_mobile_fleet = _is_mobile_client()
     if is_mobile_fleet:
-        fleet_left_col = st.container()
         fleet_main_col = st.container()
-        fleet_right_col = st.container()
+        fleet_left_col = None
+        fleet_right_col = None
     else:
         fleet_left_col, fleet_main_col, fleet_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
 
-    with fleet_left_col:
-        _render_fleet_left_rail_actions()
+    if fleet_left_col is not None:
+        with fleet_left_col:
+            _render_fleet_left_rail_actions()
+
     with fleet_main_col:
+        if is_mobile_fleet:
+            _render_fleet_left_rail_actions()
         render_fleet_management()
-    with fleet_right_col:
-        if not is_mobile_fleet:
+    if fleet_right_col is not None:
+        with fleet_right_col:
             _render_route_card(always_show=True, dock_left=False, expanded=False)
+
+    if is_mobile_fleet:
+        _compress_fleet_heading_to_grid_gap()
+        st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
+        _render_route_card(always_show=True, dock_left=False, expanded=False, mobile_docked=True)
 
 # --------------------------
 # Management page
 elif st.session_state.active_screen == "SUPERVISOR":
     render_page_heading("Management - Admin")
     _render_management_confirmation_if_any()
+    _render_batch_capacity_warning_dialog_if_needed()
+
+    def _render_management_section_chip(label: str, bg_color: str):
+        if _is_mobile_client():
+            return
+        safe_label = html.escape(str(label or "").strip())
+        safe_bg = _normalize_hex_color(bg_color, "#cbd5e1")
+        chip_border = _color_darken(safe_bg, factor=0.75)
+        st.markdown(
+            (
+                "<div style='margin:0.18rem 0 0.5rem 0;'>"
+                f"<span style='display:inline-flex; align-items:center; border-radius:999px; padding:0.26rem 0.88rem; "
+                f"background:{safe_bg}; border:1px solid {chip_border}; "
+                "font-size:1.5rem; font-weight:800; line-height:1.06; color:#0f172a; letter-spacing:0.01em;'>"
+                f"{safe_label}"
+                "</span>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
 
     run_date = st.session_state.get("run_date") or date.today()
     ship_dates = list(st.session_state.get("ship_dates") or [])
     if not ship_dates:
         ship_dates = [run_date + timedelta(days=1)]
 
-    st.markdown("#### Operations")
-    with st.expander("Configure load day", expanded=False):
+    _render_management_section_chip("Operations", "#fed7aa")
+    configure_load_day_expanded = bool(st.session_state.pop("sup_configure_load_day_open_once", False))
+    with st.expander("Configure load day", expanded=configure_load_day_expanded):
         if "sup_dust_clothes_dialog_open" not in st.session_state:
             st.session_state["sup_dust_clothes_dialog_open"] = False
 
@@ -20090,7 +22906,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 restore_archive=False,
                 force_reset=True,
             )
-            st.session_state.active_screen = "UNLOAD"
+            st.session_state["sup_configure_load_day_open_once"] = True
+            st.session_state.active_screen = "SUPERVISOR"
+            _set_query_params(page=_page_param_for_screen("SUPERVISOR"))
             _mark_and_save()
             _queue_management_confirmation(f"Load date set to {selected_load_date.isoformat()}.")
             st.rerun()
@@ -20108,6 +22926,47 @@ elif st.session_state.active_screen == "SUPERVISOR":
             )
             _mark_and_save()
             _queue_management_confirmation("Truck statuses re-synced for the current run day.")
+            st.rerun()
+
+        if st.button("Run Holiday", width="stretch", key="sup_run_holiday_btn"):
+            holiday_run_date_raw = st.session_state.get("sup_configure_load_date_pick")
+            if isinstance(holiday_run_date_raw, date):
+                holiday_run_date = holiday_run_date_raw
+            else:
+                holiday_run_date = current_run_date
+
+            holiday_ship_dates = _default_holiday_ship_dates_for_run_date(holiday_run_date)
+            first_holiday_ship_date = holiday_ship_dates[0] if holiday_ship_dates else (holiday_run_date + timedelta(days=1))
+
+            # Step 1: initialize first load day normally so day-one Unloaded setup applies.
+            apply_run_config(
+                holiday_run_date,
+                [first_holiday_ship_date],
+                restore_archive=False,
+                force_reset=True,
+            )
+
+            # Step 2: enable holiday mode (two load days) without resetting again.
+            apply_run_config(
+                holiday_run_date,
+                holiday_ship_dates,
+                restore_archive=False,
+                force_reset=False,
+            )
+
+            holiday_days_text = ", ".join(
+                f"{load_day_label(ship_day_number(d) or 1)} ({d.isoformat()})"
+                for d in holiday_ship_dates
+            )
+            st.session_state["sup_configure_load_day_open_once"] = True
+            st.session_state.active_screen = "SUPERVISOR"
+            _set_query_params(page=_page_param_for_screen("SUPERVISOR"))
+            _mark_and_save()
+            _queue_management_confirmation(
+                "Holiday run enabled for next two load days: "
+                + holiday_days_text
+                + ". Trucks reset once for day one and carry forward after that."
+            )
             st.rerun()
 
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
@@ -20239,9 +23098,143 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 _queue_management_confirmation("Daily notes are already empty.", icon="ℹ️")
                 st.rerun()
 
-    st.markdown("#### Access and Preferences")
+        st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
+        with st.expander("Batch management", expanded=False):
+            st.caption("Move or remove trucks already assigned to batches, and edit assigned wearers.")
+
+            batch_entries: list[tuple[int, int, int]] = []
+            for batch_id in range(1, BATCH_COUNT + 1):
+                batch_trucks = st.session_state.batches.get(int(batch_id), {}).get("trucks") or []
+                for truck_raw in batch_trucks:
+                    try:
+                        truck_num = int(truck_raw)
+                    except Exception:
+                        continue
+                    wearers_num = int(st.session_state.wearers.get(truck_num, 0) or 0)
+                    batch_entries.append((int(truck_num), int(batch_id), int(wearers_num)))
+
+            if not batch_entries:
+                st.caption("No trucks are currently assigned to batches.")
+            else:
+                truck_to_batch: dict[int, int] = {int(t): int(b) for t, b, _ in batch_entries}
+                truck_to_wearers: dict[int, int] = {int(t): int(w) for t, _, w in batch_entries}
+                assigned_trucks = sorted({int(t) for t, _, _ in batch_entries})
+
+                selected_batch_truck = st.selectbox(
+                    "Assigned truck",
+                    options=assigned_trucks,
+                    key="sup_batch_manage_truck",
+                    format_func=lambda t: (
+                        f"Truck {int(t)} - Batch {int(truck_to_batch.get(int(t), 0))} - Wearers {int(truck_to_wearers.get(int(t), 0))}"
+                    ),
+                )
+
+                selected_batch_id = int(truck_to_batch.get(int(selected_batch_truck), 0))
+                current_wearers = int(truck_to_wearers.get(int(selected_batch_truck), 0))
+
+                updated_wearers = int(
+                    st.number_input(
+                        "Wearers",
+                        min_value=0,
+                        max_value=999,
+                        step=1,
+                        value=max(0, int(current_wearers)),
+                        key="sup_batch_manage_wearers",
+                    )
+                )
+
+                removable_total = int(st.session_state.batches.get(int(selected_batch_id), {}).get("total") or 0)
+                projected_total = max(0, int(removable_total) - int(current_wearers) + int(updated_wearers))
+                st.caption(
+                    f"Batch {int(selected_batch_id)} total would be {int(projected_total)}/{int(BATCH_CAP)} with this wearers value."
+                )
+
+                target_batch_options = [
+                    int(batch_id)
+                    for batch_id in range(1, BATCH_COUNT + 1)
+                    if int(batch_id) != int(selected_batch_id)
+                ]
+                valid_target_batch_options = [
+                    int(batch_id)
+                    for batch_id in target_batch_options
+                    if int(st.session_state.batches.get(int(batch_id), {}).get("total") or 0) + int(current_wearers) <= int(BATCH_CAP)
+                ]
+                move_batch_options = valid_target_batch_options or target_batch_options
+
+                target_batch = st.selectbox(
+                    "Move truck to batch",
+                    options=move_batch_options,
+                    key="sup_batch_manage_target_batch",
+                    format_func=lambda batch_id: (
+                        f"Batch {int(batch_id)} (current {int(st.session_state.batches.get(int(batch_id), {}).get('total') or 0)}/{int(BATCH_CAP)})"
+                    ),
+                )
+
+                c_batch_a, c_batch_b, c_batch_c = st.columns([1, 1, 1])
+                with c_batch_a:
+                    if st.button("Update wearers", width="stretch", key="sup_batch_manage_update_wearers"):
+                        if int(projected_total) > int(BATCH_CAP):
+                            _queue_batch_capacity_warning(
+                                batch_id=int(selected_batch_id),
+                                current_total=int(removable_total) - int(current_wearers),
+                                incoming_wearers=int(updated_wearers),
+                            )
+                            st.rerun()
+                        else:
+                            st.session_state.wearers[int(selected_batch_truck)] = int(updated_wearers)
+                            st.session_state.batches[int(selected_batch_id)]["total"] = int(projected_total)
+                            _append_batch_history_entry(
+                                truck=int(selected_batch_truck),
+                                batch_id=int(selected_batch_id),
+                                wearers=int(updated_wearers),
+                                action="update_wearers",
+                            )
+                            _mark_and_save()
+                            _queue_management_confirmation(
+                                f"Truck {int(selected_batch_truck)} wearers updated to {int(updated_wearers)} in Batch {int(selected_batch_id)}."
+                            )
+                            st.rerun()
+                with c_batch_b:
+                    if st.button("Move truck", width="stretch", key="sup_batch_manage_move_truck"):
+                        target_total = int(st.session_state.batches.get(int(target_batch), {}).get("total") or 0)
+                        if int(target_total) + int(current_wearers) > int(BATCH_CAP):
+                            _queue_batch_capacity_warning(
+                                batch_id=int(target_batch),
+                                current_total=int(target_total),
+                                incoming_wearers=int(current_wearers),
+                            )
+                            st.rerun()
+                        else:
+                            remove_truck_from_batches(int(selected_batch_truck))
+                            st.session_state.wearers[int(selected_batch_truck)] = int(current_wearers)
+                            assigned_ok = batch_assign(int(selected_batch_truck), int(current_wearers), int(target_batch))
+                            if not assigned_ok:
+                                st.rerun()
+                            _mark_and_save()
+                            _queue_management_confirmation(
+                                f"Truck {int(selected_batch_truck)} moved to Batch {int(target_batch)}."
+                            )
+                            st.rerun()
+                with c_batch_c:
+                    if st.button("Remove from batch", width="stretch", key="sup_batch_manage_remove_truck"):
+                        remove_truck_from_batches(int(selected_batch_truck))
+                        st.session_state.wearers.pop(int(selected_batch_truck), None)
+                        _append_batch_history_entry(
+                            truck=int(selected_batch_truck),
+                            batch_id=None,
+                            wearers=0,
+                            action="remove",
+                        )
+                        _mark_and_save()
+                        _queue_management_confirmation(
+                            f"Truck {int(selected_batch_truck)} removed from Batch {int(selected_batch_id)}."
+                        )
+                        st.rerun()
+
+    _render_management_section_chip("Access and Preferences", "#e9d5ff")
     _render_user_management_dropdown()
 
+    _render_management_section_chip("App Settings", "#99f6e4")
     with st.expander("App Settings", expanded=False):
         if st.session_state.pop("mgmt_status_badge_reset_pending", False):
             _set_status_badge_picker_values(_get_status_badge_colors())
@@ -20362,6 +23355,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 _queue_management_confirmation("Status bubble colors reset to defaults.")
                 st.rerun()
 
+    _render_management_section_chip("Communication Settings", "#fbcfe8")
     with st.expander("Communication Settings", expanded=False):
         if "sup_comms_history_dialog_open" not in st.session_state:
             st.session_state["sup_comms_history_dialog_open"] = False
@@ -20452,8 +23446,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
             _render_sup_comms_history_dialog()
 
-    st.markdown("#### Reporting")
+    _render_management_section_chip("Reporting", "#e9d5ff")
     _render_tracked_items_management_dropdown()
+    _render_management_section_chip("Download PDFs", "#a5f3fc")
     with st.expander("Download PDFs", expanded=False):
         if "sup_pdf_download_dialog_open" not in st.session_state:
             st.session_state["sup_pdf_download_dialog_open"] = False
@@ -20532,7 +23527,8 @@ elif st.session_state.active_screen == "SUPERVISOR":
         if "mgmt_dev_direct_import_dialog_open" not in st.session_state:
             st.session_state["mgmt_dev_direct_import_dialog_open"] = False
 
-        with st.expander("1) Daily controls", expanded=False):
+        daily_controls_expanded = bool(st.session_state.pop("sup_dev_daily_controls_open_once", False))
+        with st.expander("1) Daily controls", expanded=daily_controls_expanded):
             current_shorts_mode = st.session_state.get("shorts_mode")
             if not current_shorts_mode:
                 current_shorts_mode = SHORTS_MODE_DISABLE if st.session_state.get("shorts_disabled") else SHORTS_MODE_BUTTONS
@@ -20548,8 +23544,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 value=bool(st.session_state.get("batching_disabled")),
                 key="sup_disable_batching",
             )
+            disable_skip_batching = st.checkbox(
+                "Disable Skip Batching button",
+                value=bool(st.session_state.get("skip_batching_disabled")),
+                key="sup_disable_skip_batching",
+            )
 
-            with st.expander("Off schedule (Day 1-5)", expanded=False):
+            off_schedule_expanded = bool(st.session_state.pop("sup_dev_off_schedule_open_once", False))
+            with st.expander("Off schedule (Day 1-5)", expanded=off_schedule_expanded):
                 st.markdown("""
                 **Day Mapping:**
                 - Day 1 = Monday
@@ -20616,19 +23618,23 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 st.session_state.shorts_mode = shorts_mode
                 st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
                 st.session_state.batching_disabled = bool(disable_batching)
+                st.session_state.skip_batching_disabled = bool(disable_skip_batching)
                 apply_run_config(run_date, ship_dates)
                 if not _holiday_mode_active():
                     apply_off_schedule(_previous_ship_day_num(_current_ship_day_num()))
                 normalize_states()
                 _mark_and_save()
                 _queue_management_confirmation(
-                    f"Daily controls saved ({shorts_mode}, batching {'Off' if bool(disable_batching) else 'On'})"
+                    f"Daily controls saved ({shorts_mode}, batching {'Off' if bool(disable_batching) else 'On'}, skip {'Off' if bool(disable_skip_batching) else 'On'})"
                     + (
                         f". Off-schedule Day {int(saved_sched_day)} updated."
                         if saved_sched_day is not None
                         else "."
                     )
                 )
+                st.session_state["sup_dev_daily_controls_open_once"] = True
+                st.session_state["sup_dev_off_schedule_open_once"] = True
+                st.session_state.active_screen = "SUPERVISOR"
                 st.rerun()
 
         with st.expander("2) Pace controls", expanded=False):
@@ -20900,6 +23906,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 indent=2,
             ).encode("utf-8")
 
+            batch_info_payload = {
+                "exported_at": datetime.now().isoformat(),
+                "run_date": _current_run_date_iso(),
+                "wearers": {str(k): int(v or 0) for k, v in (st.session_state.get("wearers") or {}).items()},
+                "batches": _clone_json_compatible(st.session_state.get("batches") or {}),
+                "batch_history": _load_batch_history(),
+            }
+            batch_info_download_bytes = json.dumps(
+                batch_info_payload,
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+
             current_history_key = _current_run_date_key() or date.today().isoformat()
             current_history_path = _history_state_path(current_history_key)
             state_history_download_bytes = None
@@ -20919,7 +23938,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 ).encode("utf-8")
 
             st.write("#### Quick exports")
-            export_col_1, export_col_2, export_col_3 = st.columns(3)
+            export_col_1, export_col_2, export_col_3, export_col_4 = st.columns(4)
             with export_col_1:
                 durations_date = str(current_history_key)
                 durations_filename = f"load_durations_{durations_date}.json" if durations_date else "load_durations.json"
@@ -20948,6 +23967,15 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     mime="application/json",
                     width="stretch",
                     key="mgmt_dev_download_audit_history",
+                )
+            with export_col_4:
+                st.download_button(
+                    "Download batch_info.json",
+                    data=batch_info_download_bytes,
+                    file_name="batch_info.json",
+                    mime="application/json",
+                    width="stretch",
+                    key="mgmt_dev_download_batch_info",
                 )
 
             st.write("#### Backup package")
@@ -20998,6 +24026,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
             history_items = sorted(history_items, key=lambda item: str(item.get("run_date_key") or ""))
             durations_for_backup = load_duration_history()
             audits_for_backup = _load_audit_history()
+            batch_history_for_backup = _load_batch_history()
+            batch_state_for_backup = {
+                "wearers": {str(k): int(v or 0) for k, v in (st.session_state.get("wearers") or {}).items()},
+                "batches": _clone_json_compatible(st.session_state.get("batches") or {}),
+            }
             history_backup_payload = {
                 "backup_type": "truckapp_history_backup",
                 "backup_version": 1,
@@ -21007,6 +24040,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 "load_durations": durations_for_backup,
                 "state_history": history_items,
                 "audit_history": audits_for_backup,
+                "batch_history": batch_history_for_backup,
+                "batch_state": batch_state_for_backup,
+                # Explicit combined block so batching data survives key-shape changes.
+                "batch_info": {
+                    "batch_history": batch_history_for_backup,
+                    "batch_state": batch_state_for_backup,
+                },
             }
             history_backup_bytes = json.dumps(
                 history_backup_payload,
@@ -21062,6 +24102,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     options=["Append", "Replace"],
                     horizontal=True,
                     key="mgmt_dev_backup_audit_import_mode",
+                )
+                backup_batch_import_mode = st.radio(
+                    "Backup import mode for batch_history",
+                    options=["Append", "Replace"],
+                    horizontal=True,
+                    key="mgmt_dev_backup_batch_import_mode",
+                )
+                backup_restore_batch_state = st.checkbox(
+                    "Backup import: restore current batch state (wearers + batches)",
+                    value=False,
+                    key="mgmt_dev_backup_restore_batch_state",
                 )
                 backup_overwrite_history = st.checkbox(
                     "Backup import: overwrite matching state history dates",
@@ -21197,10 +24248,71 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                     if not _save_audit_history(audits_merged):
                                         st.error("Failed to save audit history during backup import.")
 
+                                batch_info_raw = package_raw.get("batch_info")
+                                batch_history_raw = package_raw.get("batch_history")
+                                if batch_history_raw is None and isinstance(batch_info_raw, dict):
+                                    batch_history_raw = batch_info_raw.get("batch_history")
+                                imported_batch_rows: list[dict] = []
+                                skipped_batch_rows = 0
+                                if isinstance(batch_history_raw, list):
+                                    for item in batch_history_raw:
+                                        if isinstance(item, dict):
+                                            imported_batch_rows.append(item)
+                                        else:
+                                            skipped_batch_rows += 1
+
+                                if imported_batch_rows:
+                                    existing_batch_rows = _load_batch_history() if backup_batch_import_mode == "Append" else []
+                                    merged_batch_rows = list(existing_batch_rows) + imported_batch_rows
+                                    if not _save_batch_history(merged_batch_rows):
+                                        st.error("Failed to save batch history during backup import.")
+
+                                if bool(backup_restore_batch_state):
+                                    batch_state_raw = package_raw.get("batch_state")
+                                    if batch_state_raw is None and isinstance(batch_info_raw, dict):
+                                        batch_state_raw = batch_info_raw.get("batch_state")
+                                    if isinstance(batch_state_raw, dict):
+                                        restored_wearers_raw = batch_state_raw.get("wearers")
+                                        if isinstance(restored_wearers_raw, dict):
+                                            restored_wearers: dict[int, int] = {}
+                                            for truck_key, wearers_value in restored_wearers_raw.items():
+                                                try:
+                                                    restored_wearers[int(truck_key)] = max(0, int(wearers_value or 0))
+                                                except Exception:
+                                                    continue
+                                            st.session_state.wearers = restored_wearers
+
+                                        restored_batches_raw = batch_state_raw.get("batches")
+                                        if isinstance(restored_batches_raw, dict):
+                                            restored_batches: dict[int, dict] = {}
+                                            for batch_id in range(1, BATCH_COUNT + 1):
+                                                batch_payload = restored_batches_raw.get(str(batch_id)) or restored_batches_raw.get(batch_id)
+                                                if not isinstance(batch_payload, dict):
+                                                    restored_batches[batch_id] = {"trucks": [], "total": 0}
+                                                    continue
+                                                batch_trucks_raw = batch_payload.get("trucks")
+                                                batch_trucks = []
+                                                if isinstance(batch_trucks_raw, list):
+                                                    for truck_value in batch_trucks_raw:
+                                                        try:
+                                                            batch_trucks.append(int(truck_value))
+                                                        except Exception:
+                                                            continue
+                                                try:
+                                                    batch_total = int(batch_payload.get("total") or 0)
+                                                except Exception:
+                                                    batch_total = 0
+                                                restored_batches[batch_id] = {
+                                                    "trucks": batch_trucks,
+                                                    "total": max(0, batch_total),
+                                                }
+                                            st.session_state.batches = restored_batches
+
                                 log_action(
                                     "Imported history backup package "
                                     f"(durations={len(durations_imported_rows)}, durations_skipped={durations_skipped_rows}, "
                                     f"audits={len(audits_imported_rows)}, audits_skipped={audits_skipped_rows}, "
+                                    f"batch_history={len(imported_batch_rows)}, batch_history_skipped={skipped_batch_rows}, "
                                     f"state_imported={state_imported_count}, state_overwritten={state_overwritten_count}, "
                                     f"state_skipped_existing={state_skipped_existing_count}, state_invalid={state_invalid_count}, "
                                     f"state_failed={state_failed_count})."
@@ -21209,6 +24321,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                     "Backup import complete: "
                                     f"load_durations imported {len(durations_imported_rows)} (skipped {durations_skipped_rows}); "
                                     f"audit_requests imported {len(audits_imported_rows)} (skipped {audits_skipped_rows}); "
+                                    f"batch_history imported {len(imported_batch_rows)} (skipped {skipped_batch_rows}); "
                                     f"state_history imported {state_imported_count}, overwritten {state_overwritten_count}, "
                                     f"skipped existing {state_skipped_existing_count}, invalid {state_invalid_count}, failed {state_failed_count}."
                                 )
@@ -21435,6 +24548,106 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         )
                         st.rerun()
 
+                st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+                batch_import_mode = st.radio(
+                    "batch_history import mode",
+                    options=["Append", "Replace"],
+                    horizontal=True,
+                    key="mgmt_dev_import_batch_mode",
+                )
+                replace_current_batch_state = st.checkbox(
+                    "Replace current batch state (wearers + batches) from file",
+                    value=False,
+                    key="mgmt_dev_import_replace_batch_state",
+                )
+                uploaded_batch_info = st.file_uploader(
+                    "Upload batch_info JSON",
+                    type=["json"],
+                    key="mgmt_dev_upload_batch_info",
+                )
+                if st.button(
+                    "Import batch_info JSON",
+                    width="stretch",
+                    key="mgmt_dev_import_batch_info_btn",
+                ):
+                    if uploaded_batch_info is None:
+                        st.warning("Choose a batch_info JSON file first.")
+                    else:
+                        try:
+                            uploaded_batch_raw = json.loads(uploaded_batch_info.getvalue().decode("utf-8"))
+                        except Exception:
+                            uploaded_batch_raw = None
+
+                        if not isinstance(uploaded_batch_raw, dict):
+                            st.error("Invalid batch_info JSON. Expected a JSON object.")
+                        else:
+                            imported_batch_rows: list[dict] = []
+                            skipped_batch_rows = 0
+                            raw_batch_history = uploaded_batch_raw.get("batch_history")
+                            if isinstance(raw_batch_history, list):
+                                for row in raw_batch_history:
+                                    if isinstance(row, dict):
+                                        imported_batch_rows.append(row)
+                                    else:
+                                        skipped_batch_rows += 1
+
+                            if imported_batch_rows:
+                                existing_batch_rows = _load_batch_history() if batch_import_mode == "Append" else []
+                                merged_batch_rows = list(existing_batch_rows) + imported_batch_rows
+                                if not _save_batch_history(merged_batch_rows):
+                                    st.error("Failed to save batch_history JSON.")
+
+                            replaced_state = False
+                            if bool(replace_current_batch_state):
+                                imported_wearers_raw = uploaded_batch_raw.get("wearers")
+                                imported_batches_raw = uploaded_batch_raw.get("batches")
+                                if isinstance(imported_wearers_raw, dict):
+                                    normalized_wearers: dict[int, int] = {}
+                                    for truck_key, wearers_value in imported_wearers_raw.items():
+                                        try:
+                                            normalized_wearers[int(truck_key)] = max(0, int(wearers_value or 0))
+                                        except Exception:
+                                            continue
+                                    st.session_state.wearers = normalized_wearers
+                                    replaced_state = True
+
+                                if isinstance(imported_batches_raw, dict):
+                                    normalized_batches: dict[int, dict] = {}
+                                    for batch_id in range(1, BATCH_COUNT + 1):
+                                        batch_payload = imported_batches_raw.get(str(batch_id)) or imported_batches_raw.get(batch_id)
+                                        if not isinstance(batch_payload, dict):
+                                            normalized_batches[batch_id] = {"trucks": [], "total": 0}
+                                            continue
+                                        raw_trucks = batch_payload.get("trucks")
+                                        normalized_trucks: list[int] = []
+                                        if isinstance(raw_trucks, list):
+                                            for truck_value in raw_trucks:
+                                                try:
+                                                    normalized_trucks.append(int(truck_value))
+                                                except Exception:
+                                                    continue
+                                        try:
+                                            normalized_total = max(0, int(batch_payload.get("total") or 0))
+                                        except Exception:
+                                            normalized_total = 0
+                                        normalized_batches[batch_id] = {
+                                            "trucks": normalized_trucks,
+                                            "total": normalized_total,
+                                        }
+                                    st.session_state.batches = normalized_batches
+                                    replaced_state = True
+
+                            _mark_and_save()
+                            log_action(
+                                f"Imported batch_info JSON ({len(imported_batch_rows)} history rows, mode={batch_import_mode.lower()}, "
+                                f"history_skipped={skipped_batch_rows}, replaced_state={str(replaced_state).lower()})."
+                            )
+                            _queue_management_confirmation(
+                                f"Batch import complete: history rows imported {len(imported_batch_rows)} (skipped {skipped_batch_rows})"
+                                + ("; current batch state replaced." if replaced_state else ".")
+                            )
+                            st.rerun()
+
                 if st.button("Close", width="stretch", key="mgmt_dev_direct_import_dialog_close"):
                     st.session_state["mgmt_dev_direct_import_dialog_open"] = False
                     st.rerun()
@@ -21479,7 +24692,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state.inprog_start_time = None
 
             # Soft reset should respect load-day config. Start Dirty-first, then
-            # reapply off-schedule auto-pull into Unloaded for the current day.
+            # reapply previous-day OFF auto-pull into Unloaded.
             st.session_state.cleaned_set = set()
 
             current_load_day = None
@@ -21590,7 +24803,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             save_state()
             msg_label = "message" if cleared_communications == 1 else "messages"
             _queue_management_confirmation(
-                "Workday data reset. Out Of Service and Spares preserved, with unloaded auto-pull reapplied for the current day. "
+                "Workday data reset. Out Of Service and Spares preserved, with unloaded auto-pull reapplied for previous-day OFF trucks only. "
                 f"Communications cleared ({cleared_communications} {msg_label})."
             )
             st.rerun()
@@ -21681,6 +24894,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             if _save_audit_history([]):
                 for trends_key in (
                     "sup_audit_trends_selected_details",
+                    "sup_audit_trends_mobile_details_dialog_open",
                     "sup_audit_trend_days",
                     "sup_audit_trend_metric_mode",
                     "sup_audit_route_switcher",
@@ -21739,6 +24953,16 @@ elif st.session_state.active_screen == "TRENDS":
                 padding-left: 0.9rem !important;
                 padding-right: 0.9rem !important;
             }
+
+            /* Keep desktop Trends heading + rails visually closer to Notices. */
+            .page-heading-trends {
+                margin-top: -0.38rem !important;
+                margin-bottom: 0.24rem !important;
+            }
+
+            .st-key-trends_desktop_layout {
+                margin-top: -0.52rem !important;
+            }
         }
         </style>
         """,
@@ -21747,9 +24971,18 @@ elif st.session_state.active_screen == "TRENDS":
 
     render_page_heading("Trends")
 
-    trends_left_col, trends_center_col, trends_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
+    is_mobile_trends = _is_mobile_client()
+    if is_mobile_trends:
+        trends_left_col = st.container()
+        trends_center_col = st.container()
+        trends_right_col = st.container()
+    else:
+        desktop_trends_layout = st.container(key="trends_desktop_layout")
+        trends_left_col, trends_center_col, trends_right_col = desktop_trends_layout.columns([0.95, 3.1, 0.95], gap="large")
+
     with trends_left_col:
-        _render_audit_trends_selection_details_panel()
+        if not is_mobile_trends:
+            _render_audit_trends_selection_details_panel()
 
     right_days = 14
     right_day_filter = "Show All"
@@ -21757,19 +24990,22 @@ elif st.session_state.active_screen == "TRENDS":
     right_route_filter = "Show All"
     right_category_filter = "Show All"
     right_metric_mode = "Percentage"
+    trend_view_options = ["Removals", "Pace", "Shortages", "Wearers"]
+    prev_trend_view = str(st.session_state.get("trends_right_rail_trend") or "Removals")
+    trend_view_index = trend_view_options.index(prev_trend_view) if prev_trend_view in trend_view_options else 0
 
     with trends_right_col:
-        trend_view_options = ["Removals", "Pace", "Shortages"]
-        prev_trend_view = str(st.session_state.get("trends_right_rail_trend") or "Removals")
-        trend_view_index = trend_view_options.index(prev_trend_view) if prev_trend_view in trend_view_options else 0
-        right_trend_view = str(
-            st.selectbox(
-                "Trend",
-                options=trend_view_options,
-                index=trend_view_index,
-                key="trends_right_rail_trend",
+        if not is_mobile_trends:
+            right_trend_view = str(
+                st.selectbox(
+                    "Trend",
+                    options=trend_view_options,
+                    index=trend_view_index,
+                    key="trends_right_rail_trend",
+                )
             )
-        )
+        else:
+            right_trend_view = str(prev_trend_view)
 
         trend_window_options = ["Show All", 7, 14, 30]
         prev_window = st.session_state.get("trends_right_rail_days")
@@ -21782,7 +25018,7 @@ elif st.session_state.active_screen == "TRENDS":
         )
         right_days = 0 if str(right_window_pick) == "Show All" else int(right_window_pick)
 
-        if right_trend_view in {"Removals", "Shortages"}:
+        if right_trend_view in {"Removals", "Shortages", "Wearers"}:
             metric_mode_options = ["Percentage", "Qty"]
             if right_trend_view == "Removals":
                 prev_metric_mode = str(st.session_state.get("trends_right_rail_metric_mode") or "Percentage")
@@ -21795,9 +25031,12 @@ elif st.session_state.active_screen == "TRENDS":
                         key="trends_right_rail_metric_mode",
                     )
                 )
-            else:
+            elif right_trend_view == "Shortages":
                 right_metric_mode = "Qty"
                 st.caption("Shortages chart uses quantity totals.")
+            else:
+                right_metric_mode = "Qty"
+                st.caption("Wearers chart uses quantity totals.")
 
             day_filter_options = _audit_day_filter_options()
             prev_day_filter = str(st.session_state.get("trends_right_rail_day") or "Show All")
@@ -21814,13 +25053,17 @@ elif st.session_state.active_screen == "TRENDS":
             route_options = (
                 _shortage_route_filter_options(int(right_days), day_filter=right_day_filter)
                 if right_trend_view == "Shortages"
-                else _audit_route_filter_options(int(right_days), day_filter=right_day_filter)
+                else (
+                    _batch_wearers_truck_filter_options(int(right_days), day_filter=right_day_filter)
+                    if right_trend_view == "Wearers"
+                    else _audit_route_filter_options(int(right_days), day_filter=right_day_filter)
+                )
             )
             prev_route = str(st.session_state.get("trends_right_rail_route") or "Show All")
             route_index = route_options.index(prev_route) if prev_route in route_options else 0
             right_route_filter = str(
                 st.selectbox(
-                    "Route",
+                    "Truck" if right_trend_view == "Wearers" else "Route",
                     options=route_options,
                     index=route_index,
                     key="trends_right_rail_route",
@@ -21830,13 +25073,17 @@ elif st.session_state.active_screen == "TRENDS":
             category_options = (
                 _shortage_category_filter_options(int(right_days), day_filter=right_day_filter)
                 if right_trend_view == "Shortages"
-                else _audit_category_filter_options(int(right_days), day_filter=right_day_filter)
+                else (
+                    _batch_wearers_batch_filter_options(int(right_days), day_filter=right_day_filter)
+                    if right_trend_view == "Wearers"
+                    else _audit_category_filter_options(int(right_days), day_filter=right_day_filter)
+                )
             )
             prev_category = str(st.session_state.get("trends_right_rail_category") or "Show All")
             category_index = category_options.index(prev_category) if prev_category in category_options else 0
             right_category_filter = str(
                 st.selectbox(
-                    "Category",
+                    "Batch" if right_trend_view == "Wearers" else "Category",
                     options=category_options,
                     index=category_index,
                     key="trends_right_rail_category",
@@ -21850,10 +25097,22 @@ elif st.session_state.active_screen == "TRENDS":
             st.caption("Pace uses load duration history.")
 
     with trends_center_col:
+        if is_mobile_trends:
+            right_trend_view = str(
+                st.selectbox(
+                    "Trend",
+                    options=trend_view_options,
+                    index=trend_view_index,
+                    key="trends_right_rail_trend",
+                )
+            )
+
         if right_trend_view == "Pace":
             st.caption("Current load-duration pace trend.")
         elif right_trend_view == "Shortages":
             st.caption("Current shortages patterns by route and category.")
+        elif right_trend_view == "Wearers":
+            st.caption("Current batched wearers by truck and load day.")
         else:
             st.caption("Current audit request patterns by route and category.")
         _render_supervisor_audit_trends(
@@ -21866,6 +25125,9 @@ elif st.session_state.active_screen == "TRENDS":
             external_metric_mode=right_metric_mode,
             external_trend_view=right_trend_view,
         )
+
+    if is_mobile_trends:
+        _render_audit_trends_selection_details_dialog_if_needed()
 
     st.markdown("#### Coming Soon")
     future_cols = st.columns(3)
@@ -22023,6 +25285,7 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
             ),
             unsafe_allow_html=True,
         )
+        _compress_mobile_notice_to_communications_head_gap()
 
         if not recent_messages:
             st.markdown("<div class='comms-empty'>No messages yet. Start the conversation below.</div>", unsafe_allow_html=True)
@@ -22159,15 +25422,17 @@ elif st.session_state.active_screen == "UNLOAD":
         widget_spacing_rem=0.2,
     )
 
-    if _is_mobile_client():
-        unload_watch_col = st.container()
+    is_mobile_unload = _is_mobile_client()
+    if is_mobile_unload:
         unload_main_col = st.container()
-        unload_right_col = st.container()
+        unload_watch_col = unload_main_col
+        unload_right_col = None
     else:
         unload_watch_col, unload_main_col, unload_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
 
     with unload_watch_col:
-        _render_unload_watch_card(always_show=True, expanded=True)
+        if not is_mobile_unload:
+            _render_unload_watch_card(always_show=True, expanded=True)
 
     # Truck selection by clicking bubble, not dropdown
     def render_unload_bubbles(trucks):
@@ -22334,10 +25599,9 @@ elif st.session_state.active_screen == "UNLOAD":
 
     with unload_main_col:
         render_page_heading("Unload Management")
-        st.markdown("<div style='height:0.20rem;'></div>", unsafe_allow_html=True)
         render_unload_bubbles(dirty_trucks)
 
-        is_mobile_now = _is_mobile_client()
+        is_mobile_now = is_mobile_unload
         show_desktop_unload_save = False
         if st.session_state.get("batching_disabled"):
             st.session_state.pending_unload_truck = None
@@ -22406,10 +25670,15 @@ elif st.session_state.active_screen == "UNLOAD":
             width="stretch",
         )
 
-    with unload_right_col:
-        if not _is_mobile_client():
-            st.markdown("#### Right Rail")
-            st.caption("Unload spacing rail.")
+        if is_mobile_unload:
+            st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
+
+    if unload_right_col is not None:
+        with unload_right_col:
+            pass
+
+    if is_mobile_unload:
+        _render_unload_watch_card(always_show=True, expanded=False)
 
 # --------------------------
 # Truck editor page
@@ -22565,6 +25834,7 @@ elif st.session_state.active_screen == "TRUCK":
 # Batch page (opened when ?pick= is provided)
 # --------------------------
 elif st.session_state.active_screen == "BATCH":
+    _render_batch_capacity_warning_dialog_if_needed()
     _apply_mobile_touch_target_styles(
         button_min_height_px=58,
         button_font_px=18,
@@ -22574,8 +25844,234 @@ elif st.session_state.active_screen == "BATCH":
     )
     render_page_heading("Batch Assignment")
     t = st.session_state.get("unload_inprog_truck")
+    batch_dialog_internal_rerun_key = "batch_assignment_internal_rerun"
+
+    def _request_batch_dialog_internal_rerun() -> None:
+        st.session_state[batch_dialog_internal_rerun_key] = True
+        st.rerun()
+
+    def _exit_batch_to_unload() -> None:
+        st.session_state.unload_inprog_truck = None
+        st.session_state.unload_inprog_start_time = None
+        st.session_state.unload_inprog_wearers = 0
+        try:
+            st.session_state["unload_truck_select"] = None
+        except Exception:
+            pass
+        st.session_state.active_screen = "UNLOAD"
+        try:
+            _set_query_params(page="UNLOAD", pick=None)
+        except Exception:
+            pass
+        _mark_and_save()
+
+    dialog_api = getattr(st, "dialog", None)
+    if callable(dialog_api):
+        def _dismiss_batch_assignment_dialog():
+            if bool(st.session_state.pop(batch_dialog_internal_rerun_key, False)):
+                return
+            _exit_batch_to_unload()
+
+        @dialog_api("Batch Assignment", width="large", on_dismiss=_dismiss_batch_assignment_dialog)
+        def _render_batch_assignment_dialog():
+            if t is None:
+                st.warning("No truck selected for batching.")
+                if st.button("Close", width="stretch", key="batch_dialog_close_no_truck"):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    _exit_batch_to_unload()
+                    st.rerun()
+                return
+
+            truck_num = int(t)
+            if st.session_state.get("batching_disabled"):
+                _complete_unload_with_batching_disabled(truck_num, redirect_screen="UNLOAD")
+                st.rerun()
+
+            badge_bg, badge_border, badge_fg = _truck_status_colors(truck_num)
+            off_today_set = {int(x) for x in (off_today or set())}
+            route_targets = _truck_route_targets()
+            route_target = int(route_targets.get(truck_num, truck_num))
+            shop_routes = {int(x) for x in (st.session_state.get("shop_set") or set())}
+            if route_target != truck_num:
+                batch_cue_text = "Back it out" if route_target in shop_routes else "Pull it up"
+            else:
+                batch_cue_text = "Back it out" if truck_num in off_today_set else "Pull it up"
+
+            st.markdown(
+                f"""
+                <div style='text-align:center; font-weight:700; margin-bottom:6px;'>Truck</div>
+                <div style='display:flex; justify-content:center; margin:0.1rem 0 0.75rem 0;'>
+                    <div style='min-width:150px; max-width:230px; width:48%; min-height:76px; border-radius:14px; border:2px solid {badge_border}; background:{badge_bg}; color:{badge_fg}; font-weight:900; text-align:center; box-shadow:0 2px 10px rgba(0,0,0,0.12); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px 10px;'>
+                        <div style='font-size:32px; line-height:1.0; font-weight:900;'>{truck_num}</div>
+                        <div style='font-size:16px; line-height:1.05; font-weight:800; margin-top:4px; letter-spacing:0.02em;'>{batch_cue_text}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            _render_batch_capacity_warning_inline_if_needed(key_suffix=f"dialog_{truck_num}")
+
+            wearers_default = st.session_state.get("unload_inprog_wearers", 0)
+            try:
+                wearers_default = int(wearers_default or 0)
+            except Exception:
+                wearers_default = 0
+
+            wearers_input_key = f"batch_dialog_wearers_{truck_num}"
+
+            def _on_batch_dialog_wearers_change():
+                raw_val = str(st.session_state.get(wearers_input_key) or "").strip()
+                digits_only = "".join(ch for ch in raw_val if ch.isdigit())
+                st.session_state.unload_inprog_wearers = int(digits_only) if digits_only else 0
+
+            wearers_raw = st.text_input(
+                "Wearers",
+                value="" if wearers_default <= 0 else str(wearers_default),
+                key=wearers_input_key,
+                on_change=_on_batch_dialog_wearers_change,
+            )
+            components.html(
+                """
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const isMobile = (() => {
+                            try {
+                                return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                            } catch (e) {
+                                return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                            }
+                        })();
+                        const inputs = root.querySelectorAll('input[aria-label="Wearers"]');
+                        if (!inputs || !inputs.length) return;
+                        const input = inputs[inputs.length - 1];
+                        input.setAttribute('inputmode', 'numeric');
+                        input.setAttribute('pattern', '[0-9]*');
+                        input.setAttribute('enterkeyhint', 'done');
+                        if (!input.dataset.batchEnterCommitBound) {
+                            input.dataset.batchEnterCommitBound = '1';
+                            input.addEventListener('keydown', (event) => {
+                                if (event.key !== 'Enter' && event.key !== 'NumpadEnter') return;
+                                event.preventDefault();
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                input.blur();
+                            });
+                        }
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+            wearers_text = str(wearers_raw).strip()
+            typed_digits = "".join(ch for ch in wearers_text if ch.isdigit())
+            if wearers_text.isdigit():
+                w = int(wearers_text)
+            elif wearers_text == "":
+                w = 0
+            else:
+                w = int(typed_digits) if typed_digits else 0
+                st.warning("Wearers must be a whole number.")
+            st.session_state.unload_inprog_wearers = int(w)
+
+            preview_w = w if w > 0 else 0
+            allowed = batch_allowed_ids(preview_w)
+            if wearers_text != "" and w > 0:
+                pass
+            elif wearers_text != "":
+                st.caption("Enter at least 1 wearer before assigning.")
+            else:
+                st.caption("Enter wearers. Batch options are ready.")
+
+            if not allowed:
+                st.error("No batch can accept this truck without exceeding 400.")
+                if w > 0:
+                    warn_token = f"batch_dialog_limit_{truck_num}_{w}"
+                    if str(st.session_state.get("batch_capacity_warning_token") or "") != warn_token:
+                        fullest_batch = max(
+                            range(1, BATCH_COUNT + 1),
+                            key=lambda batch_id: int(st.session_state.batches[batch_id]["total"]),
+                        )
+                        st.session_state["batch_capacity_warning_token"] = warn_token
+                        _queue_batch_capacity_warning(
+                            batch_id=int(fullest_batch),
+                            current_total=int(st.session_state.batches[int(fullest_batch)]["total"]),
+                            incoming_wearers=int(w),
+                        )
+                        _request_batch_dialog_internal_rerun()
+            else:
+                batch = st.selectbox(
+                    "Assign to batch",
+                    allowed,
+                    format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})",
+                    key=f"batch_dialog_assign_select_{truck_num}",
+                )
+
+            skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                if st.button("Assign to batch", width="stretch", key=f"batch_dialog_assign_{truck_num}"):
+                    if not allowed:
+                        fullest_batch = max(
+                            range(1, BATCH_COUNT + 1),
+                            key=lambda batch_id: int(st.session_state.batches[batch_id]["total"]),
+                        )
+                        _queue_batch_capacity_warning(
+                            batch_id=int(fullest_batch),
+                            current_total=int(st.session_state.batches[int(fullest_batch)]["total"]),
+                            incoming_wearers=int(w),
+                        )
+                        _request_batch_dialog_internal_rerun()
+                    elif w <= 0:
+                        st.warning("Enter at least 1 wearer before assigning.")
+                    else:
+                        exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
+                        if exceeds_cap:
+                            _queue_batch_capacity_warning(
+                                batch_id=int(batch),
+                                current_total=int(current_total),
+                                incoming_wearers=int(w),
+                            )
+                            _request_batch_dialog_internal_rerun()
+                        assigned_ok = batch_assign(truck_num, w, batch)
+                        if not assigned_ok:
+                            _request_batch_dialog_internal_rerun()
+                        st.session_state.wearers[truck_num] = int(w)
+                        post_unload_status = _mark_truck_unloaded_after_batch(truck_num)
+                        _exit_batch_to_unload()
+                        if post_unload_status == "Spare":
+                            st.success(f"Truck {truck_num} assigned to Batch {batch} and returned to Spare.")
+                        else:
+                            st.success(f"Truck {truck_num} assigned to Batch {batch} and marked Unloaded.")
+                        st.rerun()
+            with c2:
+                if st.button("Cancel", width="stretch", key=f"batch_dialog_cancel_{truck_num}"):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    _exit_batch_to_unload()
+                    st.rerun()
+            with c3:
+                if st.button(
+                    "Skip batching",
+                    width="stretch",
+                    key=f"batch_dialog_skip_{truck_num}",
+                    disabled=skip_batching_disabled_now,
+                ):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    post_unload_status = _mark_truck_unloaded_after_batch(truck_num)
+                    _exit_batch_to_unload()
+                    if post_unload_status == "Spare":
+                        st.success(f"Truck {truck_num} returned to Spare.")
+                    st.rerun()
+
+        _render_batch_assignment_dialog()
+        st.stop()
+
     if t is None:
         st.warning("No truck selected for batching.")
+        st.session_state["batch_capacity_warning_inline_payload"] = None
     else:
         if st.session_state.get("batching_disabled"):
             _complete_unload_with_batching_disabled(int(t), redirect_screen="UNLOAD")
@@ -22608,6 +26104,7 @@ elif st.session_state.active_screen == "BATCH":
             """,
             unsafe_allow_html=True,
         )
+        _render_batch_capacity_warning_inline_if_needed(key_suffix=f"fallback_{int(t)}")
         st.markdown("<div id='batch-wearers'></div>", unsafe_allow_html=True)
         components.html("<script>const el=document.getElementById('batch-wearers'); if(el) el.scrollIntoView({behavior:'smooth'});</script>", height=0)
         wearers_default = st.session_state.get("unload_inprog_wearers", 0)
@@ -22615,10 +26112,18 @@ elif st.session_state.active_screen == "BATCH":
             wearers_default = int(wearers_default or 0)
         except Exception:
             wearers_default = 0
+        wearers_input_key = f"batch_wearers_{t}"
+
+        def _on_batch_fallback_wearers_change():
+            raw_val = str(st.session_state.get(wearers_input_key) or "").strip()
+            digits_only = "".join(ch for ch in raw_val if ch.isdigit())
+            st.session_state.unload_inprog_wearers = int(digits_only) if digits_only else 0
+
         wearers_raw = st.text_input(
             "Wearers",
             value="" if wearers_default <= 0 else str(wearers_default),
-            key=f"batch_wearers_{t}",
+            key=wearers_input_key,
+            on_change=_on_batch_fallback_wearers_change,
         )
         components.html(
             f"""
@@ -22647,6 +26152,15 @@ elif st.session_state.active_screen == "BATCH":
                         el.dataset.batchLiveBound = '1';
                         el.addEventListener('input', () => {{
                             el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }});
+                    }}
+                    if (!el.dataset.batchEnterCloseBound) {{
+                        el.dataset.batchEnterCloseBound = '1';
+                        el.addEventListener('keydown', (event) => {{
+                            if (event.key !== 'Enter' && event.key !== 'NumpadEnter') return;
+                            event.preventDefault();
+                            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            el.blur();
                         }});
                     }}
                 }});
@@ -22704,7 +26218,9 @@ elif st.session_state.active_screen == "BATCH":
             w = int(typed_digits) if typed_digits else 0
             st.warning("Wearers must be a whole number.")
         st.session_state.unload_inprog_wearers = int(w)
-        if st.button("Skip batching", width="stretch"):
+        skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
+        if st.button("Skip batching", width="stretch", disabled=skip_batching_disabled_now):
+            st.session_state["batch_capacity_warning_inline_payload"] = None
             post_unload_status = _mark_truck_unloaded_after_batch(int(t))
             st.session_state.unload_inprog_truck = None
             st.session_state.unload_inprog_start_time = None
@@ -22721,7 +26237,7 @@ elif st.session_state.active_screen == "BATCH":
         preview_w = w if w > 0 else 0
         allowed = batch_allowed_ids(preview_w)
         if wearers_text != "" and w > 0:
-            st.info(f"Assign **Truck {t}** (wearers: **{w}**) to a batch (<= {BATCH_CAP}).")
+            pass
         elif wearers_text != "":
             st.caption("Enter at least 1 wearer before assigning.")
         else:
@@ -22729,6 +26245,20 @@ elif st.session_state.active_screen == "BATCH":
 
         if not allowed:
             st.error("No batch can accept this truck without exceeding 400.")
+            if w > 0:
+                warn_token = f"batch_fallback_limit_{int(t)}_{w}"
+                if str(st.session_state.get("batch_capacity_warning_token") or "") != warn_token:
+                    fullest_batch = max(
+                        range(1, BATCH_COUNT + 1),
+                        key=lambda batch_id: int(st.session_state.batches[batch_id]["total"]),
+                    )
+                    st.session_state["batch_capacity_warning_token"] = warn_token
+                    _queue_batch_capacity_warning(
+                        batch_id=int(fullest_batch),
+                        current_total=int(st.session_state.batches[int(fullest_batch)]["total"]),
+                        incoming_wearers=int(w),
+                    )
+                    st.rerun()
         else:
             batch = st.selectbox(
                 "Assign to batch",
@@ -22742,7 +26272,17 @@ elif st.session_state.active_screen == "BATCH":
                     if w <= 0:
                         st.warning("Enter at least 1 wearer before assigning.")
                     else:
-                        batch_assign(t, w, batch)
+                        exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
+                        if exceeds_cap:
+                            _queue_batch_capacity_warning(
+                                batch_id=int(batch),
+                                current_total=int(current_total),
+                                incoming_wearers=int(w),
+                            )
+                            st.rerun()
+                        assigned_ok = batch_assign(t, w, batch)
+                        if not assigned_ok:
+                            st.rerun()
                         st.session_state.wearers[int(t)] = int(w)
                         post_unload_status = _mark_truck_unloaded_after_batch(int(t))
                         st.session_state.unload_inprog_truck = None
@@ -22758,10 +26298,12 @@ elif st.session_state.active_screen == "BATCH":
                             st.session_state["unload_truck_select"] = None
                         except Exception:
                             pass
+                        st.session_state["batch_capacity_warning_inline_payload"] = None
                         st.session_state.active_screen = "UNLOAD"
                         st.rerun()
             with c2:
                 if st.button("Cancel", width="stretch"):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
                     st.session_state.unload_inprog_truck = None
                     st.session_state.unload_inprog_start_time = None
                     st.session_state.unload_inprog_wearers = 0
@@ -22836,69 +26378,151 @@ elif st.session_state.active_screen == "LOAD":
         load_left_col, load_main_col, load_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
 
     with load_left_col:
-        st.markdown(
+        components.html(
             """
-            <style>
-                [data-testid="stExpander"] details > summary,
-                [data-testid="stExpander"] details > summary * {
-                    color: #e2e8f0 !important;
-                    -webkit-text-fill-color: #e2e8f0 !important;
-                    opacity: 1 !important;
-                    font-weight: 800 !important;
-                }
-                [data-testid="stExpander"] details > summary {
-                    background: #0f172a !important;
-                    border: 1px solid rgba(148, 163, 184, 0.46) !important;
-                    border-radius: 10px !important;
-                }
-                [data-testid="stExpander"] details > summary svg {
-                    color: #e2e8f0 !important;
-                    fill: #e2e8f0 !important;
-                    stroke: #e2e8f0 !important;
-                }
-                [data-testid="stExpander"] details > div[role="region"] {
-                    background: rgba(2, 6, 23, 0.58) !important;
-                    border-left: 1px solid rgba(148, 163, 184, 0.28) !important;
-                    border-right: 1px solid rgba(148, 163, 184, 0.28) !important;
-                    border-bottom: 1px solid rgba(148, 163, 184, 0.28) !important;
-                    border-radius: 0 0 10px 10px !important;
-                }
-            </style>
+            <script>
+            (function() {
+                try {
+                    const root = window.parent.document;
+                    const styleId = 'load-action-layout-style';
+                    let styleEl = root.getElementById(styleId);
+                    if (!styleEl) {
+                        styleEl = root.createElement('style');
+                        styleEl.id = styleId;
+                        root.head.appendChild(styleEl);
+                    }
+                    styleEl.textContent = `
+                        .st-key-load_set_dust_clothes_toggle,
+                        .st-key-load_open_audit_fleet_screen,
+                        .st-key-load_set_next_up_toggle,
+                        .st-key-load_show_off_dialog_toggle {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                        }
+                        .st-key-load_set_dust_clothes_toggle > div[data-testid="stButton"],
+                        .st-key-load_open_audit_fleet_screen > div[data-testid="stButton"],
+                        .st-key-load_set_next_up_toggle > div[data-testid="stButton"],
+                        .st-key-load_show_off_dialog_toggle > div[data-testid="stButton"] {
+                            margin: 0 !important;
+                        }
+                        .st-key-load_set_dust_clothes_toggle button,
+                        .st-key-load_open_audit_fleet_screen button,
+                        .st-key-load_set_next_up_toggle button,
+                        .st-key-load_show_off_dialog_toggle button {
+                            min-height: 44px !important;
+                            font-weight: 850 !important;
+                        }
+                        .st-key-load_set_dust_clothes_toggle,
+                        .st-key-load_open_audit_fleet_screen,
+                        .st-key-load_set_next_up_toggle,
+                        .st-key-load_show_off_dialog_toggle {
+                            margin: 0 0 0.50rem 0 !important;
+                        }
+                        @media (max-width: 980px) {
+                            [data-testid="stMainBlockContainer"] [class*="st-key-load_set_dust_clothes_toggle"],
+                            [data-testid="stMainBlockContainer"] [class*="st-key-load_open_audit_fleet_screen"],
+                            [data-testid="stMainBlockContainer"] [class*="st-key-load_set_next_up_toggle"],
+                            [data-testid="stMainBlockContainer"] [class*="st-key-load_show_off_dialog_toggle"] {
+                                margin: 0 0 0.5rem 0 !important;
+                                padding: 0 !important;
+                            }
+                            [data-testid="stMainBlockContainer"] .page-heading-load-management {
+                                display: flex !important;
+                                align-items: center !important;
+                                justify-content: center !important;
+                                margin: 0.32rem auto 0.52rem auto !important;
+                            }
+                            [data-testid="stMainBlockContainer"] .page-heading-load-management,
+                            [data-testid="stMainBlockContainer"] .page-heading-load-management * {
+                                text-align: center !important;
+                            }
+                            .page-heading-load-management {
+                                margin: 0.08rem auto 0.34rem auto !important;
+                                justify-content: center !important;
+                                margin-left: auto !important;
+                                margin-right: auto !important;
+                            }
+                        }
+                        [data-testid="stExpander"] details > summary,
+                        [data-testid="stExpander"] details > summary * {
+                            color: #e2e8f0 !important;
+                            -webkit-text-fill-color: #e2e8f0 !important;
+                            opacity: 1 !important;
+                            font-weight: 800 !important;
+                        }
+                        [data-testid="stExpander"] details > summary {
+                            background: #0f172a !important;
+                            border: 1px solid rgba(148, 163, 184, 0.46) !important;
+                            border-radius: 10px !important;
+                        }
+                        [data-testid="stExpander"] details > summary svg {
+                            color: #e2e8f0 !important;
+                            fill: #e2e8f0 !important;
+                            stroke: #e2e8f0 !important;
+                        }
+                        [data-testid="stExpander"] details > div[role="region"] {
+                            background: rgba(2, 6, 23, 0.58) !important;
+                            border-left: 1px solid rgba(148, 163, 184, 0.28) !important;
+                            border-right: 1px solid rgba(148, 163, 184, 0.28) !important;
+                            border-bottom: 1px solid rgba(148, 163, 184, 0.28) !important;
+                            border-radius: 0 0 10px 10px !important;
+                        }
+                    `;
+                } catch (e) {}
+            })();
+            </script>
             """,
-            unsafe_allow_html=True,
+            height=0,
+            width=0,
         )
         if "load_dust_clothes_dialog_open" not in st.session_state:
             st.session_state["load_dust_clothes_dialog_open"] = False
         if "load_next_up_dialog_open" not in st.session_state:
             st.session_state["load_next_up_dialog_open"] = False
+        if "load_show_off_dialog_open" not in st.session_state:
+            st.session_state["load_show_off_dialog_open"] = False
 
         dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
 
         if not dust_clothes_set_today:
-            st.markdown(
+            components.html(
                 """
-                <style>
-                @keyframes loadDustNeedsSetPulse {
-                    0%, 100% {
-                        box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0);
-                    }
-                    50% {
-                        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.95), 0 0 0 8px rgba(250, 204, 21, 0.16);
-                    }
-                }
-                .st-key-load_set_dust_clothes_toggle button,
-                [data-testid="stButton"] button[aria-label="Set Dust Clothes"] {
-                    border: 2px solid rgba(250, 204, 21, 0.95) !important;
-                    outline: 2px solid rgba(250, 204, 21, 0.55) !important;
-                    outline-offset: 1px !important;
-                    animation: loadDustNeedsSetPulse 1.25s ease-in-out infinite !important;
-                }
-                </style>
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const styleId = 'load-dust-pulse-style';
+                        let styleEl = root.getElementById(styleId);
+                        if (!styleEl) {
+                            styleEl = root.createElement('style');
+                            styleEl.id = styleId;
+                            root.head.appendChild(styleEl);
+                        }
+                        styleEl.textContent = `
+                            @keyframes loadDustNeedsSetPulse {
+                                0%, 100% { box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0); }
+                                50% { box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.95), 0 0 0 8px rgba(250, 204, 21, 0.16); }
+                            }
+                            .st-key-load_set_dust_clothes_toggle button,
+                            [data-testid="stButton"] button[aria-label="Set Dust Clothes"] {
+                                border: 2px solid rgba(250, 204, 21, 0.95) !important;
+                                outline: 2px solid rgba(250, 204, 21, 0.55) !important;
+                                outline-offset: 1px !important;
+                                animation: loadDustNeedsSetPulse 1.25s ease-in-out infinite !important;
+                            }
+                        `;
+                    } catch (e) {}
+                })();
+                </script>
                 """,
-                unsafe_allow_html=True,
+                height=0,
+                width=0,
             )
 
         dust_button_label = "Edit Dust Clothes" if dust_clothes_set_today else "Set Dust Clothes"
+        if is_mobile_load:
+            render_page_heading("Load Management")
+            _compress_mobile_notice_to_heading_gap("load-management")
         if st.button(dust_button_label, width="stretch", key="load_set_dust_clothes_toggle"):
             st.session_state["load_dust_clothes_dialog_open"] = True
             st.rerun()
@@ -23012,32 +26636,73 @@ elif st.session_state.active_screen == "LOAD":
             current_next_up_num = None
 
         if (current_next_up_num is None) and bool(true_available):
-            st.markdown(
+            components.html(
                 """
-                <style>
-                @keyframes loadNextUpNeedsSetPulse {
-                    0%, 100% {
-                        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0);
-                    }
-                    50% {
-                        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.95), 0 0 0 8px rgba(59, 130, 246, 0.16);
-                    }
-                }
-                .st-key-load_set_next_up_toggle button,
-                [data-testid="stButton"] button[aria-label="Set Next Up"] {
-                    border: 2px solid rgba(59, 130, 246, 0.95) !important;
-                    outline: 2px solid rgba(59, 130, 246, 0.55) !important;
-                    outline-offset: 1px !important;
-                    animation: loadNextUpNeedsSetPulse 1.25s ease-in-out infinite !important;
-                }
-                </style>
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const styleId = 'load-next-up-pulse-style';
+                        let styleEl = root.getElementById(styleId);
+                        if (!styleEl) {
+                            styleEl = root.createElement('style');
+                            styleEl.id = styleId;
+                            root.head.appendChild(styleEl);
+                        }
+                        styleEl.textContent = `
+                            @keyframes loadNextUpNeedsSetPulse {
+                                0%, 100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0); }
+                                50% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.95), 0 0 0 8px rgba(59, 130, 246, 0.16); }
+                            }
+                            .st-key-load_set_next_up_toggle button,
+                            [data-testid="stButton"] button[aria-label="Set Next Up"] {
+                                border: 2px solid rgba(59, 130, 246, 0.95) !important;
+                                outline: 2px solid rgba(59, 130, 246, 0.55) !important;
+                                outline-offset: 1px !important;
+                                animation: loadNextUpNeedsSetPulse 1.25s ease-in-out infinite !important;
+                            }
+                        `;
+                    } catch (e) {}
+                })();
+                </script>
                 """,
-                unsafe_allow_html=True,
+                height=0,
+                width=0,
             )
 
         if st.button("Set Next Up", width="stretch", key="load_set_next_up_toggle"):
             st.session_state["load_next_up_dialog_open"] = True
             st.rerun()
+
+        if st.button("Show Off", width="stretch", key="load_show_off_dialog_toggle"):
+            st.session_state["load_show_off_dialog_open"] = True
+            st.rerun()
+
+        if st.session_state.get("load_show_off_dialog_open"):
+            def _dismiss_load_show_off_dialog():
+                st.session_state["load_show_off_dialog_open"] = False
+
+            @st.dialog("Off Trucks Today", width="small", on_dismiss=_dismiss_load_show_off_dialog)
+            def _render_load_show_off_dialog():
+                if off_today_list:
+                    st.caption(f"{len(off_today_list)} truck(s) scheduled Off today")
+                    st.markdown(
+                        "<div style='display:flex; flex-wrap:wrap; gap:0.42rem;'>"
+                        + "".join(
+                            f"<span style='display:inline-flex; align-items:center; justify-content:center; min-width:52px; padding:0.34rem 0.6rem; border-radius:999px; border:1px solid rgba(148,163,184,0.45); background:rgba(30,41,59,0.78); font-weight:800;'>#{int(t)}</span>"
+                            for t in off_today_list
+                        )
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption("No trucks are scheduled Off today.")
+
+                if st.button("Close", width="stretch", key="load_show_off_dialog_close"):
+                    st.session_state["load_show_off_dialog_open"] = False
+                    st.rerun()
+
+            _render_load_show_off_dialog()
 
         if current_next_up_num is not None:
             st.caption(f"Current Next Up: Truck {int(current_next_up_num)}")
@@ -23114,7 +26779,9 @@ elif st.session_state.active_screen == "LOAD":
         remaining_count = len(remaining_trucks)
 
     with load_main_col:
-        render_page_heading("Load Management")
+        if not is_mobile_load:
+            render_page_heading("Load Management")
+            _compress_load_heading_to_actions_gap()
 
         def _render_load_unloaded_truck_buttons(key_prefix: str):
             unloaded_trucks = [int(t) for t in status_unloaded_trucks]
@@ -23156,10 +26823,6 @@ elif st.session_state.active_screen == "LOAD":
             st.caption("Unloaded trucks")
             _render_load_unloaded_truck_buttons("load_unloaded_trucks_inprog")
         else:
-            st.markdown(
-                "<div style='text-align:center; font-size:1.28rem; font-weight:900; letter-spacing:0.03em; margin:0 0 4px 0;'>Start loading</div>",
-                unsafe_allow_html=True,
-            )
             if len(true_available) == 0:
                 if cleaned_list:
                     if off_today_list:
@@ -23206,13 +26869,9 @@ elif st.session_state.active_screen == "LOAD":
 
         st.divider()
         now_local = _now_local()
-        pace_shift_view, shift_name, shift_start, shift_end, shift_window_label, load_day_started = _resolve_pace_shift_selection(
-            select_key="load_pace_shift_view",
-            last_auto_key="load_pace_shift_last_auto",
-            now_local=now_local,
-            label="Pace Shift View",
-            use_sidebar=False,
-        )
+        shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_pace_shift_window(now_local)
+        st.session_state["load_pace_shift_view"] = str(shift_name)
+        st.session_state["load_pace_shift_last_auto"] = str(shift_name)
         avg_per_truck_seconds = _pace_avg_seconds_for_cards()
         pace_avg_source_name = _pace_avg_source_label()
         pace_loader_baseline_count, pace_loader_active_count, pace_loader_multiplier = _pace_loader_settings()
@@ -23300,6 +26959,8 @@ elif st.session_state.active_screen == "LOAD":
             pace_shift_floor_avg_seconds = max(1, int(round(effective_shift_seconds / int(scheduled_total))))
 
         pace_calc_available = avg_per_truck_seconds is not None
+        pace_mobile_docked = bool(is_mobile_load)
+        pace_mobile_dock_class = " load-pace-mobile-dock" if pace_mobile_docked else ""
         pace_header_gradient = "linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2))"
         pace_border_style = "1px solid rgba(148,163,184,0.35)"
         pace_header_value = "N/A"
@@ -23366,11 +27027,6 @@ elif st.session_state.active_screen == "LOAD":
         st.markdown(
             (
                 "<style>"
-                ".st-key-load_pace_shift_view{margin:0 0 8px auto !important;max-width:min(190px,100%);}"
-                ".st-key-load_pace_shift_view [data-testid='stSelectbox'] > div{margin-bottom:0 !important;}"
-                ".st-key-load_pace_shift_view [data-baseweb='select'] > div{min-height:34px !important;background:rgba(15,23,42,0.8) !important;border:1px solid rgba(148,163,184,0.58) !important;border-radius:10px !important;}"
-                ".st-key-load_pace_shift_view [data-baseweb='select'] *{color:#e2e8f0 !important;-webkit-text-fill-color:#e2e8f0 !important;}"
-                "@media (max-width: 700px){.st-key-load_pace_shift_view{margin:0 0 8px 0 !important;max-width:min(160px,100%);}}"
                 ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
                 ".load-pace-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;text-align:left;user-select:none;}"
                 ".load-pace-toggle-hit{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;cursor:pointer;}"
@@ -23380,8 +27036,13 @@ elif st.session_state.active_screen == "LOAD":
                 ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
                 ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
                 ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
+                "@media (max-width:980px){.load-pace-wrap.load-pace-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}"
+                ".load-pace-wrap.load-pace-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}"
+                ".load-pace-wrap.load-pace-mobile-dock.collapsed{background:transparent !important;}"
+                ".load-pace-wrap.load-pace-mobile-dock .load-pace-body{max-height:min(56vh,460px);overflow:auto;}"
+                ".load-pace-wrap.load-pace-mobile-dock.collapsed .load-pace-body{max-height:0 !important;overflow:hidden;}}"
                 "</style>"
-                f"<div class='load-pace-wrap' data-load-pace-card='1' style='border:{pace_border_style};'>"
+                f"<div class='load-pace-wrap{pace_mobile_dock_class}' data-load-pace-card='1' style='border:{pace_border_style};'>"
                 f"  <div class='load-pace-label' data-load-pace-header='1' style='background:{pace_header_gradient};'>"
                 "    <span class='load-pace-toggle-hit' data-load-pace-toggle-hit='1' role='button' tabindex='0'>"
                 f"      <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
@@ -23459,25 +27120,26 @@ elif st.session_state.active_screen == "LOAD":
         )
 
     with load_right_col:
-        with st.expander(off_header, expanded=(not is_mobile_load)):
-            off_rows_html = "".join(
-                (
-                    f"<tr style='background:{'rgba(148,163,184,0.10)' if idx % 2 == 0 else 'rgba(148,163,184,0.22)'};'>"
-                    f"<td style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:700;'>{int(truck)}</td></tr>"
+        if not is_mobile_load:
+            with st.expander(off_header, expanded=True):
+                off_rows_html = "".join(
+                    (
+                        f"<tr style='background:{'rgba(148,163,184,0.10)' if idx % 2 == 0 else 'rgba(148,163,184,0.22)'};'>"
+                        f"<td style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:700;'>{int(truck)}</td></tr>"
+                    )
+                    for idx, truck in enumerate(off_today_list)
                 )
-                for idx, truck in enumerate(off_today_list)
-            )
-            st.markdown(
-                (
-                    "<table style='width:100%; border-collapse:collapse; table-layout:fixed;'>"
-                    "<thead>"
-                    "<tr><th style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:800;'>Truck</th></tr>"
-                    "</thead>"
-                    f"<tbody>{off_rows_html}</tbody>"
-                    "</table>"
-                ),
-                unsafe_allow_html=True,
-            )
+                st.markdown(
+                    (
+                        "<table style='width:100%; border-collapse:collapse; table-layout:fixed;'>"
+                        "<thead>"
+                        "<tr><th style='text-align:center; padding:6px 8px; border:1px solid rgba(148,163,184,0.35); font-weight:800;'>Truck</th></tr>"
+                        "</thead>"
+                        f"<tbody>{off_rows_html}</tbody>"
+                        "</table>"
+                    ),
+                    unsafe_allow_html=True,
+                )
 
 # --------------------------
 # Audit Fleet
@@ -23502,9 +27164,15 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         unsafe_allow_html=True,
     )
 
-    render_page_heading("Auditing - Removal Requests")
+    render_page_heading("Auditing")
 
-    audit_left_col, audit_main_col, audit_right_col = st.columns([1.05, 3.15, 0.8], gap="large")
+    is_mobile_audit = _is_mobile_client()
+    if is_mobile_audit:
+        audit_left_col = st.container()
+        audit_main_col = st.container()
+        audit_right_col = st.container()
+    else:
+        audit_left_col, audit_main_col, audit_right_col = st.columns([1.05, 3.15, 0.8], gap="large")
 
     fleet_audit_trucks = sorted(
         (
@@ -23515,37 +27183,50 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         )
         & {int(t) for t in FLEET}
     )
+    all_fleet_audit_trucks = sorted({int(t) for t in FLEET})
+    audit_show_all_dialog_key = "audit_fleet_show_all_dialog_open"
+    if audit_show_all_dialog_key not in st.session_state:
+        st.session_state[audit_show_all_dialog_key] = False
+
     selected_audit_truck = st.session_state.get("audit_fleet_selected_truck")
     try:
         selected_audit_truck_num = int(selected_audit_truck) if selected_audit_truck is not None else None
     except Exception:
         selected_audit_truck_num = None
 
-    if selected_audit_truck_num not in fleet_audit_trucks:
+    if selected_audit_truck_num not in all_fleet_audit_trucks:
         selected_audit_truck_num = None
         st.session_state.audit_fleet_selected_truck = None
 
     with audit_left_col:
-        _render_audit_left_rail_card(max_items=6, recent_days=7)
-
-        if selected_audit_truck_num is None:
+        if not is_mobile_audit:
+            _render_audit_left_rail_card(max_items=6, recent_days=7)
+        if selected_audit_truck_num is None and (not is_mobile_audit):
             st.caption("Select a truck to start an audit removal request.")
 
     with audit_main_col:
-        if selected_audit_truck_num is None and fleet_audit_trucks:
-            audit_cols_per_row = 4 if _is_mobile_client() else 6
+        if selected_audit_truck_num is None and all_fleet_audit_trucks:
+            audit_cols_per_row = 1 if is_mobile_audit else 6
             audit_button_css: list[str] = [
                 "<style>",
                 ".audit-fleet-truck-grid-note{opacity:0.82;font-size:0.85rem;margin:0.25rem 0 0.5rem 0;}",
             ]
+            audit_grid_entries: list[int | str] = list(fleet_audit_trucks) + ["SHOW_ALL"]
 
-            for start_idx in range(0, len(fleet_audit_trucks), audit_cols_per_row):
-                row_trucks = fleet_audit_trucks[start_idx : start_idx + audit_cols_per_row]
+            for start_idx in range(0, len(audit_grid_entries), audit_cols_per_row):
+                row_trucks = audit_grid_entries[start_idx : start_idx + audit_cols_per_row]
                 row_cols = st.columns(audit_cols_per_row)
                 for col_idx, truck_num in enumerate(row_trucks):
-                    tnum = int(truck_num)
-                    btn_key = f"audit_fleet_pick_{tnum}"
-                    bg, border, fg = _truck_status_colors(tnum)
+                    is_show_all_btn = str(truck_num) == "SHOW_ALL"
+                    if is_show_all_btn:
+                        btn_key = "audit_fleet_pick_show_all"
+                        btn_label = "Show All"
+                        bg, border, fg = ("#1f2937", "#64748b", "#e2e8f0")
+                    else:
+                        tnum = int(truck_num)
+                        btn_key = f"audit_fleet_pick_{tnum}"
+                        btn_label = str(tnum)
+                        bg, border, fg = _truck_status_colors(tnum)
 
                     audit_button_css.append(
                         (
@@ -23584,7 +27265,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                             f".st-key-{btn_key} button p,.st-key-{btn_key} button span{{"
                             f"color:{fg} !important;"
                             "font-weight:900 !important;"
-                            "font-size:1.55rem !important;"
+                            f"font-size:{'1.05rem' if is_show_all_btn else '1.55rem'} !important;"
                             "line-height:1 !important;"
                             "margin:0 !important;"
                             "padding:0 !important;"
@@ -23594,12 +27275,38 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                     )
 
                     with row_cols[col_idx]:
-                        if st.button(str(tnum), key=btn_key, width="stretch", type="primary"):
-                            st.session_state.audit_fleet_selected_truck = tnum
+                        if st.button(btn_label, key=btn_key, width="stretch", type="primary"):
+                            if is_show_all_btn:
+                                st.session_state[audit_show_all_dialog_key] = True
+                            else:
+                                st.session_state.audit_fleet_selected_truck = int(tnum)
                             st.rerun()
 
             audit_button_css.append("</style>")
             st.markdown("".join(audit_button_css), unsafe_allow_html=True)
+
+            if st.session_state.get(audit_show_all_dialog_key):
+                def _dismiss_audit_show_all_dialog():
+                    st.session_state[audit_show_all_dialog_key] = False
+
+                @st.dialog("Audit Any Fleet Truck", width="large", on_dismiss=_dismiss_audit_show_all_dialog)
+                def _render_audit_show_all_dialog():
+                    st.caption("Choose any fleet truck to open its audit removal request panel.")
+                    picked_truck = render_numeric_truck_buttons(
+                        all_fleet_audit_trucks,
+                        "audit_fleet_show_all_pick",
+                        default_cols=(3 if is_mobile_audit else 6),
+                    )
+                    if picked_truck is not None:
+                        st.session_state.audit_fleet_selected_truck = int(picked_truck)
+                        st.session_state[audit_show_all_dialog_key] = False
+                        st.rerun()
+
+                    if st.button("Close", width="stretch", key="audit_fleet_show_all_close"):
+                        st.session_state[audit_show_all_dialog_key] = False
+                        st.rerun()
+
+                _render_audit_show_all_dialog()
 
     if selected_audit_truck_num is not None:
         source_key = "LOAD_FLEET"
@@ -23608,46 +27315,72 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         current_applied_day_num = _normalize_load_day_num(_current_ship_day_num())
         inferred_loaded_day_num = _audit_loaded_day_num_from_applied(current_applied_day_num)
 
-        with audit_left_col:
-            if st.button("Change Truck", width="stretch", key="audit_fleet_change_truck"):
-                st.session_state.audit_fleet_selected_truck = None
-                st.rerun()
+        if is_mobile_audit:
+            with audit_main_col:
+                st.markdown(
+                    (
+                        "<div style='text-align:center; font-size:1.2rem; font-weight:900; letter-spacing:0.05em; "
+                        "margin:0.15rem 0 0.45rem 0;'>"
+                        f"Truck {int(selected_audit_truck_num)}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if st.button("Change Truck", width="stretch", key="audit_fleet_change_truck"):
+                    st.session_state.audit_fleet_selected_truck = None
+                    st.rerun()
+                _render_audit_capture_panel(
+                    int(selected_audit_truck_num),
+                    show_header=False,
+                    source=source_key,
+                    show_note_and_warning_inputs=True,
+                    show_active_warnings_top=False,
+                )
+        else:
+            with audit_left_col:
+                if st.button("Change Truck", width="stretch", key="audit_fleet_change_truck"):
+                    st.session_state.audit_fleet_selected_truck = None
+                    st.rerun()
 
-            st.checkbox(
-                "Warn next load",
-                value=bool(st.session_state.get(warn_next_load_key, False)),
-                help=(
-                    f"Triggers a warning on the next load when this truck is loaded on Day {int(inferred_loaded_day_num)}."
-                    if inferred_loaded_day_num is not None
-                    else "Triggers a warning on the next load for this truck."
-                ),
-                key=warn_next_load_key,
-            )
-            st.text_input(
-                "Note (optional)",
-                key=note_key,
-                help="Optional detail saved with this remove request.",
-            )
+                st.checkbox(
+                    "Warn next load",
+                    value=bool(st.session_state.get(warn_next_load_key, False)),
+                    help=(
+                        f"Triggers a warning on the next load when this truck is loaded on Day {int(inferred_loaded_day_num)}."
+                        if inferred_loaded_day_num is not None
+                        else "Triggers a warning on the next load for this truck."
+                    ),
+                    key=warn_next_load_key,
+                )
+                st.text_input(
+                    "Note (optional)",
+                    key=note_key,
+                    help="Optional detail saved with this remove request.",
+                )
 
-        with audit_main_col:
-            st.markdown(
-                (
-                    "<div style='text-align:center; font-size:1.2rem; font-weight:900; letter-spacing:0.05em; "
-                    "margin:0.4rem 0 0.5rem 0;'>"
-                    f"Truck {int(selected_audit_truck_num)}"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
-            )
-            _render_audit_capture_panel(
-                int(selected_audit_truck_num),
-                show_header=False,
-                source=source_key,
-                show_note_and_warning_inputs=False,
-            )
+            with audit_main_col:
+                st.markdown(
+                    (
+                        "<div style='text-align:center; font-size:1.2rem; font-weight:900; letter-spacing:0.05em; "
+                        "margin:0.4rem 0 0.5rem 0;'>"
+                        f"Truck {int(selected_audit_truck_num)}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                _render_audit_capture_panel(
+                    int(selected_audit_truck_num),
+                    show_header=False,
+                    source=source_key,
+                    show_note_and_warning_inputs=False,
+                )
 
     with audit_right_col:
         st.empty()
+
+    if is_mobile_audit:
+        st.markdown("<div style='height:86px;'></div>", unsafe_allow_html=True)
+        _render_mobile_audit_dock_card(max_items=6, recent_days=7, expanded=False)
 
 
 # --------------------------

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.7.1 - 2026-04-07
+
+Ordered list of final changes included in this release:
+
+1. Updated app metadata release to **v1.7.1** with release date **20260407**.
+2. Added mobile gesture support for the sidebar: swipe-left closes, and left-edge swipe-right opens.
+3. Improved mobile sidebar swipe reliability (wider edge capture, tolerant thresholds, and drag-open handling).
+4. Prevented immediate sidebar re-close after swipe-open by adding a short outside-tap suppression window.
+5. Updated mobile dock cards so expanded state is opaque and collapsed state is transparent.
+6. Updated deployment defaults/tags to **v1.7.1** in `docker-compose.yml`, `docker-compose.portainer.yml`, and `docker-entrypoint.sh`.
+7. Updated README release/deployment references and `requirements.txt` baseline label to **v1.7.1**.
+
 ## v1.7.0 - 2026-04-06
 
 Ordered list of final changes included in this release:

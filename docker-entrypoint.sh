@@ -5,7 +5,7 @@ set -eu
 APP_PATH=""
 
 : "${APP_FILE:=app_unloadv1.7.py}"
-: "${APP_VERSION:=1.7.0}"
+: "${APP_VERSION:=1.7.1}"
 if [ -f "${APP_FILE}" ]; then
   APP_PATH="${APP_FILE}"
 fi

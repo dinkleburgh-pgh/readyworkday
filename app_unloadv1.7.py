@@ -175,6 +175,16 @@ DEFAULT_SHORT_ITEMS = [
     "Other",
 ]
 
+HIDDEN_LEGACY_SHORT_ITEMS = {
+    "Mats",
+    "Aprons",
+    "Trash Bags",
+    "Soap",
+    "Paper Towels",
+    "Toilet Paper",
+    "Towels",
+}
+
 SHORTS_MODE_EXCEL = "Excel Sheet (current)"
 SHORTS_MODE_BUTTONS = "Button Selection"
 SHORTS_MODE_DISABLE = "Disable (manual input)"
@@ -1591,6 +1601,7 @@ def _append_audit_history_entry(
     *,
     truck: int,
     route_override: int | None = None,
+    applied_day_override: int | None = None,
     item_label: str,
     qty: int,
     note: str = "",
@@ -1608,7 +1619,9 @@ def _append_audit_history_entry(
     ts_iso = datetime.now().isoformat()
 
     run_date_key = _current_run_date_iso()
-    applied_day_num = _normalize_load_day_num(_current_ship_day_num())
+    applied_day_num = _normalize_load_day_num(applied_day_override)
+    if applied_day_num is None:
+        applied_day_num = _normalize_load_day_num(_current_ship_day_num())
     loaded_day_num = _audit_loaded_day_num_from_applied(applied_day_num)
     route_targets = _truck_route_targets()
     try:
@@ -16132,11 +16145,6 @@ def _shorts_excel_item_options(existing_rows: list[dict] | None = None) -> list[
         if label not in options:
             options.append(label)
 
-    for legacy_item in DEFAULT_SHORT_ITEMS:
-        legacy_label = str(legacy_item or "").strip()
-        if legacy_label and legacy_label not in options:
-            options.append(legacy_label)
-
     for row in (existing_rows or []):
         if not isinstance(row, dict):
             continue
@@ -16144,7 +16152,41 @@ def _shorts_excel_item_options(existing_rows: list[dict] | None = None) -> list[
         if item_value and item_value not in options:
             options.append(item_value)
 
-    return options
+    filtered_options: list[str] = []
+    for option in options:
+        option_text = str(option or "").strip()
+        if option_text in HIDDEN_LEGACY_SHORT_ITEMS:
+            continue
+        filtered_options.append(option_text)
+    return filtered_options
+
+
+def _shorts_recent_item_labels(truck: int, existing_rows: list[dict] | None = None, limit: int = 5) -> list[str]:
+    max_items = max(1, int(limit or 5))
+    seen: set[str] = set()
+    recents: list[str] = []
+
+    def _collect(rows: list[dict] | None):
+        for row in reversed(rows or []):
+            if not isinstance(row, dict):
+                continue
+            item_value = str(row.get("item") or "").strip()
+            if not item_value or item_value == "None":
+                continue
+            if item_value in HIDDEN_LEGACY_SHORT_ITEMS:
+                continue
+            if item_value in seen:
+                continue
+            seen.add(item_value)
+            recents.append(item_value)
+            if len(recents) >= max_items:
+                return
+
+    _collect(existing_rows)
+    if len(recents) < max_items:
+        _collect(st.session_state.get("shorts", {}).get(int(truck), []))
+
+    return recents[:max_items]
 
 def _shorts_button_add_item(truck: int, label: str, qty: int):
     t = int(truck)
@@ -23332,12 +23374,37 @@ elif st.session_state.active_screen == "SUPERVISOR":
     if not ship_dates:
         ship_dates = [run_date + timedelta(days=1)]
 
+    supervisor_dialog_keys = [
+        "sup_dust_clothes_dialog_open",
+        "sup_operations_audit_dialog_open",
+        "sup_operations_view_audits_dialog_open",
+        "sup_comms_history_dialog_open",
+        "sup_pdf_download_dialog_open",
+        "mgmt_dev_shortages_dialog_open",
+        "mgmt_dev_backup_import_dialog_open",
+        "mgmt_dev_direct_import_dialog_open",
+    ]
+    for dialog_key in supervisor_dialog_keys:
+        if dialog_key not in st.session_state:
+            st.session_state[dialog_key] = False
+
+    def _open_supervisor_dialog(target_key: str):
+        for dialog_key in supervisor_dialog_keys:
+            st.session_state[dialog_key] = False
+        st.session_state[target_key] = True
+
+    open_supervisor_dialogs = [
+        dialog_key for dialog_key in supervisor_dialog_keys if bool(st.session_state.get(dialog_key))
+    ]
+    if len(open_supervisor_dialogs) > 1:
+        keep_key = open_supervisor_dialogs[0]
+        for dialog_key in supervisor_dialog_keys:
+            st.session_state[dialog_key] = dialog_key == keep_key
+
     _render_management_section_chip("Operations", "#fed7aa")
+
     configure_load_day_expanded = bool(st.session_state.pop("sup_configure_load_day_open_once", False))
     with st.expander("Configure load day", expanded=configure_load_day_expanded):
-        if "sup_dust_clothes_dialog_open" not in st.session_state:
-            st.session_state["sup_dust_clothes_dialog_open"] = False
-
         current_run_date_raw = st.session_state.get("run_date")
         current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
 
@@ -23427,7 +23494,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
         sup_dust_button_label = "Edit Dust Garments" if sup_dust_clothes_set_today else "Set Dust Clothes"
         if st.button(sup_dust_button_label, width="stretch", key="sup_open_dust_clothes_dialog"):
-            st.session_state["sup_dust_clothes_dialog_open"] = True
+            _open_supervisor_dialog("sup_dust_clothes_dialog_open")
             st.rerun()
 
         if st.session_state.get("sup_dust_clothes_dialog_open"):
@@ -23686,6 +23753,310 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         )
                         st.rerun()
 
+    with st.expander("Audit", expanded=False):
+        audit_action_cols = st.columns([1, 1])
+        with audit_action_cols[0]:
+            if st.button("Audit", width="stretch", key="sup_operations_open_audit_dialog"):
+                _open_supervisor_dialog("sup_operations_audit_dialog_open")
+                st.rerun()
+        with audit_action_cols[1]:
+            if st.button("View Audits", width="stretch", key="sup_operations_open_view_audits_dialog"):
+                _open_supervisor_dialog("sup_operations_view_audits_dialog_open")
+                st.rerun()
+
+    if st.session_state.get("sup_operations_audit_dialog_open"):
+        @st.dialog("Operations Audit", width="small")
+        def _render_sup_operations_audit_dialog():
+            tracked_map = _tracked_items_map()
+            truck_options = sorted(int(t) for t in set(FLEET))
+            load_day_options = [1, 2, 3, 4, 5]
+            category_options = [str(c) for c in tracked_map.keys() if str(c).strip()]
+            if not category_options:
+                category_options = ["General"]
+
+            selected_truck = int(
+                st.selectbox(
+                    "Truck",
+                    options=truck_options,
+                    format_func=lambda t: f"Truck {int(t)}",
+                    key="sup_operations_audit_truck_pick",
+                )
+            )
+            selected_load_day = int(
+                st.selectbox(
+                    "Load day",
+                    options=load_day_options,
+                    format_func=lambda d: f"Day {int(d)}",
+                    key="sup_operations_audit_load_day_pick",
+                )
+            )
+            selected_category = str(
+                st.selectbox(
+                    "Category",
+                    options=category_options,
+                    key="sup_operations_audit_category_pick",
+                )
+            ).strip()
+
+            category_block = tracked_map.get(selected_category)
+            subcategory_options: list[str] = []
+            if isinstance(category_block, dict):
+                for group_name, group_items in category_block.items():
+                    group_text = str(group_name or "").strip()
+                    if isinstance(group_items, list) and group_items:
+                        for item_name in group_items:
+                            item_text = str(item_name or "").strip()
+                            if group_text and item_text:
+                                subcategory_options.append(f"{group_text} - {item_text}")
+                            elif item_text:
+                                subcategory_options.append(item_text)
+                    elif group_text:
+                        subcategory_options.append(group_text)
+            elif isinstance(category_block, list):
+                subcategory_options = [str(item_name).strip() for item_name in category_block if str(item_name).strip()]
+
+            if not subcategory_options:
+                subcategory_options = ["General"]
+
+            selected_subcategory = str(
+                st.selectbox(
+                    "Sub Category",
+                    options=subcategory_options,
+                    key="sup_operations_audit_subcategory_pick",
+                )
+            ).strip()
+
+            selected_amount = int(
+                st.number_input(
+                    "Amount",
+                    min_value=1,
+                    step=1,
+                    value=1,
+                    key="sup_operations_audit_amount_pick",
+                )
+            )
+
+            if st.button("Add Audit Request", width="stretch", key="sup_operations_audit_add"):
+                if not selected_category:
+                    st.warning("Select a category.")
+                elif not selected_subcategory:
+                    st.warning("Select a sub category.")
+                else:
+                    item_label = str(selected_category)
+                    if str(selected_subcategory).lower() != "general":
+                        item_label = f"{selected_category} - {selected_subcategory}"
+
+                    if _append_audit_history_entry(
+                        truck=int(selected_truck),
+                        applied_day_override=int(selected_load_day),
+                        item_label=item_label,
+                        qty=int(selected_amount),
+                        source="SUPERVISOR_OPERATIONS",
+                    ):
+                        st.session_state["sup_operations_audit_dialog_open"] = False
+                        _queue_management_confirmation(
+                            f"Audit entry added for Truck {int(selected_truck)} on Day {int(selected_load_day)}."
+                        )
+                        st.rerun()
+                    else:
+                        st.error("Could not save audit entry.")
+
+            if st.button("Close", width="stretch", key="sup_operations_audit_close"):
+                st.session_state["sup_operations_audit_dialog_open"] = False
+                st.rerun()
+
+        _render_sup_operations_audit_dialog()
+
+    if st.session_state.get("sup_operations_view_audits_dialog_open"):
+        @st.dialog("View Audits", width="large")
+        def _render_sup_operations_view_audits_dialog():
+            entries = _load_audit_history()
+            if not entries:
+                st.info("No audit entries found.")
+                if st.button("Close", width="stretch", key="sup_operations_view_audits_close_empty"):
+                    st.session_state["sup_operations_view_audits_dialog_open"] = False
+                    st.rerun()
+                return
+
+            tracked_map = _tracked_items_map()
+            truck_options = sorted(int(t) for t in set(FLEET))
+            load_day_options = [1, 2, 3, 4, 5]
+            category_options = [str(c) for c in tracked_map.keys() if str(c).strip()]
+            if not category_options:
+                category_options = ["General"]
+
+            def _entry_label(entry: dict) -> str:
+                ts = str(entry.get("ts") or "")[:19].replace("T", " ")
+                truck_val = int(entry.get("truck") or 0)
+                item_val = str(entry.get("item") or "")
+                qty_val = int(entry.get("qty") or 0)
+                source_val = str(entry.get("source") or "")
+                return f"{ts} | Truck {truck_val} | {item_val} | Qty {qty_val} | {source_val}"
+
+            entry_ids = [str(e.get("entry_id") or "") for e in entries if str(e.get("entry_id") or "").strip()]
+            selected_entry_id = st.selectbox(
+                "Audit entry",
+                options=entry_ids,
+                format_func=lambda eid: _entry_label(next((e for e in entries if str(e.get("entry_id") or "") == str(eid)), {})),
+                key="sup_operations_view_audits_entry_pick",
+            )
+
+            selected_idx = next(
+                (idx for idx, e in enumerate(entries) if str(e.get("entry_id") or "") == str(selected_entry_id)),
+                -1,
+            )
+            if selected_idx < 0:
+                st.warning("Could not load the selected entry.")
+                if st.button("Close", width="stretch", key="sup_operations_view_audits_close_badpick"):
+                    st.session_state["sup_operations_view_audits_dialog_open"] = False
+                    st.rerun()
+                return
+
+            selected_entry = dict(entries[selected_idx])
+            existing_item = str(selected_entry.get("item") or "").strip()
+            existing_category = existing_item
+            existing_subcategory = "General"
+            if " - " in existing_item:
+                existing_category, existing_subcategory = existing_item.split(" - ", 1)
+            existing_category = str(existing_category or "").strip() or "General"
+            existing_subcategory = str(existing_subcategory or "").strip() or "General"
+            if existing_category not in category_options:
+                category_options = [existing_category] + category_options
+
+            edit_truck = int(
+                st.selectbox(
+                    "Truck",
+                    options=truck_options,
+                    index=truck_options.index(int(selected_entry.get("truck") or truck_options[0])) if int(selected_entry.get("truck") or truck_options[0]) in truck_options else 0,
+                    format_func=lambda t: f"Truck {int(t)}",
+                    key=f"sup_operations_view_audits_truck_{selected_entry_id}",
+                )
+            )
+            current_applied_day = _normalize_load_day_num(selected_entry.get("applied_day_num"))
+            if current_applied_day is None:
+                current_applied_day = _normalize_load_day_num(selected_entry.get("load_day_num"))
+            if current_applied_day is None:
+                current_applied_day = 1
+            edit_load_day = int(
+                st.selectbox(
+                    "Load day",
+                    options=load_day_options,
+                    index=load_day_options.index(int(current_applied_day)) if int(current_applied_day) in load_day_options else 0,
+                    format_func=lambda d: f"Day {int(d)}",
+                    key=f"sup_operations_view_audits_day_{selected_entry_id}",
+                )
+            )
+
+            edit_category = str(
+                st.selectbox(
+                    "Category",
+                    options=category_options,
+                    index=category_options.index(existing_category) if existing_category in category_options else 0,
+                    key=f"sup_operations_view_audits_category_{selected_entry_id}",
+                )
+            ).strip()
+
+            category_block = tracked_map.get(edit_category)
+            subcategory_options: list[str] = []
+            if isinstance(category_block, dict):
+                for group_name, group_items in category_block.items():
+                    group_text = str(group_name or "").strip()
+                    if isinstance(group_items, list) and group_items:
+                        for item_name in group_items:
+                            item_text = str(item_name or "").strip()
+                            if group_text and item_text:
+                                subcategory_options.append(f"{group_text} - {item_text}")
+                            elif item_text:
+                                subcategory_options.append(item_text)
+                    elif group_text:
+                        subcategory_options.append(group_text)
+            elif isinstance(category_block, list):
+                subcategory_options = [str(item_name).strip() for item_name in category_block if str(item_name).strip()]
+            if not subcategory_options:
+                subcategory_options = ["General"]
+            if existing_subcategory not in subcategory_options:
+                subcategory_options = [existing_subcategory] + subcategory_options
+
+            edit_subcategory = str(
+                st.selectbox(
+                    "Sub Category",
+                    options=subcategory_options,
+                    index=subcategory_options.index(existing_subcategory) if existing_subcategory in subcategory_options else 0,
+                    key=f"sup_operations_view_audits_subcategory_{selected_entry_id}",
+                )
+            ).strip()
+
+            edit_amount = int(
+                st.number_input(
+                    "Amount",
+                    min_value=1,
+                    step=1,
+                    value=max(1, int(_normalize_audit_qty(selected_entry.get("qty")))),
+                    key=f"sup_operations_view_audits_amount_{selected_entry_id}",
+                )
+            )
+            edit_note = st.text_input(
+                "Note",
+                value=str(selected_entry.get("note") or ""),
+                key=f"sup_operations_view_audits_note_{selected_entry_id}",
+            )
+            edit_warn_next = st.checkbox(
+                "Warn next load",
+                value=bool(selected_entry.get("warn_next_load", False)),
+                key=f"sup_operations_view_audits_warn_{selected_entry_id}",
+            )
+
+            edit_cols = st.columns([1, 1])
+            with edit_cols[0]:
+                if st.button("Save Changes", width="stretch", key="sup_operations_view_audits_save"):
+                    updated_item = str(edit_category)
+                    if str(edit_subcategory).lower() != "general":
+                        updated_item = f"{edit_category} - {edit_subcategory}"
+                    selected_entry["truck"] = int(edit_truck)
+                    selected_entry["route"] = int(edit_truck)
+                    selected_entry["item"] = updated_item
+                    selected_entry["qty"] = int(_normalize_audit_qty(edit_amount))
+                    selected_entry["note"] = str(edit_note or "").strip()
+                    selected_entry["warn_next_load"] = bool(edit_warn_next)
+                    selected_entry["load_day_num"] = int(edit_load_day)
+                    selected_entry["applied_day_num"] = int(edit_load_day)
+                    selected_entry["loaded_day_num"] = _audit_loaded_day_num_from_applied(int(edit_load_day))
+                    entries[selected_idx] = selected_entry
+                    if _save_audit_history(entries):
+                        _queue_management_confirmation("Audit entry updated.")
+                        st.rerun()
+                    else:
+                        st.error("Could not save audit changes.")
+            with edit_cols[1]:
+                if st.button("Delete Entry", width="stretch", key="sup_operations_view_audits_delete"):
+                    remaining_entries = [
+                        e for e in entries if str(e.get("entry_id") or "") != str(selected_entry_id)
+                    ]
+                    if _save_audit_history(remaining_entries):
+                        _queue_management_confirmation("Audit entry deleted.")
+                        st.rerun()
+                    else:
+                        st.error("Could not delete audit entry.")
+
+            recent_rows = [
+                {
+                    "ts": str(e.get("ts") or ""),
+                    "truck": int(e.get("truck") or 0),
+                    "item": str(e.get("item") or ""),
+                    "qty": int(e.get("qty") or 0),
+                    "source": str(e.get("source") or ""),
+                }
+                for e in sorted(entries, key=lambda x: str(x.get("ts") or ""), reverse=True)[:12]
+            ]
+            st.caption("Recent audits")
+            st.dataframe(recent_rows, width="stretch", hide_index=True)
+
+            if st.button("Close", width="stretch", key="sup_operations_view_audits_close"):
+                st.session_state["sup_operations_view_audits_dialog_open"] = False
+                st.rerun()
+
+        _render_sup_operations_view_audits_dialog()
+
     _render_management_section_chip("Access and Preferences", "#e9d5ff")
     _render_user_management_dropdown()
 
@@ -23852,7 +24223,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         st.write("##### Message history")
         st.caption("Open message history in a dialog for easier scanning.")
         if st.button("Open communications history", width="stretch", key="mgmt_comms_open_history_dialog"):
-            st.session_state["sup_comms_history_dialog_open"] = True
+            _open_supervisor_dialog("sup_comms_history_dialog_open")
             st.rerun()
 
         if st.session_state.get("sup_comms_history_dialog_open"):
@@ -23910,7 +24281,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
         st.caption("Open report downloads in a focused dialog.")
         if st.button("Open report downloads", width="stretch", key="sup_open_pdf_download_dialog"):
-            st.session_state["sup_pdf_download_dialog_open"] = True
+            _open_supervisor_dialog("sup_pdf_download_dialog_open")
             st.rerun()
 
         if st.session_state.get("sup_pdf_download_dialog_open"):
@@ -24527,8 +24898,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     key="mgmt_dev_open_backup_import_dialog",
                     width="stretch",
                 ):
-                    st.session_state["mgmt_dev_backup_import_dialog_open"] = True
-                    st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+                    _open_supervisor_dialog("mgmt_dev_backup_import_dialog_open")
                     st.rerun()
             with import_c2:
                 if st.button(
@@ -24536,8 +24906,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     key="mgmt_dev_open_direct_import_dialog",
                     width="stretch",
                 ):
-                    st.session_state["mgmt_dev_direct_import_dialog_open"] = True
-                    st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+                    _open_supervisor_dialog("mgmt_dev_direct_import_dialog_open")
                     st.rerun()
 
         with st.expander("4) Audit photo archive", expanded=False):
@@ -24646,6 +25015,237 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                 f"Deleted audit photo archive for {selected_photo_day} ({deleted_rows} record(s), {deleted_files} file(s))."
                             )
                             st.rerun()
+
+        with st.expander("5) Shortages", expanded=False):
+            st.caption("Quick add single shortages or mass-edit shortages for a selected truck.")
+            if st.button(
+                "Add Shortages",
+                width="stretch",
+                key="mgmt_dev_open_shortages_dialog",
+            ):
+                _open_supervisor_dialog("mgmt_dev_shortages_dialog_open")
+                st.rerun()
+
+        if st.session_state.get("mgmt_dev_shortages_dialog_open"):
+            @st.dialog("Development - Add Shortages", width="large")
+            def _render_mgmt_dev_shortages_dialog():
+                def _normalize_rows(raw_rows) -> list[dict]:
+                    if hasattr(raw_rows, "to_dict"):
+                        try:
+                            rows = raw_rows.to_dict("records")
+                        except Exception:
+                            rows = []
+                    elif isinstance(raw_rows, list):
+                        rows = raw_rows
+                    else:
+                        rows = []
+
+                    normalized_rows: list[dict] = []
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        item_val = str(row.get("item") or "").strip()
+                        if not item_val or item_val == "None":
+                            continue
+                        try:
+                            qty_val = int(row.get("qty") or 0)
+                        except Exception:
+                            qty_val = 0
+                        if qty_val <= 0:
+                            continue
+                        normalized_rows.append(
+                            {
+                                "item": item_val,
+                                "qty": int(qty_val),
+                                "note": str(row.get("note") or "").strip(),
+                            }
+                        )
+                    return normalized_rows
+
+                truck_options = sorted(int(t) for t in set(FLEET))
+                if not truck_options:
+                    st.warning("No fleet trucks are configured.")
+                    if st.button("Close", width="stretch", key="mgmt_dev_shortages_dialog_close_no_trucks"):
+                        st.session_state["mgmt_dev_shortages_dialog_open"] = False
+                        st.rerun()
+                    return
+
+                selected_truck = int(
+                    st.selectbox(
+                        "Truck",
+                        options=truck_options,
+                        format_func=lambda t: f"Truck {int(t)}",
+                        key="mgmt_dev_shortages_truck_pick",
+                    )
+                )
+
+                ensure_shorts_model(int(selected_truck))
+
+                rows_store_key = "mgmt_dev_shortages_rows"
+                last_truck_key = "mgmt_dev_shortages_last_truck"
+                if st.session_state.get(last_truck_key) != int(selected_truck):
+                    existing_rows = [
+                        {
+                            "item": str(row.get("item") or "").strip(),
+                            "qty": int(row.get("qty") or 1),
+                            "note": str(row.get("note") or "").strip(),
+                        }
+                        for row in (st.session_state.shorts.get(int(selected_truck), []) or [])
+                        if _short_row_has_item(row)
+                    ]
+                    st.session_state[rows_store_key] = existing_rows or [{"item": "None", "qty": 1, "note": ""}]
+                    st.session_state[last_truck_key] = int(selected_truck)
+
+                item_options = _shorts_excel_item_options(st.session_state.get(rows_store_key) or [])
+                tracked_map = _tracked_items_map()
+                category_options = ["Recents"] + [str(c) for c in tracked_map.keys() if str(c).strip()]
+                if len(category_options) == 1:
+                    category_options.append("General")
+
+                st.write("##### Quick add")
+                quick_cols = st.columns([2, 2, 1])
+                with quick_cols[0]:
+                    quick_category = str(
+                        st.selectbox(
+                            "Category",
+                            options=category_options,
+                            key="mgmt_dev_shortages_quick_category",
+                        )
+                    ).strip()
+                with quick_cols[1]:
+                    if quick_category == "Recents":
+                        quick_subcategory_options = _shorts_recent_item_labels(
+                            int(selected_truck),
+                            existing_rows=st.session_state.get(rows_store_key) or [],
+                            limit=5,
+                        )
+                        if not quick_subcategory_options:
+                            quick_subcategory_options = ["General"]
+                    elif quick_category == "Bulk" and isinstance(tracked_map.get("Bulk"), dict):
+                        quick_subcategory_options = []
+                        for bulk_group, bulk_items in (tracked_map.get("Bulk") or {}).items():
+                            group_text = str(bulk_group or "").strip()
+                            for bulk_item in (bulk_items or []):
+                                item_text = str(bulk_item or "").strip()
+                                if group_text and item_text:
+                                    quick_subcategory_options.append(f"{group_text} - {item_text}")
+                    else:
+                        quick_subcategory_options = [
+                            str(item_name).strip()
+                            for item_name in (tracked_map.get(quick_category) or [])
+                            if str(item_name).strip()
+                        ]
+
+                    if not quick_subcategory_options:
+                        quick_subcategory_options = ["General"]
+
+                    quick_subcategory = str(
+                        st.selectbox(
+                            "Sub Category",
+                            options=quick_subcategory_options,
+                            key="mgmt_dev_shortages_quick_subcategory",
+                        )
+                    ).strip()
+
+                with quick_cols[2]:
+                    quick_qty = int(
+                        st.number_input(
+                            "Qty",
+                            min_value=1,
+                            step=1,
+                            value=1,
+                            key="mgmt_dev_shortages_quick_qty",
+                        )
+                    )
+
+                quick_action_cols = st.columns([1, 1])
+                with quick_action_cols[0]:
+                    if st.button("Quick Add", width="stretch", key="mgmt_dev_shortages_quick_add_btn"):
+                        if not quick_subcategory:
+                            st.warning("Pick a sub category.")
+                        else:
+                            if quick_category == "Recents":
+                                quick_item = quick_subcategory
+                            elif quick_category == "Bulk":
+                                quick_item = f"Bulk - {quick_subcategory}"
+                            elif quick_category == "General":
+                                quick_item = quick_subcategory
+                            else:
+                                quick_item = f"{quick_category} - {quick_subcategory}"
+
+                            if quick_item not in item_options:
+                                item_options.append(quick_item)
+                            _shorts_button_add_item(int(selected_truck), quick_item, int(quick_qty))
+                            refreshed_rows = [
+                                {
+                                    "item": str(row.get("item") or "").strip(),
+                                    "qty": int(row.get("qty") or 1),
+                                    "note": str(row.get("note") or "").strip(),
+                                }
+                                for row in (st.session_state.shorts.get(int(selected_truck), []) or [])
+                                if _short_row_has_item(row)
+                            ]
+                            st.session_state[rows_store_key] = refreshed_rows or [{"item": "None", "qty": 1, "note": ""}]
+                            _queue_management_confirmation(
+                                f"Quick shortage added for Truck {int(selected_truck)}: {quick_item} x{int(quick_qty)}."
+                            )
+                            st.rerun()
+                with quick_action_cols[1]:
+                    if st.button("Reload current truck", width="stretch", key="mgmt_dev_shortages_reload_rows_btn"):
+                        st.session_state[last_truck_key] = None
+                        st.rerun()
+
+                st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+                st.write("##### Mass input")
+
+                edited_rows = st.data_editor(
+                    st.session_state.get(rows_store_key) or [{"item": "None", "qty": 1, "note": ""}],
+                    width="stretch",
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key="mgmt_dev_shortages_editor",
+                    column_config={
+                        "item": st.column_config.SelectboxColumn(
+                            "Item",
+                            options=item_options,
+                            required=False,
+                        ),
+                        "qty": st.column_config.NumberColumn(
+                            "Qty",
+                            min_value=0,
+                            step=1,
+                            required=False,
+                        ),
+                        "note": st.column_config.TextColumn("Note (optional)"),
+                    },
+                )
+                st.session_state[rows_store_key] = _normalize_rows(edited_rows) or [{"item": "None", "qty": 1, "note": ""}]
+
+                mass_action_cols = st.columns([1, 1, 1])
+                with mass_action_cols[0]:
+                    if st.button("Apply mass shortages", width="stretch", key="mgmt_dev_shortages_apply_mass_btn"):
+                        normalized_rows = _normalize_rows(edited_rows)
+                        st.session_state.shorts[int(selected_truck)] = normalized_rows
+                        save_state()
+                        _queue_management_confirmation(
+                            f"Applied {len(normalized_rows)} shortage row(s) to Truck {int(selected_truck)}."
+                        )
+                        st.rerun()
+                with mass_action_cols[1]:
+                    if st.button("Clear truck shortages", width="stretch", key="mgmt_dev_shortages_clear_truck_btn"):
+                        st.session_state.shorts[int(selected_truck)] = []
+                        save_state()
+                        st.session_state[last_truck_key] = None
+                        _queue_management_confirmation(
+                            f"Cleared shortages for Truck {int(selected_truck)}."
+                        )
+                        st.rerun()
+                with mass_action_cols[2]:
+                    if st.button("Close", width="stretch", key="mgmt_dev_shortages_dialog_close"):
+                        st.session_state["mgmt_dev_shortages_dialog_open"] = False
+                        st.rerun()
+
+            _render_mgmt_dev_shortages_dialog()
 
         if st.session_state.get("mgmt_dev_backup_import_dialog_open"):
             def _dismiss_mgmt_dev_backup_import_dialog():

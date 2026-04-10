@@ -1,0 +1,53 @@
+[
+  {
+    "entry_id": "f442d4e8ba31d5bb",
+    "ts": "2026-04-09T02:04:26.460095",
+    "run_date": "2026-04-07",
+    "load_day_num": 4,
+    "applied_day_num": 4,
+    "loaded_day_num": 4,
+    "truck": 59,
+    "route": 59,
+    "item": "4x6 - Blue",
+    "qty": 13,
+    "note": "",
+    "actor": "Nate",
+    "source": "SUPERVISOR_OPERATIONS",
+    "warn_next_load": false,
+    "warn_applied_run_date": null
+  },
+  {
+    "entry_id": "9e0ab92aff4dc276",
+    "ts": "2026-04-09T02:05:07.683268",
+    "run_date": "2026-04-07",
+    "load_day_num": 4,
+    "applied_day_num": 4,
+    "loaded_day_num": 4,
+    "truck": 59,
+    "route": 59,
+    "item": "3x10 - Black",
+    "qty": 12,
+    "note": "",
+    "actor": "Nate",
+    "source": "SUPERVISOR_OPERATIONS",
+    "warn_next_load": false,
+    "warn_applied_run_date": null
+  },
+  {
+    "entry_id": "2c347d7772afda11",
+    "ts": "2026-04-09T02:06:09.366447",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "applied_day_num": 3,
+    "loaded_day_num": 3,
+    "truck": 53,
+    "route": 53,
+    "item": "3x10 - Onyx",
+    "qty": 20,
+    "note": "",
+    "actor": "Nate",
+    "source": "SUPERVISOR_OPERATIONS",
+    "warn_next_load": false,
+    "warn_applied_run_date": null
+  }
+]

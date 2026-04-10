@@ -1,0 +1,79 @@
+[
+  {
+    "entry_id": "197a85a8e209f6a1",
+    "ts": "2026-04-07T05:17:37.284388",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 64,
+    "route": 64,
+    "batch_id": 1,
+    "wearers": 1,
+    "action": "assign"
+  },
+  {
+    "entry_id": "b208d65508df6cf6",
+    "ts": "2026-04-07T05:19:28.309460",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 66,
+    "route": 66,
+    "batch_id": 3,
+    "wearers": 348,
+    "action": "assign"
+  },
+  {
+    "entry_id": "6929584a9fa7f175",
+    "ts": "2026-04-07T05:19:38.229776",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 68,
+    "route": 68,
+    "batch_id": 4,
+    "wearers": 348,
+    "action": "assign"
+  },
+  {
+    "entry_id": "8281ca7f3ffcdfa5",
+    "ts": "2026-04-07T05:22:27.858977",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 69,
+    "route": 69,
+    "batch_id": 5,
+    "wearers": 400,
+    "action": "assign"
+  },
+  {
+    "entry_id": "37732ac047aee97e",
+    "ts": "2026-04-07T05:25:05.645802",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 70,
+    "route": 70,
+    "batch_id": 6,
+    "wearers": 350,
+    "action": "assign"
+  },
+  {
+    "entry_id": "9a1bf76ba0b93268",
+    "ts": "2026-04-07T05:33:06.511954",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 75,
+    "route": 75,
+    "batch_id": 1,
+    "wearers": 1,
+    "action": "assign"
+  },
+  {
+    "entry_id": "c3e1cc9e9cebd3c8",
+    "ts": "2026-04-07T07:08:09.693002",
+    "run_date": "2026-04-07",
+    "load_day_num": 3,
+    "truck": 50,
+    "route": 50,
+    "batch_id": 1,
+    "wearers": 66,
+    "action": "assign"
+  }
+]

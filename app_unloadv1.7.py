@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 7
+_APP_BUILD = 8
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -9405,6 +9405,14 @@ def unload_trucks_for_current_day() -> set[int]:
     }
 
 
+def _route_runs_on_current_load_day(route_num: int) -> bool:
+    try:
+        route_value = int(route_num)
+    except Exception:
+        return False
+    return route_value in {int(t) for t in scheduled_trucks_for_current_load_day()}
+
+
 def current_load_day_completion() -> dict[str, object]:
     scheduled = scheduled_trucks_for_current_load_day()
     loaded_trucks = {int(t) for t in (st.session_state.get("loaded_set") or set())}
@@ -12744,9 +12752,9 @@ def _send_truck_to_shop(truck: int, reason: str = "", load_on: str = ""):
     st.session_state.shop_set.add(t)
     st.session_state.shop_notes[t] = (reason or "").strip()
 
-    off_today_set = {int(tt) for tt in (off_trucks_for_today() or [])}
+    route_runs_today = _route_runs_on_current_load_day(int(t))
     load_on_val = (load_on or "").strip()
-    if t in off_today_set:
+    if not route_runs_today:
         load_on_val = ""
     _set_shop_load_on_route_assignment(t, load_on_val)
 
@@ -14179,9 +14187,8 @@ def _render_shop_load_on_dropdown(
             source_num = int(source_truck)
         except Exception:
             source_num = None
-        off_today_set_for_source = {int(t) for t in (off_trucks_for_today() or [])}
-        if source_num is not None and source_num in off_today_set_for_source:
-            # Off-day routes do not need a Load On assignment.
+        if source_num is not None and not _route_runs_on_current_load_day(int(source_num)):
+            # Routes that do not run today do not need a Load On assignment.
             try:
                 st.session_state.pop(key, None)
             except Exception:
@@ -14636,13 +14643,12 @@ def _assign_truck_to_shop_route(route_num: int, selected_truck: int) -> tuple[bo
     shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
     off_set = {int(t) for t in (st.session_state.get("off_set") or set())}
     loaded_set = {int(t) for t in (st.session_state.get("loaded_set") or set())}
-    off_today_set = {int(t) for t in (off_trucks_for_today() or [])}
     spare_set_now = {int(t) for t in (st.session_state.get("spare_set") or set())}
 
     if route not in shop_set:
         return False, f"Route {route} truck is not currently in Shop."
-    if route in off_today_set:
-        return False, f"Route {route} is scheduled Off today and does not need assignment."
+    if not _route_runs_on_current_load_day(int(route)):
+        return False, f"Route {route} does not run today and does not need assignment."
     if chosen_truck == route:
         return False, "Pick a different truck than the Shop route number."
     if chosen_truck in off_set:
@@ -14764,13 +14770,18 @@ def _render_route_card_assign_dialog_if_needed():
         int(route_num)
         for route_num in shop_set
         if (
-            int(route_num) not in off_today_set
+            _route_runs_on_current_load_day(int(route_num))
             and int(route_num) not in assigned_shop_routes
             and str(shop_prev_status.get(int(route_num), "")).strip().lower() == "loaded"
         )
     }
     is_oos_unassigned_route = route_num in off_set and route_num not in off_today_set
-    is_shop_unassigned_route = route_num in shop_set and route_num not in assigned_shop_routes and route_num not in off_today_set and route_num not in potential_crossload_shop_routes
+    is_shop_unassigned_route = (
+        route_num in shop_set
+        and _route_runs_on_current_load_day(int(route_num))
+        and route_num not in assigned_shop_routes
+        and route_num not in potential_crossload_shop_routes
+    )
     is_swap_unassigned_route = route_num in unassigned_swap_routes
     if not is_oos_unassigned_route and not is_shop_unassigned_route and not is_swap_unassigned_route:
         st.session_state.pop("route_card_assign_route", None)
@@ -14928,7 +14939,7 @@ def _render_route_card(
     unassigned_shop_routes = [
         int(route_num)
         for route_num in shop_routes
-        if int(route_num) not in assigned_shop_routes and int(route_num) not in off_today_routes
+        if int(route_num) not in assigned_shop_routes and _route_runs_on_current_load_day(int(route_num))
     ]
     shop_prev_status_raw = st.session_state.get("shop_prev_status") or {}
     shop_prev_status: dict[int, str] = {}
@@ -19532,7 +19543,7 @@ def _pdf_route_shop_snapshot_rows() -> list[tuple[str, bool]]:
     unassigned_shop_routes = [
         int(route_num)
         for route_num in shop_routes
-        if int(route_num) not in assigned_shop_routes and int(route_num) not in off_today_routes
+        if int(route_num) not in assigned_shop_routes and _route_runs_on_current_load_day(int(route_num))
     ]
     potential_crossload_shop_routes = {
         int(route_num)
@@ -19586,8 +19597,8 @@ def _pdf_route_shop_snapshot_rows() -> list[tuple[str, bool]]:
                         False,
                     )
                 )
-            elif int(route_num) in off_today_routes:
-                rows.append((f"  Truck {int(route_num)} in Shop -> OFF Today{note_suffix}", False))
+            elif not _route_runs_on_current_load_day(int(route_num)):
+                rows.append((f"  Truck {int(route_num)} in Shop -> Not Running Today{note_suffix}", False))
             elif int(route_num) in potential_crossload_shop_routes:
                 rows.append((f"  Truck {int(route_num)} in Shop -> Potential Crossload{note_suffix}", False))
             else:
@@ -20671,7 +20682,7 @@ if raw_route_assign:
         int(route_num)
         for route_num in shop_set
         if (
-            int(route_num) not in off_today_set
+            _route_runs_on_current_load_day(int(route_num))
             and int(route_num) not in assigned_shop_routes
             and str(shop_prev_status.get(int(route_num), "")).strip().lower() == "loaded"
         )
@@ -20683,8 +20694,8 @@ if raw_route_assign:
             (route_to_assign in off_set and route_to_assign not in off_today_set)
             or (
                 route_to_assign in shop_set
+                and _route_runs_on_current_load_day(int(route_to_assign))
                 and route_to_assign not in assigned_shop_routes
-                and route_to_assign not in off_today_set
                 and route_to_assign not in potential_crossload_shop_routes
             )
             or (route_to_assign in unassigned_swap_routes)
@@ -22273,7 +22284,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
             st.session_state.pop(modal_state_key, None)
         fleet_trucks = sorted({int(t) for t in FLEET})
         current_shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
-        off_today_set = {int(t) for t in (off_trucks_for_today() or [])}
 
         if send_mode_on:
             muted_for_mode = set()
@@ -22354,7 +22364,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         }
                         _mark_and_save()
                         st.rerun()
-                    elif selected_shop_truck in off_today_set:
+                    elif not _route_runs_on_current_load_day(int(selected_shop_truck)):
                         _send_truck_to_shop(selected_shop_truck, "", "")
                         st.session_state.status_shop_feedback = {
                             "ok": True,

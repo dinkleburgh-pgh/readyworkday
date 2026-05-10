@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 6
+_APP_BUILD = 7
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -11835,7 +11835,7 @@ def render_numeric_truck_buttons(
                             badge.style.setProperty('display', 'inline-flex', 'important');
                             badge.style.setProperty('align-items', 'center', 'important');
                             badge.style.setProperty('justify-content', 'center', 'important');
-                            badge.style.setProperty('max-width', '94%', 'important');
+                            badge.style.setProperty('max-width', '82%', 'important');
                             badge.style.setProperty('white-space', 'nowrap', 'important');
                             badge.style.setProperty('overflow', 'hidden', 'important');
                             badge.style.setProperty('text-overflow', 'ellipsis', 'important');
@@ -12039,7 +12039,7 @@ def render_numeric_truck_buttons(
             cell_gap_rem=0.62,
             min_button_height_px=64,
         )
-    if active_screen_key in {"STATUS_UNLOADED", "FLEET", "UNLOAD"}:
+    if active_screen_key != "AUDIT_FLEET":
         expected_labels_json = json.dumps([label for (label, _, _) in button_entries if str(label).strip()])
         components.html(
             f"""

@@ -23,6 +23,7 @@ import hashlib
 import shutil
 import zipfile
 from pathlib import Path
+import bcrypt
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -6378,36 +6379,57 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                 st.error("Username and password are required")
             else:
                 try:
-                    # Use authenticator to validate the credentials
-                    # This is a workaround since authenticator.login() doesn't work in dialogs
-                    authenticator.login(
-                        location="unrendered",
-                        fields={
-                            "Form name": "Login Portal",
-                            "Username": "Username",
-                            "Password": "Password",
-                            "Login": "Login",
-                        },
-                        key=f"auth_manual_login_{username}",
-                        clear_on_submit=False,
-                    )
+                    # Load authentication database
+                    with open("auth_users.json", "r") as f:
+                        auth_data = json.load(f)
                     
-                    # Check authentication status
-                    auth_status = st.session_state.get("authentication_status")
-                    if auth_status is True:
-                        st.success("Login successful! Redirecting...")
-                        st.session_state.auth_login_portal_pending = False
-                        st.rerun()
-                    elif auth_status is False:
-                        st.error("Invalid username or password")
+                    # Find user by username (case-insensitive)
+                    found_user = None
+                    for user_key in auth_data.get("users", {}):
+                        if user_key.lower() == username.lower():
+                            found_user = user_key
+                            break
+                    
+                    if not found_user:
+                        st.error("❌ Username not found")
                     else:
-                        st.error("Authentication error")
+                        user_info = auth_data["users"][found_user]
                         
+                        # Check if user is enabled
+                        if not user_info.get("enabled", True):
+                            st.error("❌ User account is disabled")
+                        else:
+                            # Validate password hash using bcrypt
+                            stored_hash = user_info.get("password", "")
+                            try:
+                                # bcrypt.checkpw expects bytes for both password and hash
+                                password_bytes = password.encode("utf-8")
+                                hash_bytes = stored_hash.encode("utf-8")
+                                
+                                if bcrypt.checkpw(password_bytes, hash_bytes):
+                                    # Successful authentication - set session state
+                                    st.session_state.authentication_status = True
+                                    st.session_state.username = found_user
+                                    st.session_state.name = user_info.get("name", found_user)
+                                    st.session_state.role = user_info.get("role", "user")
+                                    
+                                    # Close the portal and trigger redirect
+                                    st.session_state.auth_login_portal_pending = False
+                                    st.session_state.auth_login_portal_requested_at = 0.0
+                                    
+                                    st.success("✅ Login successful! Redirecting...")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Invalid password")
+                            except Exception as pwd_err:
+                                st.error(f"❌ Password validation error: {str(pwd_err)}")
+                    
+                except FileNotFoundError:
+                    st.error("❌ Authentication database not found")
+                except json.JSONDecodeError:
+                    st.error("❌ Authentication database format error")
                 except Exception as e:
-                    st.error(f"Login failed: {str(e)}")
-            st.session_state.auth_login_portal_pending = False
-            st.session_state.auth_login_portal_requested_at = 0.0
-            st.rerun()
+                    st.error(f"❌ Login error: {str(e)}")
 
     _login_dialog()
 

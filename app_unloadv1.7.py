@@ -6380,7 +6380,7 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
             else:
                 try:
                     # Load authentication database
-                    with open("auth_users.json", "r") as f:
+                        with open(AUTH_USERS_FILE, "r") as f:
                         auth_data = json.load(f)
                     
                     # Find user by username (case-insensitive)

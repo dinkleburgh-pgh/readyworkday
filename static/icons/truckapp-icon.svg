@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TruckApp icon">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#g1)" />
+  <path d="M84 280h215a24 24 0 0 1 24 24v36H84z" fill="#f8fafc" />
+  <path d="M323 244h57c16 0 30 8 38 21l22 37v38h-80v-64h-37z" fill="#f8fafc" />
+  <circle cx="159" cy="365" r="40" fill="#0f172a" />
+  <circle cx="159" cy="365" r="16" fill="#94a3b8" />
+  <circle cx="371" cy="365" r="40" fill="#0f172a" />
+  <circle cx="371" cy="365" r="16" fill="#94a3b8" />
+  <rect x="114" y="201" width="128" height="55" rx="10" fill="#93c5fd" />
+  <path d="M365 278h35l13 21h-48z" fill="#93c5fd" />
+</svg>

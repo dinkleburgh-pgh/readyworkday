@@ -1,0 +1,16 @@
+[
+  {
+    "entry_id": "1b07bc8cd2bb0ead",
+    "ts": "2026-04-12T17:52:56.068985",
+    "run_date": "2026-04-07",
+    "truck": 4,
+    "actor": "Nate",
+    "source": "upload",
+    "note": "",
+    "relative_path": "audit_photo_archive\\2026\\04\\07\\truck_4\\a_d3_r4_20260412_175256_068.jpg",
+    "original_bytes": 1893846,
+    "compressed_bytes": 204467,
+    "jpeg_quality": 72,
+    "max_dimension": 1920
+  }
+]

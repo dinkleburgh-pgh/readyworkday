@@ -2,11 +2,11 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.7.1**
+Current release: **v1.7.2**
 
-## Recent updates (v1.7.1)
+## Recent updates (v1.7.2)
 
-- Updated app release metadata to **v1.7.1** (`20260407`) in the active entry app.
+- Updated app release metadata to **v1.7.2** (`20260510`) in the active entry app.
 - Added mobile sidebar gesture controls: swipe-left to close and left-edge swipe-right to open.
 - Improved mobile sidebar behavior so swipe-open stays open and does not immediately auto-collapse.
 - Updated mobile dock cards so open state is opaque while collapsed state is transparent.
@@ -132,7 +132,7 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.7.1` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.7.2` exists (published from GitHub Actions).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.7.py`
@@ -140,7 +140,7 @@ Use a **Git-based Stack** in Portainer.
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
-- The Portainer compose file is pinned to image tag `v1.7.1` to avoid stale `latest` pulls.
+- The Portainer compose file is pinned to image tag `v1.7.2` to avoid stale `latest` pulls.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 - Runtime state/auth files now persist under `/app/data` inside the container; point `TRUCKAPP_DATA_DIR` at a durable host path so setup/auth is preserved across recreate/redeploy.
@@ -153,7 +153,7 @@ docker compose down
 
 ## Basic daily flow
 
-1. **Ready Workday**: set run date, load day(s), and warning/settings.
+1. **Ready Workday**: run date/load day advance automatically at 6:00 AM; use this area for warning/settings and run-day re-sync only.
 2. **Unload**: select dirty trucks, assign batch/wearers, mark trucks unloaded.
 3. **Load**: start next truck from unloaded list.
 4. **In Progress**: monitor timer, record shortages.

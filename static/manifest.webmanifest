@@ -1,0 +1,19 @@
+{
+  "name": "TruckApp Load Management",
+  "short_name": "TruckApp",
+  "description": "Truck load management and scheduling dashboard.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/icons/truckapp-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

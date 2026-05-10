@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+1. Added initial Progressive Web App support for mobile/tablet installability, including manifest, service worker/offline fallback, and mobile web app meta tag bootstrap in the main app shell.
+2. Removed manual load-day switching controls from Management and standardized automatic load-day rollover to 6:00 AM (start of 1st shift).
+3. Updated shift handoff/snooze state handling to be user-scoped so one signed-in user's shift actions no longer affect other users.
+
+## v1.7.2 - 2026-05-10
+
+1. Fixed invalid escape sequences in JavaScript code to resolve SyntaxWarning messages.
+2. Updated app metadata release to **v1.7.2** with release date **20260510**.
+3. Ensured backward compatibility for state management and navigation fixes.
+4. Updated deployment defaults/tags to **v1.7.2** in `docker-compose.yml`, `docker-compose.portainer.yml`, and `docker-entrypoint.sh`.
+5. Updated README release/deployment references and `requirements.txt` baseline label to **v1.7.2**.
+
 ## v1.7.1 - 2026-04-07
 
 Ordered list of final changes included in this release:

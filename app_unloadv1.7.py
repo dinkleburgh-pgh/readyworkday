@@ -33,8 +33,8 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.7.1"
-_APP_DATE = "20260407"  
+_APP_VERSION = "1.7.2"
+_APP_DATE = "20260510"  
 
 
 def _emit_startup_version_banner_once():

@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 3
+_APP_BUILD = 4
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -803,6 +803,31 @@ def _history_dir_path() -> str:
 
 def _history_state_path(run_date_key: str) -> str:
     return os.path.join(_history_dir_path(), f"state_{run_date_key}.json")
+
+
+def _shift_summary_archive_dir_path() -> str:
+    return os.path.join(_history_dir_path(), "shift_summaries")
+
+
+def _archive_shift_summary_for_run_date(run_date_key: str | None, now_local: datetime | None = None) -> str | None:
+    run_key = str(run_date_key or "").strip()
+    if not run_key:
+        return None
+    try:
+        pdf_bytes = generate_end_of_day_pdf_bytes()
+        if not pdf_bytes:
+            return None
+        now_value = now_local if isinstance(now_local, datetime) else _now_local()
+        stamp = now_value.strftime("%Y%m%d_%H%M%S")
+        file_name = f"shift_summary_{run_key}_{stamp}.pdf"
+        out_path = os.path.join(_shift_summary_archive_dir_path(), file_name)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "wb") as f:
+            f.write(pdf_bytes)
+        return out_path
+    except Exception as e:
+        logging.error(f"Failed to archive shift summary for {run_key}: {e}")
+        return None
 
 
 def _durations_path() -> str:
@@ -7325,6 +7350,7 @@ def apply_run_config(
     archived_state = None
 
     if old_key and new_key and day_changed and (not bool(st.session_state.get("archive_view_mode"))):
+        _archive_shift_summary_for_run_date(old_key)
         archive_current_state(old_key)
 
     if day_changed and new_key and bool(restore_archive):
@@ -9297,6 +9323,10 @@ def _recommended_run_date_for_shift(now_local: datetime | None = None) -> date:
     base_date = now_value.date()
     if now_value.hour < int(cutoff_hour):
         return base_date - timedelta(days=1)
+    # Business rule: Sunday 6:00 AM starts 1st Shift for Monday's load cycle
+    # so the active load day becomes Day 2.
+    if base_date.weekday() == 6:
+        return base_date + timedelta(days=1)
     return base_date
 
 

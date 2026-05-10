@@ -6342,6 +6342,13 @@ def _build_authenticator():
 
 
 def _show_login_portal(authenticator, default_password_active: bool = False):
+    auth_status = st.session_state.get("authentication_status")
+    meta = st.session_state.get("authenticator_meta", {})
+    if auth_status is True:
+        username = st.session_state.get("username")
+        raw_username = str(username or meta.get("username") or "guest").strip()
+        username_lookup = meta.get("username_lookup") if isinstance(meta.get("username_lookup"), dict) else {}
+
     def _dismiss_login_portal():
         st.session_state.auth_login_portal_pending = False
         st.session_state.auth_login_portal_requested_at = 0.0
@@ -6384,41 +6391,20 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
             """,
             unsafe_allow_html=True,
         )
-        login_kwargs = {
-            "location": "main",
-            "fields": {
-                "Form name": "Login Portal",
-                "Username": "Username",
-                "Password": "Password",
-                "Login": "Login",
-            },
-            "key": "truckapp_login",
-            "clear_on_submit": False,
-        }
         try:
-            authenticator.login(**login_kwargs)
-            st.session_state.auth_login_cookie_recovery_attempts = 0
+            authenticator.login(
+                location="main",
+                fields={
+                    "Form name": "Login Portal",
+                    "Username": "Username",
+                    "Password": "Password",
+                    "Login": "Login",
+                },
+                key="truckapp_login",
+                clear_on_submit=False,
+            )
         except Exception as exc:
-            error_text = str(exc or "").strip()
-            if "User not authorized" in error_text:
-                attempts = int(st.session_state.get("auth_login_cookie_recovery_attempts") or 0)
-                if attempts < 2:
-                    st.session_state.auth_login_cookie_recovery_attempts = attempts + 1
-                    try:
-                        cookie_controller = getattr(authenticator, "cookie_controller", None)
-                        if cookie_controller is not None and hasattr(cookie_controller, "delete_cookie"):
-                            cookie_controller.delete_cookie()
-                    except Exception:
-                        pass
-                    st.session_state["authentication_status"] = None
-                    st.session_state.pop("username", None)
-                    st.session_state.pop("name", None)
-                    st.session_state.pop("email", None)
-                    st.session_state.pop("roles", None)
-                    st.rerun()
-                st.error("Unable to render login form: User not authorized. Please clear browser cookies for this site and try again.")
-                return
-            st.error(f"Unable to render login form: {exc}")
+            st.error(f"Login error: {str(exc)}")
             return
 
         auth_status = st.session_state.get("authentication_status")
@@ -20931,6 +20917,15 @@ if BLANK_PAGE_WATCHDOG_ENABLED:
 
 authenticator = _apply_auth_gate()
 _enforce_active_screen_role_access()
+
+# Redirect to default screen if user successfully logged in
+# Only trigger if login portal is no longer pending and user is authenticated
+if (st.session_state.get("authentication_status") is True and 
+    not st.session_state.get("auth_login_portal_pending", False)):
+    if not st.session_state.get("auth_post_login_redirect_done", False):
+        st.session_state.active_screen = "IN_PROGRESS"
+        st.session_state.auth_post_login_redirect_done = True
+        st.rerun()
 
 role_access_notice = st.session_state.pop("role_access_notice", None)
 if role_access_notice:

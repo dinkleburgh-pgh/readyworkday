@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 9
+_APP_BUILD = 10
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -8563,6 +8563,38 @@ st.markdown(
                 color: #e2e8f0 !important;
                 -webkit-text-fill-color: #e2e8f0 !important;
             }
+        }
+        /* Dialog/Modal Styling - Light dimming backdrop */
+        [data-testid="stModal"]::before,
+        .stModal::before {
+            content: "" !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            background: rgba(0, 0, 0, 0.25) !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            z-index: 1000 !important;
+        }
+        [data-testid="stModal"],
+        .stModal,
+        [role="dialog"] {
+            position: fixed !important;
+            z-index: 1001 !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            background: #0f172a !important;
+            border: 1px solid rgba(148, 163, 184, 0.3) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45) !important;
+        }
+        /* Ensure modals appear on top of page content */
+        [data-testid="stModal"] > *,
+        .stModal > * {
+            z-index: 1001 !important;
         }
     </style>
     """,

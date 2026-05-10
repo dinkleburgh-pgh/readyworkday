@@ -6,6 +6,7 @@ APP_PATH=""
 
 : "${APP_FILE:=app_unloadv1.7.py}"
 : "${APP_VERSION:=1.7.2}"
+: "${APP_BUILD:=2}"
 if [ -f "${APP_FILE}" ]; then
   APP_PATH="${APP_FILE}"
 fi
@@ -31,7 +32,7 @@ if [ -z "$APP_PATH" ]; then
 fi
 
 echo "Launching Streamlit app: $APP_PATH"
-echo "TruckApp version: $APP_VERSION"
+echo "TruckApp version: $APP_VERSION (build $APP_BUILD)"
 
 STREAMLIT_PORT="${STREAMLIT_SERVER_PORT:-8501}"
 STREAMLIT_ADDRESS="${STREAMLIT_SERVER_ADDRESS:-0.0.0.0}"

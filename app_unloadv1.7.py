@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 2
+_APP_BUILD = 3
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:

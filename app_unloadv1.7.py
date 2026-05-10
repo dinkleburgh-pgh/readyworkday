@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 5
+_APP_BUILD = 6
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -11728,8 +11728,8 @@ def render_numeric_truck_buttons(
                         }}
                         button[kind="primary"] .truck-route-badge {{
                             position: absolute !important;
-                            right: -8px !important;
-                            top: -8px !important;
+                            right: 3px !important;
+                            top: 3px !important;
                             z-index: 24 !important;
                             pointer-events: none !important;
                             border-radius: 999px !important;
@@ -11746,7 +11746,7 @@ def render_numeric_truck_buttons(
                             align-items: center !important;
                             justify-content: center !important;
                             box-shadow: 0 1px 5px rgba(2,6,23,0.45) !important;
-                            max-width: 94% !important;
+                            max-width: 82% !important;
                             white-space: nowrap !important;
                             text-overflow: ellipsis !important;
                             overflow: hidden !important;
@@ -11825,8 +11825,8 @@ def render_numeric_truck_buttons(
                             badge.className = 'truck-route-badge';
                             badge.textContent = badgeLabel;
                             badge.style.setProperty('position', 'absolute', 'important');
-                            badge.style.setProperty('right', '-8px', 'important');
-                            badge.style.setProperty('top', '-8px', 'important');
+                            badge.style.setProperty('right', '3px', 'important');
+                            badge.style.setProperty('top', '3px', 'important');
                             badge.style.setProperty('font-size', '10px', 'important');
                             badge.style.setProperty('line-height', '1.1', 'important');
                             badge.style.setProperty('font-weight', '900', 'important');
@@ -12038,6 +12038,75 @@ def render_numeric_truck_buttons(
             primary_only=True,
             cell_gap_rem=0.62,
             min_button_height_px=64,
+        )
+    if active_screen_key in {"STATUS_UNLOADED", "FLEET", "UNLOAD"}:
+        expected_labels_json = json.dumps([label for (label, _, _) in button_entries if str(label).strip()])
+        components.html(
+            f"""
+            <script>
+            (function() {{
+                try {{
+                    const root = window.parent.document;
+                    const expected = new Set({expected_labels_json});
+                    const normalize = (value) => String(value || '').replace(/\u2063/g, '').trim();
+                    const canonical = (value) => {{
+                        const label = normalize(value);
+                        if (!label) return '';
+                        if (expected.has(label)) return label;
+                        const numeric = label.match(/^(\\d+)/);
+                        if (numeric && expected.has(numeric[1])) return numeric[1];
+                        return label;
+                    }};
+                    const isColumnSlot = (node) => {{
+                        if (!node || node.nodeType !== 1) return false;
+                        const testId = String(node.getAttribute('data-testid') || '').trim();
+                        if (testId === 'column') return true;
+                        const cls = String(node.className || '');
+                        return /\\bstColumn\\b/.test(cls);
+                    }};
+                    const nearestColumnSlot = (btn) => {{
+                        let node = btn ? btn.parentElement : null;
+                        for (let depth = 0; node && depth < 12; depth += 1) {{
+                            if (isColumnSlot(node)) return node;
+                            node = node.parentElement;
+                        }}
+                        return null;
+                    }};
+
+                    const applySpacing = () => {{
+                        const buttons = Array.from(root.querySelectorAll('button[kind="primary"]'));
+                        buttons.forEach((btn) => {{
+                            if (btn.closest('[data-testid="stSidebar"]')) return;
+                            const label = canonical(btn.innerText || btn.textContent || '');
+                            if (!label || !expected.has(label)) return;
+
+                            const host = btn.closest('[data-testid="stButton"]');
+                            if (host) {{
+                                host.style.setProperty('margin', '0 0 0.46rem 0', 'important');
+                                host.style.setProperty('position', 'relative', 'important');
+                                host.style.setProperty('z-index', '1', 'important');
+                            }}
+
+                            const slot = nearestColumnSlot(btn);
+                            if (slot) {{
+                                slot.style.setProperty('min-width', '0', 'important');
+                                slot.style.setProperty('padding-bottom', '0.08rem', 'important');
+                            }}
+
+                            btn.style.setProperty('position', 'relative', 'important');
+                            btn.style.setProperty('z-index', '1', 'important');
+                        }});
+                    }};
+
+                    applySpacing();
+                    setTimeout(applySpacing, 80);
+                    setTimeout(applySpacing, 260);
+                }} catch (e) {{}}
+            }})();
+            </script>
+            """,
+            height=0,
+            width=0,
         )
     return None
 

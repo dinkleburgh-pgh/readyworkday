@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 4
+_APP_BUILD = 5
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -23651,23 +23651,24 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
                     const shouldFlash = {str(bool(enabled)).lower()};
                     const targetClass = 'inprog-next-up-burst';
-                    const normalize = (value) =>
-                        String(value || '')
-                            .replace(/\u2063/g, '')
-                            .replace(/\\s+/g, ' ')
-                            .trim()
-                            .toLowerCase();
+                    const targetKeyClasses = [
+                        'st-key-inprog_manage_next_up_button',
+                        'st-key-inprog_manage_next_up_button_mobile',
+                        'st-key-inprog_manage_next_up_button_original'
+                    ];
 
                     const apply = () => {{
                         const buttons = Array.from(root.querySelectorAll('button'));
                         buttons.forEach((btn) => btn.classList.remove(targetClass));
                         if (!shouldFlash) return;
 
-                        const setNextUpButton = buttons.find(
-                            (btn) => normalize(btn.innerText || btn.textContent || '') === 'set next up'
-                        );
-                        if (setNextUpButton) {{
-                            setNextUpButton.classList.add(targetClass);
+                        for (const keyClass of targetKeyClasses) {{
+                            const host = root.querySelector('.' + keyClass);
+                            const setNextUpButton = host ? host.querySelector('button') : null;
+                            if (setNextUpButton) {{
+                                setNextUpButton.classList.add(targetClass);
+                                break;
+                            }}
                         }}
                     }};
 
@@ -29947,14 +29948,29 @@ elif st.session_state.active_screen == "LOAD":
                                 0%, 100% { box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0); }
                                 50% { box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.95), 0 0 0 8px rgba(250, 204, 21, 0.16); }
                             }
-                            .st-key-load_set_dust_clothes_toggle button,
-                            [data-testid="stButton"] button[aria-label="Set Dust Clothes"] {
+                            .st-key-load_set_dust_clothes_toggle button {
                                 border: 2px solid rgba(250, 204, 21, 0.95) !important;
                                 outline: 2px solid rgba(250, 204, 21, 0.55) !important;
                                 outline-offset: 1px !important;
                                 animation: loadDustNeedsSetPulse 1.25s ease-in-out infinite !important;
                             }
                         `;
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+        else:
+            components.html(
+                """
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const styleEl = root.getElementById('load-dust-pulse-style');
+                        if (styleEl) styleEl.remove();
                     } catch (e) {}
                 })();
                 </script>
@@ -30099,14 +30115,29 @@ elif st.session_state.active_screen == "LOAD":
                                 0%, 100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.42), 0 0 0 5px rgba(15, 23, 42, 0.0); }
                                 50% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.95), 0 0 0 8px rgba(59, 130, 246, 0.16); }
                             }
-                            .st-key-load_set_next_up_toggle button,
-                            [data-testid="stButton"] button[aria-label="Set Next Up"] {
+                            .st-key-load_set_next_up_toggle button {
                                 border: 2px solid rgba(59, 130, 246, 0.95) !important;
                                 outline: 2px solid rgba(59, 130, 246, 0.55) !important;
                                 outline-offset: 1px !important;
                                 animation: loadNextUpNeedsSetPulse 1.25s ease-in-out infinite !important;
                             }
                         `;
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+        else:
+            components.html(
+                """
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const styleEl = root.getElementById('load-next-up-pulse-style');
+                        if (styleEl) styleEl.remove();
                     } catch (e) {}
                 })();
                 </script>

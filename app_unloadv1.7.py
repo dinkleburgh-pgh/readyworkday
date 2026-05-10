@@ -6357,27 +6357,54 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
     def _login_dialog():
         st.caption("Sign in for role-based access. You can continue viewing as Guest.")
         
-        try:
-            authenticator.login(
-                location="main",
-                fields={
-                    "Form name": "Login Portal",
-                    "Username": "Username",
-                    "Password": "Password",
-                    "Login": "Login",
-                },
-                key="truckapp_login",
-                clear_on_submit=False,
+        # Manual authentication form (authenticator.login doesn't work in dialogs)
+        with st.form("login_portal_form", clear_on_submit=False):
+            username = st.text_input(
+                "Username",
+                placeholder="Enter your username",
+                key="portal_username_field",
             )
-        except Exception as exc:
-            st.error(f"Login error: {str(exc)}")
-            return
-
-        auth_status = st.session_state.get("authentication_status")
-        if auth_status is None and default_password_active:
-            st.caption("Default password is active. Set TRUCKAPP_AUTH_PASSWORD to secure access.")
-
-        if st.button("Close", key="auth_close_login_portal_btn", use_container_width=True):
+            password = st.text_input(
+                "Password",
+                type="password",
+                placeholder="Enter your password",
+                key="portal_password_field",
+            )
+            submitted = st.form_submit_button("Login", use_container_width=True)
+        
+        # Process login submission
+        if submitted:
+            if not username or not password:
+                st.error("Username and password are required")
+            else:
+                try:
+                    # Use authenticator to validate the credentials
+                    # This is a workaround since authenticator.login() doesn't work in dialogs
+                    authenticator.login(
+                        location="unrendered",
+                        fields={
+                            "Form name": "Login Portal",
+                            "Username": "Username",
+                            "Password": "Password",
+                            "Login": "Login",
+                        },
+                        key=f"auth_manual_login_{username}",
+                        clear_on_submit=False,
+                    )
+                    
+                    # Check authentication status
+                    auth_status = st.session_state.get("authentication_status")
+                    if auth_status is True:
+                        st.success("Login successful! Redirecting...")
+                        st.session_state.auth_login_portal_pending = False
+                        st.rerun()
+                    elif auth_status is False:
+                        st.error("Invalid username or password")
+                    else:
+                        st.error("Authentication error")
+                        
+                except Exception as e:
+                    st.error(f"Login failed: {str(e)}")
             st.session_state.auth_login_portal_pending = False
             st.session_state.auth_login_portal_requested_at = 0.0
             st.rerun()

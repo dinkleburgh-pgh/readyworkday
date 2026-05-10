@@ -35,7 +35,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 8
+_APP_BUILD = 9
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -5644,6 +5644,8 @@ def _deserialize_state_payload(data: dict) -> dict:
             "shop_prev_status",
             "unload_request_meta",
             "shorts_button_state",
+            "previous_route_covers",
+            "spare_origin_route",
         }:
             if isinstance(v, dict):
                 new = {}
@@ -5717,7 +5719,7 @@ def _serialize_state() -> dict:
             data[k] = v.isoformat() if v else None
         elif k == "ship_dates":
             data[k] = [d.isoformat() for d in v]
-        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "oos_spare_assignments", "route_swap_assignments", "sup_notes_global", "sup_notes_daily", "sup_notes_by_load_day", "shorts_initials", "load_durations", "truck_load_day_by_truck", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state"}:
+        elif k in {"wearers", "shop_notes", "shop_spares", "off_notes", "oos_spare_assignments", "route_swap_assignments", "sup_notes_global", "sup_notes_daily", "sup_notes_by_load_day", "shorts_initials", "load_durations", "truck_load_day_by_truck", "shorts", "batches", "off_schedule", "shop_prev_status", "shorts_button_state", "previous_route_covers", "spare_origin_route"}:
             ser = {}
             for kk, vv in (v or {}).items():
                 ser[str(kk)] = vv
@@ -5802,6 +5804,8 @@ def _sync_next_up_from_state_file(force: bool = False):
         "pace_loader_baseline_count",
         "pace_loader_active_count",
         "inprog_layout_style",
+        "previous_route_covers",
+        "spare_origin_route",
     )
     changed = False
     for key in sync_keys:
@@ -7350,6 +7354,8 @@ def apply_run_config(
     archived_state = None
 
     if old_key and new_key and day_changed and (not bool(st.session_state.get("archive_view_mode"))):
+        # Capture which spares/trucks covered which routes on this load day before transitioning
+        _capture_previous_route_covers()
         _archive_shift_summary_for_run_date(old_key)
         archive_current_state(old_key)
 
@@ -7503,6 +7509,8 @@ defaults = {
     "route_swap_assignments": {},    # {route: truck} active route swaps
     "used_spares_today": set(),      # spares that actually loaded an OOS route today
     "spares_needing_return": set(),  # used previous day; start Dirty, return to Spare after unload
+    "previous_route_covers": {},     # {spare_truck: {route: 1}} - which routes each spare covered on previous load day
+    "spare_origin_route": {},        # {spare_truck: route} - tracks origin route for dirty spares (for audit reconciliation)
     "shop_set": set(),
     "shop_notes": {},                # {truck: text}
     "shop_spares": {},               # {truck: text}
@@ -9360,6 +9368,54 @@ def _first_shift_day_rollover_due(now_local: datetime | None = None) -> bool:
         return False
 
     return True
+
+
+def _capture_previous_route_covers():
+    """Capture which spare/truck covered which route on current load day.
+    This is called before day transition so we can track route coverage for audit reconciliation.
+    Stores in format: {spare_truck: {route: 1, route2: 1}}
+    """
+    previous_covers: dict[int, dict[int, int]] = {}
+    
+    # Capture OOS spare assignments (spare covering OOS route)
+    for route_raw, spare_raw in (st.session_state.get("oos_spare_assignments") or {}).items():
+        try:
+            route_num = int(route_raw)
+            spare_num = int(spare_raw)
+        except Exception:
+            continue
+        if spare_num not in previous_covers:
+            previous_covers[spare_num] = {}
+        previous_covers[spare_num][route_num] = 1
+    
+    # Capture route swap assignments (truck covering route via swap)
+    for route_raw, truck_raw in (st.session_state.get("route_swap_assignments") or {}).items():
+        try:
+            route_num = int(route_raw)
+            truck_num = int(truck_raw)
+        except Exception:
+            continue
+        if truck_num not in previous_covers:
+            previous_covers[truck_num] = {}
+        previous_covers[truck_num][route_num] = 1
+    
+    # Store for unload day reconciliation
+    st.session_state.previous_route_covers = previous_covers
+    # Clear the spare_origin_route on new day so it gets populated fresh during audit
+    st.session_state.spare_origin_route = {}
+    return previous_covers
+
+
+def _get_original_truck_for_route(route_num: int | None) -> int | None:
+    """Get the truck originally assigned to a route before any swaps.
+    Note: This is a placeholder for future enhancement. Currently, base truck-route
+    mappings are not persisted in the app, so this returns None.
+    Route coverage tracking is available via spare_origin_route and previous_route_covers state.
+    Returns None if route info not available.
+    """
+    return None
+
+
 
 
 def scheduled_trucks_for_current_load_day() -> set[int]:
@@ -16392,6 +16448,20 @@ def start_loading_truck(truck: int, load_day_num: int | None = None):
         )
         used_spares_today.add(t)
         st.session_state.used_spares_today = used_spares_today
+        
+        # Track if this spare covered a route on the previous load day for audit reconciliation
+        previous_covers = st.session_state.get("previous_route_covers") or {}
+        origin_route = None
+        if t in previous_covers:
+            # This spare covered routes on the previous load day; mark first covered route as origin
+            covered_routes = list(previous_covers.get(t, {}).keys())
+            if covered_routes:
+                origin_route = covered_routes[0]
+        
+        if origin_route is not None:
+            spare_origin_map = st.session_state.get("spare_origin_route") or {}
+            spare_origin_map[int(t)] = int(origin_route)
+            st.session_state.spare_origin_route = spare_origin_map
 
     st.session_state.inprog_set = {t}
     st.session_state.inprog_start_time = time.time()

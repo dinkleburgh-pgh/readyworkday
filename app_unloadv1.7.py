@@ -6356,41 +6356,7 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
     @st.dialog("Login Portal", on_dismiss=_dismiss_login_portal)
     def _login_dialog():
         st.caption("Sign in for role-based access. You can continue viewing as Guest.")
-        st.markdown(
-            """
-            <style>
-            div[role="dialog"] [data-testid="stFormSubmitButton"] {
-                width: 100% !important;
-            }
-            div[role="dialog"] [data-testid="stFormSubmitButton"] > button {
-                width: 100% !important;
-                min-height: 46px !important;
-                border-radius: 12px !important;
-                border: 1px solid rgba(20, 83, 45, 0.9) !important;
-                color: #f0fdf4 !important;
-                background: linear-gradient(180deg, #22c55e 0%, #16a34a 52%, #15803d 100%) !important;
-                box-shadow: 0 10px 22px rgba(21, 128, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.26) !important;
-                font-weight: 900 !important;
-                letter-spacing: 0.02em !important;
-                transition: transform 0.12s ease, box-shadow 0.16s ease, filter 0.16s ease !important;
-            }
-            div[role="dialog"] [data-testid="stFormSubmitButton"] > button:hover {
-                filter: brightness(1.06) !important;
-                box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25), 0 12px 26px rgba(21, 128, 61, 0.32) !important;
-            }
-            div[role="dialog"] [data-testid="stFormSubmitButton"] > button:active {
-                transform: translateY(1px) !important;
-                filter: brightness(0.96) !important;
-                box-shadow: 0 5px 14px rgba(21, 128, 61, 0.26) !important;
-            }
-            div[role="dialog"] [data-testid="stFormSubmitButton"] > button:focus-visible {
-                outline: 2px solid #86efac !important;
-                outline-offset: 2px !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        
         try:
             authenticator.login(
                 location="main",
@@ -6408,9 +6374,7 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
             return
 
         auth_status = st.session_state.get("authentication_status")
-        if auth_status is False:
-            st.error("Username or password is incorrect.")
-        elif auth_status is None and default_password_active:
+        if auth_status is None and default_password_active:
             st.caption("Default password is active. Set TRUCKAPP_AUTH_PASSWORD to secure access.")
 
         if st.button("Close", key="auth_close_login_portal_btn", use_container_width=True):

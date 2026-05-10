@@ -35,16 +35,18 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-
-
+_APP_BUILD = 2
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
-        app_key = f"{_APP_VERSION}|{_APP_DATE}|{os.path.basename(__file__)}"
+        app_key = f"{_APP_VERSION}|{_APP_DATE}|{_APP_BUILD}|{os.path.basename(__file__)}"
         if os.environ.get("TRUCKAPP_VERSION_BANNER_PRINTED") == app_key:
             return
         os.environ["TRUCKAPP_VERSION_BANNER_PRINTED"] = app_key
-        print(f"[TruckApp] Running app version v{_APP_VERSION} ({_APP_DATE})", flush=True)
+        print(
+            f"[TruckApp] Running app version v{_APP_VERSION} ({_APP_DATE}) build {_APP_BUILD}",
+            flush=True,
+        )
     except Exception:
         pass
 
@@ -6380,7 +6382,7 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
             else:
                 try:
                     # Load authentication database
-                        with open(AUTH_USERS_FILE, "r") as f:
+                    with open(AUTH_USERS_FILE, "r") as f:
                         auth_data = json.load(f)
                     
                     # Find user by username (case-insensitive)
@@ -21597,8 +21599,14 @@ if (
 version_label_footer = str(_APP_VERSION).strip()
 if version_label_footer and not version_label_footer.lower().startswith("v"):
     version_label_footer = f"v{version_label_footer}"
+build_label_footer = str(_APP_BUILD).strip()
 st.sidebar.markdown(
-    f"<div style='font-size:0.72rem; opacity:0.65; text-align:center; margin-top:4px;'>Version {html.escape(version_label_footer)}</div>",
+    (
+        "<div style='font-size:0.72rem; opacity:0.72; text-align:center; margin-top:4px;'>"
+        f"App {html.escape(version_label_footer)}"
+        f" | Build {html.escape(build_label_footer)}"
+        "</div>"
+    ),
     unsafe_allow_html=True,
 )
 

@@ -4,7 +4,7 @@
 
 ## v1.7.3 - 2026-05-11
 
-1. Updated app metadata release to **v1.7.3** with release date **20260511** and build 13.
+1. Updated app metadata release to **v1.7.3** with release date **20260511** and build 14.
 2. Updated deployment image references in compose files to **v1.7.3**.
 3. Updated README release references and `requirements.txt` baseline label to **v1.7.3**.
 4. Rewrote sidebar bouncer toggle button (v3): fixed jitter caused by watching CSS `style` mutations, added 80ms debounced sync, reduced DOM writes, bumped poll interval to 1500ms, and widened button to 26px.

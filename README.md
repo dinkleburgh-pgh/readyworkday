@@ -9,7 +9,7 @@ Current release: **v1.7.3**
 - Rewrote sidebar bouncer toggle button (v3) to fix jitter, over-firing, and position drift caused by watching CSS style mutations on every animation frame.
 - Improved Run Day dialogs: renamed Step 1 header to "Select Dust Garments" in purple, standardized button order (Save/Continue → Skip → Back → Close) across all 4 steps, removed Skip from Step 4, and applied consistent green/amber/blue/red color scheme matching the rest of the app.
 - Fixed Step 1 truck-number labels so numbers no longer wrap inside checkbox cells on mobile.
-- Updated app metadata to **v1.7.3** (`20260511`) and bumped build to 13.
+- Updated app metadata to **v1.7.3** (`20260511`) and bumped build to 14.
 
 ## Prior updates (v1.7.2)
 

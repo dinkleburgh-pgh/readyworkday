@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.3"
 _APP_DATE = "20260511"  
-_APP_BUILD = 15
+_APP_BUILD = 16
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -22332,9 +22332,9 @@ with st.sidebar:
         (
             "<!doctype html>"
             "<html><head><style>"
-            "html, body { margin:0; padding:0; background:transparent !important; overflow:hidden; }"
-            "body { display:flex; align-items:center; justify-content:center; min-height:38px; }"
-            "#sidebar-clock-wrap { margin:6px 0 0 0; padding:0; text-align:center; background:transparent; }"
+            "html, body { margin:0; padding:0; width:100%; min-height:38px; background:#0f172a !important; overflow:hidden; }"
+            "body { display:flex; align-items:center; justify-content:center; width:100%; min-height:38px; background:#0f172a !important; }"
+            "#sidebar-clock-wrap { width:100%; margin:6px 0 0 0; padding:0; text-align:center; background:#0f172a; box-sizing:border-box; }"
             "#sidebar-clock { font-size:30px; font-weight:900; color:#93c5fd; line-height:1; white-space:nowrap; }"
             "</style></head><body>"
             "<div id='sidebar-clock-wrap'><div id='sidebar-clock'></div></div>"

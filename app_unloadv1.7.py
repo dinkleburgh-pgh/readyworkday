@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
 from datetime import date, timedelta, datetime
 import time
-from io import BytesIO
+from io import BytesIO, StringIO
 import json
 import html
 import os
@@ -22,6 +22,8 @@ import functools
 import hashlib
 import shutil
 import zipfile
+import socket
+import csv
 from pathlib import Path
 import bcrypt
 # Load quick-select amounts from JSON
@@ -35,7 +37,143 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.2"
 _APP_DATE = "20260510"  
-_APP_BUILD = 10
+_APP_BUILD = 11
+_STARTUP_TOTAL_STEPS = 6
+_ANSI_RESET = "\033[0m"
+_ANSI_DIM = "\033[2m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_BLUE = "\033[94m"
+_ANSI_GREEN = "\033[92m"
+_ANSI_YELLOW = "\033[93m"
+
+
+def _startup_progress_app_key() -> str:
+    return f"{_APP_VERSION}|{_APP_DATE}|{_APP_BUILD}|{os.path.basename(__file__)}"
+
+
+def _colorize_startup_line(text: str, color: str) -> str:
+    try:
+        return f"{color}{text}{_ANSI_RESET}"
+    except Exception:
+        return str(text)
+
+
+def _emit_startup_timed_step(step_number: int, label: str) -> None:
+    """Emit one startup milestone with per-step and cumulative timing."""
+    try:
+        app_key = _startup_progress_app_key()
+        if os.environ.get("TRUCKAPP_STARTUP_TIMING_DONE") == app_key:
+            return
+
+        start_key = "TRUCKAPP_STARTUP_TIMING_START"
+        last_key = "TRUCKAPP_STARTUP_TIMING_LAST"
+        step_key = "TRUCKAPP_STARTUP_TIMING_STEP"
+        owner_key = "TRUCKAPP_STARTUP_TIMING_OWNER"
+
+        now = time.perf_counter()
+
+        if os.environ.get(owner_key) != app_key:
+            os.environ[owner_key] = app_key
+            os.environ[start_key] = str(now)
+            os.environ[last_key] = str(now)
+            os.environ[step_key] = "0"
+
+        try:
+            current_step = int(os.environ.get(step_key, "0") or "0")
+        except Exception:
+            current_step = 0
+        if int(step_number) <= current_step:
+            return
+
+        try:
+            start_ts = float(os.environ.get(start_key, str(now)) or str(now))
+        except Exception:
+            start_ts = now
+        try:
+            last_ts = float(os.environ.get(last_key, str(now)) or str(now))
+        except Exception:
+            last_ts = now
+
+        step_seconds = max(0.0, now - last_ts)
+        total_seconds = max(0.0, now - start_ts)
+        log_line = (
+            f"[TruckApp][startup] [{int(step_number)}/{_STARTUP_TOTAL_STEPS}] {str(label)} "
+            f"(+{step_seconds:.3f}s | total {total_seconds:.3f}s)"
+        )
+        print(_colorize_startup_line(log_line, _ANSI_CYAN), flush=True)
+        logging.info(log_line)
+
+        os.environ[last_key] = str(now)
+        os.environ[step_key] = str(int(step_number))
+    except Exception:
+        pass
+
+
+def _emit_startup_total_once() -> None:
+    """Emit one final startup total timing line."""
+    try:
+        app_key = _startup_progress_app_key()
+        if os.environ.get("TRUCKAPP_STARTUP_TIMING_DONE") == app_key:
+            return
+
+        owner_key = "TRUCKAPP_STARTUP_TIMING_OWNER"
+        start_key = "TRUCKAPP_STARTUP_TIMING_START"
+        if os.environ.get(owner_key) != app_key:
+            return
+
+        now = time.perf_counter()
+        try:
+            start_ts = float(os.environ.get(start_key, str(now)) or str(now))
+        except Exception:
+            start_ts = now
+        total_seconds = max(0.0, now - start_ts)
+        total_line = f"[TruckApp][startup] Backend startup load time: {total_seconds:.3f}s"
+        print(_colorize_startup_line(total_line, _ANSI_GREEN), flush=True)
+        logging.info(total_line)
+        os.environ["TRUCKAPP_STARTUP_TOTAL_SECONDS"] = f"{total_seconds:.3f}"
+        os.environ["TRUCKAPP_STARTUP_TIMING_DONE"] = app_key
+    except Exception:
+        pass
+
+
+def _emit_startup_urls_banner_once() -> None:
+    """Print a final URL banner as the last startup output block."""
+    try:
+        app_key = _startup_progress_app_key()
+        if os.environ.get("TRUCKAPP_STARTUP_URLS_PRINTED") == app_key:
+            return
+        os.environ["TRUCKAPP_STARTUP_URLS_PRINTED"] = app_key
+
+        port_raw = str(os.getenv("STREAMLIT_SERVER_PORT") or "8501").strip()
+        try:
+            port = int(port_raw)
+        except Exception:
+            port = 8501
+
+        local_url = f"http://localhost:{port}"
+        try:
+            network_ip = socket.gethostbyname(socket.gethostname())
+            if not network_ip or network_ip.startswith("127."):
+                network_ip = "0.0.0.0"
+        except Exception:
+            network_ip = "0.0.0.0"
+        network_url = f"http://{network_ip}:{port}"
+
+        lines = [
+            _colorize_startup_line("You can now view your Streamlit app in your browser.", _ANSI_YELLOW),
+            _colorize_startup_line(f"  Local URL: {local_url}", _ANSI_BLUE),
+            _colorize_startup_line(f"  Network URL: {network_url}", _ANSI_BLUE),
+        ]
+        for line in lines:
+            print(line, flush=True)
+
+        logging.info("You can now view your Streamlit app in your browser.")
+        logging.info("  Local URL: %s", local_url)
+        logging.info("  Network URL: %s", network_url)
+    except Exception:
+        pass
+
+
 def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
@@ -51,7 +189,7 @@ def _emit_startup_version_banner_once():
         pass
 
 
-_emit_startup_version_banner_once()
+_emit_startup_timed_step(1, "Bootstrapping app runtime")
 
 # Setup logging
 logging.basicConfig(
@@ -59,6 +197,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+_emit_startup_timed_step(2, "Initializing logging")
 try:
     from zoneinfo import ZoneInfo
 except Exception:
@@ -70,11 +209,136 @@ except Exception:
     Image = None
     ImageOps = None
 
+_emit_startup_timed_step(3, "Loading optional integrations")
+
 # PDF (ReportLab)
 from reportlab.lib.pagesizes import letter # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
 
+_emit_startup_timed_step(4, "Preparing report/render helpers")
+
 st.set_page_config(page_title="Load Management", layout="centered")
+_emit_startup_timed_step(5, "Configuring Streamlit page")
+
+
+def _coerce_toast_text(value) -> str:
+    try:
+        text = str(value if value is not None else "").strip()
+    except Exception:
+        text = ""
+    return text
+
+
+def _emit_message_toast(level: str, body, icon=None):
+    text = _coerce_toast_text(body)
+    if not text:
+        return None
+
+    default_icons = {
+        "warning": "??",
+        "error": "?",
+        "success": "?",
+        "info": "??",
+    }
+    icon_value = str(icon).strip() if icon is not None else ""
+    if not icon_value:
+        icon_value = default_icons.get(str(level or "").strip().lower(), "??")
+
+    try:
+        st.toast(text, icon=icon_value)
+    except Exception:
+        pass
+    return None
+
+
+def _install_global_toast_message_overrides() -> None:
+    if bool(getattr(st, "_truckapp_toast_override_installed", False)):
+        return
+
+    def _st_warning(body, *args, **kwargs):
+        return _emit_message_toast("warning", body, kwargs.get("icon"))
+
+    def _st_error(body, *args, **kwargs):
+        return _emit_message_toast("error", body, kwargs.get("icon"))
+
+    def _st_success(body, *args, **kwargs):
+        return _emit_message_toast("success", body, kwargs.get("icon"))
+
+    def _st_info(body, *args, **kwargs):
+        return _emit_message_toast("info", body, kwargs.get("icon"))
+
+    st.warning = _st_warning
+    st.error = _st_error
+    st.success = _st_success
+    st.info = _st_info
+
+    try:
+        delta_module = importlib.import_module("streamlit.delta_generator")
+        delta_cls = getattr(delta_module, "DeltaGenerator", None)
+        if delta_cls is not None:
+            def _dg_warning(self, body, *args, **kwargs):
+                return _emit_message_toast("warning", body, kwargs.get("icon"))
+
+            def _dg_error(self, body, *args, **kwargs):
+                return _emit_message_toast("error", body, kwargs.get("icon"))
+
+            def _dg_success(self, body, *args, **kwargs):
+                return _emit_message_toast("success", body, kwargs.get("icon"))
+
+            def _dg_info(self, body, *args, **kwargs):
+                return _emit_message_toast("info", body, kwargs.get("icon"))
+
+            delta_cls.warning = _dg_warning
+            delta_cls.error = _dg_error
+            delta_cls.success = _dg_success
+            delta_cls.info = _dg_info
+    except Exception:
+        pass
+
+    setattr(st, "_truckapp_toast_override_installed", True)
+
+
+_install_global_toast_message_overrides()
+
+# Enforce a consistent top-right visual style for all Streamlit toasts.
+st.markdown(
+    """
+    <style>
+    [data-testid="stToastContainer"] {
+        top: 0.85rem !important;
+        right: 0.85rem !important;
+        left: auto !important;
+        bottom: auto !important;
+        width: min(92vw, 430px) !important;
+        max-width: min(92vw, 430px) !important;
+        z-index: 1800 !important;
+    }
+    [data-testid="stToast"] {
+        border-radius: 12px !important;
+        border: 1px solid rgba(125, 211, 252, 0.45) !important;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.93)) !important;
+        color: #e2e8f0 !important;
+        box-shadow: 0 14px 32px rgba(2, 6, 23, 0.42) !important;
+        backdrop-filter: blur(6px) !important;
+        -webkit-backdrop-filter: blur(6px) !important;
+    }
+    [data-testid="stToast"] p {
+        color: #e2e8f0 !important;
+        font-weight: 600 !important;
+        line-height: 1.3 !important;
+    }
+    @media (max-width: 980px) {
+        [data-testid="stToastContainer"] {
+            top: 0.55rem !important;
+            right: 0.55rem !important;
+            width: min(96vw, 420px) !important;
+            max-width: min(96vw, 420px) !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def _inject_pwa_bootstrap() -> None:
@@ -164,6 +428,134 @@ def _inject_pwa_bootstrap() -> None:
 
 
 _inject_pwa_bootstrap()
+
+
+def _inject_client_startup_timing_probe() -> None:
+    """Measure browser-perceived startup timing and detect full render completion."""
+    backend_total_seconds = str(os.environ.get("TRUCKAPP_STARTUP_TOTAL_SECONDS") or "").strip()
+    components.html(
+        f"""
+        <script>
+        (() => {{
+            const host = window.parent || window;
+            if (!host || !host.document) return;
+            const doc = host.document;
+            const marker = `truckappStartupMetricsInit:${{String({json.dumps(backend_total_seconds)})}}`;
+            if (doc.documentElement.dataset.truckappStartupMetricsInit === marker) return;
+            doc.documentElement.dataset.truckappStartupMetricsInit = marker;
+
+            const toMsLabel = (valueMs) => {{
+                const n = Number(valueMs);
+                if (!Number.isFinite(n) || n < 0) return "n/a";
+                return `${{(n / 1000).toFixed(3)}}s`;
+            }};
+
+            const perf = host.performance;
+            const nav = (perf && perf.getEntriesByType) ? perf.getEntriesByType('navigation')[0] : null;
+            const paints = (perf && perf.getEntriesByType) ? perf.getEntriesByType('paint') : [];
+            const fp = (paints || []).find((p) => p && p.name === 'first-paint');
+            const fcp = (paints || []).find((p) => p && p.name === 'first-contentful-paint');
+
+            const interactiveMs = (perf && Number.isFinite(perf.now?.())) ? perf.now() : NaN;
+            const domContentLoadedMs = nav ? Number(nav.domContentLoadedEventEnd || nav.domInteractive || NaN) : NaN;
+            const fpMs = fp ? Number(fp.startTime || NaN) : NaN;
+            const fcpMs = fcp ? Number(fcp.startTime || NaN) : NaN;
+            const backendSeconds = String({json.dumps(backend_total_seconds)} || "").trim();
+            const backendLabel = backendSeconds ? `${{backendSeconds}}s` : "n/a";
+
+            const metricText = [
+                `Backend: ${{backendLabel}}`,
+                `Client interactive: ${{toMsLabel(interactiveMs)}}`,
+                `FCP: ${{toMsLabel(fcpMs)}}`,
+                `DOM ready: ${{toMsLabel(domContentLoadedMs)}}`,
+            ].join(' | ');
+
+            const metricPayload = {{
+                backend_seconds: backendSeconds || null,
+                interactive_ms: Number.isFinite(interactiveMs) ? Number(interactiveMs.toFixed(3)) : null,
+                first_paint_ms: Number.isFinite(fpMs) ? Number(fpMs.toFixed(3)) : null,
+                first_contentful_paint_ms: Number.isFinite(fcpMs) ? Number(fcpMs.toFixed(3)) : null,
+                dom_content_loaded_ms: Number.isFinite(domContentLoadedMs) ? Number(domContentLoadedMs.toFixed(3)) : null,
+                captured_at_iso: new Date().toISOString(),
+            }};
+
+            try {{
+                host.localStorage.setItem('truckapp_startup_metrics', JSON.stringify(metricPayload));
+            }} catch (e) {{}}
+
+            try {{
+                console.log('[TruckApp][startup][client]', metricPayload);
+            }} catch (e) {{}}
+
+            const renderCheckKey = `truckappStartupRenderCheckDone:${{String(backendSeconds || 'n/a')}}`;
+            if (host.sessionStorage.getItem(renderCheckKey) === '1') return;
+
+            const isRunningVisible = () => {{
+                try {{
+                    const runImg = doc.querySelector('img[alt="Running..."]');
+                    if (!runImg) return false;
+                    const style = host.getComputedStyle(runImg);
+                    return style && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                }} catch (e) {{
+                    return false;
+                }}
+            }};
+
+            const hasMainAppContent = () => {{
+                return Boolean(
+                    doc.querySelector('[data-testid="stMainBlockContainer"]') ||
+                    doc.querySelector('section.main .block-container')
+                );
+            }};
+
+            const markRendered = () => {{
+                const renderedMs = (perf && Number.isFinite(perf.now?.())) ? perf.now() : NaN;
+                const renderPayload = {{
+                    backend_seconds: backendSeconds || null,
+                    full_render_ms: Number.isFinite(renderedMs) ? Number(renderedMs.toFixed(3)) : null,
+                    first_contentful_paint_ms: metricPayload.first_contentful_paint_ms,
+                    dom_content_loaded_ms: metricPayload.dom_content_loaded_ms,
+                    captured_at_iso: new Date().toISOString(),
+                }};
+                try {{
+                    host.localStorage.setItem('truckapp_startup_metrics_render_complete', JSON.stringify(renderPayload));
+                    host.sessionStorage.setItem(renderCheckKey, '1');
+                }} catch (e) {{}}
+                try {{
+                    console.log('[TruckApp][startup][client][render-complete]', renderPayload);
+                }} catch (e) {{}}
+
+                try {{
+                    const params = new URLSearchParams(host.location.search || '');
+                    if (params.get('startup_render_sent') !== '1') {{
+                        if (Number.isFinite(renderPayload.full_render_ms)) params.set('startup_render_ms', String(renderPayload.full_render_ms));
+                        if (renderPayload.backend_seconds) params.set('startup_backend_s', String(renderPayload.backend_seconds));
+                        if (Number.isFinite(renderPayload.first_contentful_paint_ms)) params.set('startup_fcp_ms', String(renderPayload.first_contentful_paint_ms));
+                        if (Number.isFinite(renderPayload.dom_content_loaded_ms)) params.set('startup_dom_ms', String(renderPayload.dom_content_loaded_ms));
+                        params.set('startup_render_sent', '1');
+                        const search = params.toString();
+                        const nextUrl = host.location.pathname + (search ? ('?' + search) : '') + (host.location.hash || '');
+                        host.location.replace(nextUrl);
+                    }}
+                }} catch (e) {{}}
+            }};
+
+            const startMs = Date.now();
+            const timeoutMs = 45000;
+            const intervalId = host.setInterval(() => {{
+                const timedOut = (Date.now() - startMs) >= timeoutMs;
+                if ((hasMainAppContent() && !isRunningVisible()) || timedOut) {{
+                    host.clearInterval(intervalId);
+                    markRendered();
+                }}
+            }}, 180);
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
 
 # Hide always-visible helper captions. Keep guidance on field hover via widget `help`.
 st.markdown(
@@ -915,6 +1307,77 @@ def _audit_photo_manifest_path(run_date_key: str | None = None) -> str:
     return os.path.join(_audit_photo_day_dir_path(run_date_key), "audit_photo_manifest.json")
 
 
+def _audit_photo_previous_calendar_day(run_date_key: str | None) -> str:
+    run_key = str(run_date_key or "").strip()
+    try:
+        run_dt = date.fromisoformat(run_key)
+    except Exception:
+        return ""
+    return (run_dt - timedelta(days=1)).isoformat()
+
+
+def _audit_photo_enrich_entry(entry: dict) -> dict:
+    row = dict(entry or {})
+
+    run_date_key = str(row.get("run_date") or "").strip() or _current_run_date_iso()
+    row["run_date"] = run_date_key
+    row.setdefault("photo_day", run_date_key)
+
+    loaded_prev_date = str(row.get("loaded_previous_date") or "").strip() or _audit_photo_previous_calendar_day(run_date_key)
+    if loaded_prev_date:
+        row["loaded_previous_date"] = loaded_prev_date
+
+    try:
+        truck_num = int(row.get("truck") or 0)
+    except Exception:
+        truck_num = 0
+    row["truck"] = int(truck_num)
+
+    route_num = row.get("route")
+    try:
+        route_int = int(route_num)
+    except Exception:
+        route_int = None
+    if route_int is None:
+        rel_path = str(row.get("relative_path") or "")
+        route_match = re.search(r"_r(\d+)_", rel_path)
+        if route_match:
+            try:
+                route_int = int(route_match.group(1))
+            except Exception:
+                route_int = None
+    if route_int is None:
+        route_int = int(truck_num) if int(truck_num) > 0 else 0
+    row["route"] = int(route_int)
+
+    photo_day_num = _normalize_load_day_num(row.get("photo_day_num"))
+    loaded_day_num = _normalize_load_day_num(row.get("loaded_day_num"))
+    if photo_day_num is None:
+        rel_path = str(row.get("relative_path") or "")
+        day_match = re.search(r"_d(\d+)_", rel_path)
+        if day_match:
+            try:
+                photo_day_num = _normalize_load_day_num(int(day_match.group(1)))
+            except Exception:
+                photo_day_num = None
+    if loaded_day_num is None and photo_day_num is not None:
+        loaded_day_num = _normalize_load_day_num(_previous_ship_day_num(int(photo_day_num)))
+    row["photo_day_num"] = int(photo_day_num) if photo_day_num is not None else None
+    row["loaded_day_num"] = int(loaded_day_num) if loaded_day_num is not None else None
+
+    context_text = str(row.get("loaded_previous_context") or "").strip()
+    if not context_text:
+        if loaded_prev_date:
+            context_text = (
+                f"Photo day {run_date_key}; truck load context is previous day {loaded_prev_date}."
+            )
+        else:
+            context_text = "Photo reflects truck load from the previous day."
+    row["loaded_previous_context"] = context_text
+
+    return row
+
+
 def _load_audit_photo_manifest(run_date_key: str | None = None) -> list[dict]:
     path = _audit_photo_manifest_path(run_date_key)
     if not os.path.exists(path):
@@ -924,7 +1387,7 @@ def _load_audit_photo_manifest(run_date_key: str | None = None) -> list[dict]:
             raw = json.load(f)
         if not isinstance(raw, list):
             return []
-        return [dict(r) for r in raw if isinstance(r, dict)]
+        return [_audit_photo_enrich_entry(dict(r)) for r in raw if isinstance(r, dict)]
     except Exception:
         return []
 
@@ -973,6 +1436,8 @@ def _save_audit_photo_file(
         load_day_token = f"d{int(current_load_day)}" if current_load_day is not None else "d0"
         route_num = int((_truck_route_targets() or {}).get(int(truck_num), int(truck_num)))
         ts = datetime.now()
+        loaded_previous_date = _audit_photo_previous_calendar_day(run_date_key)
+        previous_load_day_num = _normalize_load_day_num(_previous_ship_day_num(current_load_day))
 
         day_dir = _audit_photo_day_dir_path(run_date_key)
         truck_dir = os.path.join(day_dir, f"truck_{int(truck_num)}")
@@ -993,7 +1458,17 @@ def _save_audit_photo_file(
             "entry_id": hashlib.sha1(f"{ts.isoformat()}|{rel_path}|{truck_num}".encode("utf-8")).hexdigest()[:16],
             "ts": ts.isoformat(),
             "run_date": run_date_key,
+            "photo_day": run_date_key,
             "truck": int(truck_num),
+            "route": int(route_num),
+            "photo_day_num": int(current_load_day) if current_load_day is not None else None,
+            "loaded_day_num": int(previous_load_day_num) if previous_load_day_num is not None else None,
+            "loaded_previous_date": str(loaded_previous_date or ""),
+            "loaded_previous_context": (
+                f"Photo day {run_date_key}; truck load context is previous day {loaded_previous_date}."
+                if loaded_previous_date
+                else "Photo reflects truck load from the previous day."
+            ),
             "actor": str(_current_actor_name() or "").strip() or "Unknown",
             "source": str(source_label or "upload"),
             "note": str(note_text or "").strip(),
@@ -1045,7 +1520,20 @@ def _build_audit_photo_zip_bytes(run_date_key: str | None = None) -> bytes | Non
 
 def _audit_photo_entries_for_day(run_date_key: str | None = None) -> list[dict]:
     entries = _load_audit_photo_manifest(run_date_key)
-    return sorted(entries, key=lambda e: str(e.get("ts") or ""), reverse=True)
+    def _sort_key(entry: dict) -> tuple[int, float]:
+        try:
+            truck_sort = int(entry.get("truck") or 0)
+        except Exception:
+            truck_sort = 0
+        ts_raw = str(entry.get("ts") or "").strip()
+        try:
+            ts_value = datetime.fromisoformat(ts_raw).timestamp()
+        except Exception:
+            ts_value = 0.0
+        # Sort by truck number ascending, then newest photo first within each truck.
+        return int(truck_sort), float(-ts_value)
+
+    return sorted(entries, key=_sort_key)
 
 
 def _audit_photo_archive_run_dates() -> list[str]:
@@ -1178,7 +1666,7 @@ def _render_mobile_audit_photo_uploader(
     )
     st.text_input("Photo note (optional)", key=photo_note_key, max_chars=120)
 
-    if st.button("Save Audit Photo(s)", use_container_width=True, key=save_btn_key):
+    if st.button("Save Audit Photo(s)", width='stretch', key=save_btn_key):
         candidates: list[tuple[str, object]] = []
         if camera_capture is not None:
             candidates.append(("camera", camera_capture))
@@ -1220,7 +1708,7 @@ def _render_mobile_audit_photo_uploader(
                 file_name=f"audit_photos_{run_date_key}.zip",
                 mime="application/zip",
                 key=f"audit_mobile_photo_zip_{run_date_key}",
-                use_container_width=True,
+                width='stretch',
             )
 
         with st.expander("Recent photos", expanded=False):
@@ -1231,7 +1719,7 @@ def _render_mobile_audit_photo_uploader(
                 abs_path = os.path.join(os.getcwd(), rel_path)
                 if not os.path.exists(abs_path):
                     continue
-                st.image(abs_path, use_container_width=True)
+                st.image(abs_path, width='stretch')
                 orig = int(entry.get("original_bytes") or 0)
                 comp = int(entry.get("compressed_bytes") or 0)
                 ratio_text = ""
@@ -1239,7 +1727,12 @@ def _render_mobile_audit_photo_uploader(
                     saved_pct = max(0, int(round((1 - (comp / float(orig))) * 100)))
                     ratio_text = f" - saved {saved_pct}%"
                 st.caption(
-                    f"Truck {int(entry.get('truck') or 0)} - {str(entry.get('source') or 'upload').title()}{ratio_text}"
+                    (
+                        f"Truck {int(entry.get('truck') or 0)} - Route {int(entry.get('route') or entry.get('truck') or 0)} - "
+                        f"Photo Day {str(entry.get('photo_day') or entry.get('run_date') or '-')} - "
+                        f"Loaded Previous Day {str(entry.get('loaded_previous_date') or '-')} - "
+                        f"{str(entry.get('source') or 'upload').title()}{ratio_text}"
+                    )
                 )
 
 
@@ -1827,7 +2320,7 @@ def _render_audit_capture_panel(
             warning_id = str(warning.get("entry_id") or "").strip()
             if warning_id and st.button(
                 "Mark warning applied",
-                use_container_width=True,
+                width='stretch',
                 key=f"audit_warn_apply_{source}_{t}_{warning_id}",
             ):
                 if _mark_audit_warning_applied(warning_id):
@@ -1908,7 +2401,7 @@ def _render_audit_capture_panel(
                 row_cols = st.columns(cols_per_row)
                 for idx, label in enumerate(row_labels):
                     with row_cols[idx]:
-                        if st.button(label, use_container_width=True, key=f"audit_cat_{source}_{t}_{row_key}_{start}_{label}"):
+                        if st.button(label, width='stretch', key=f"audit_cat_{source}_{t}_{row_key}_{start}_{label}"):
                             next_step = "bulk_group" if label == "Bulk" else "item"
                             _set_audit_button_state(
                                 {
@@ -1931,7 +2424,7 @@ def _render_audit_capture_panel(
             row_cols = st.columns(cols_per_row)
             for idx, group in enumerate(row_groups):
                 with row_cols[idx]:
-                    if st.button(group, use_container_width=True, key=f"audit_bulk_{source}_{t}_{group}"):
+                    if st.button(group, width='stretch', key=f"audit_bulk_{source}_{t}_{group}"):
                         _set_audit_button_state(
                             {
                                 "step": "item",
@@ -1942,7 +2435,7 @@ def _render_audit_capture_panel(
                             }
                         )
                         st.rerun()
-        if st.button("Back to categories", use_container_width=True, key=f"audit_bulk_back_{source}_{t}"):
+        if st.button("Back to categories", width='stretch', key=f"audit_bulk_back_{source}_{t}"):
             _reset_audit_button_state()
             st.rerun()
     elif audit_step == "item":
@@ -1958,7 +2451,7 @@ def _render_audit_capture_panel(
             row_cols = st.columns(cols_per_row)
             for idx, item_name in enumerate(row_items):
                 with row_cols[idx]:
-                    if st.button(item_name, use_container_width=True, key=f"audit_item_{source}_{t}_{item_name}"):
+                    if st.button(item_name, width='stretch', key=f"audit_item_{source}_{t}_{item_name}"):
                         _set_audit_button_state(
                             {
                                 "step": "qty",
@@ -1969,7 +2462,7 @@ def _render_audit_capture_panel(
                             }
                         )
                         st.rerun()
-        if st.button("Back", use_container_width=True, key=f"audit_item_back_{source}_{t}"):
+        if st.button("Back", width='stretch', key=f"audit_item_back_{source}_{t}"):
             prev_step = "bulk_group" if audit_category == "Bulk" else "category"
             _set_audit_button_state(
                 {
@@ -2000,7 +2493,7 @@ def _render_audit_capture_panel(
             row_cols = st.columns(cols_per_row)
             for idx, amount in enumerate(row_amounts):
                 with row_cols[idx]:
-                    if st.button(str(amount), use_container_width=True, key=f"audit_quick_qty_{source}_{t}_{audit_item}_{amount}"):
+                    if st.button(str(amount), width='stretch', key=f"audit_quick_qty_{source}_{t}_{audit_item}_{amount}"):
                         audit_state["qty"] = int(amount)
                         _set_audit_button_state(audit_state)
                         st.session_state[custom_qty_key] = int(amount)
@@ -2105,7 +2598,7 @@ def _render_audit_capture_panel(
         st.session_state.pop(route_pick_key, None)
 
     can_add_request = bool(selected_item) and int(qty) >= 1
-    if can_add_request and st.button("Add Remove Request", use_container_width=True, key=f"audit_add_{source}_{t}"):
+    if can_add_request and st.button("Add Remove Request", width='stretch', key=f"audit_add_{source}_{t}"):
         if not full_item_label:
             st.warning("Select an audit item before adding.")
         else:
@@ -2126,7 +2619,7 @@ def _render_audit_capture_panel(
             else:
                 st.error("Could not save audit request.")
 
-    if is_qty_step and st.button("Back", use_container_width=True, key=f"audit_qty_back_{source}_{t}"):
+    if is_qty_step and st.button("Back", width='stretch', key=f"audit_qty_back_{source}_{t}"):
         _set_audit_button_state(
             {
                 "step": "item",
@@ -2183,7 +2676,7 @@ def _render_audit_capture_panel(
             with row_cols[2]:
                 st.write(row_vals["By"])
             with row_cols[3]:
-                if st.button("Delete", use_container_width=True, key=f"audit_row_delete_{source}_{t}_{entry_id}"):
+                if st.button("Delete", width='stretch', key=f"audit_row_delete_{source}_{t}_{entry_id}"):
                     if _delete_audit_history_entry(entry_id):
                         st.success("Audit request deleted.")
                         st.rerun()
@@ -3008,7 +3501,7 @@ def _render_audit_trends_selection_details_dialog_if_needed():
     @st.dialog("Selection Details", width="small", on_dismiss=_dismiss_trends_details_dialog)
     def _render_trends_details_dialog():
         _render_audit_trends_selection_details_panel()
-        if st.button("Close", use_container_width=True, key="sup_audit_trends_mobile_details_close"):
+        if st.button("Close", width='stretch', key="sup_audit_trends_mobile_details_close"):
             st.session_state[open_key] = False
             st.rerun()
 
@@ -3187,7 +3680,7 @@ def _render_supervisor_audit_trends(
         }
         if using_placeholder_pace:
             pace_chart_spec = _with_example_watermark(pace_chart_spec)
-        st.vega_lite_chart(pace_chart_spec, use_container_width=True)
+        st.vega_lite_chart(pace_chart_spec, width='stretch')
         return
 
     if selected_trend_view == "Wearers":
@@ -3268,18 +3761,17 @@ def _render_supervisor_audit_trends(
             "mark": {"type": "bar", "cornerRadiusEnd": 3},
             "encoding": {
                 "x": {
-                    "field": "truck",
-                    "type": "nominal",
-                    "sort": {"op": "sum", "field": "wearers", "order": "descending"},
-                    "title": "Truck",
-                    "axis": {"labelAngle": -35},
-                },
-                "y": {
                     "field": "wearers",
                     "type": "quantitative",
                     "title": "Wearers",
                     "stack": "zero",
                     "axis": {"format": ",d"},
+                },
+                "y": {
+                    "field": "truck",
+                    "type": "nominal",
+                    "sort": {"op": "sum", "field": "wearers", "order": "ascending"},
+                    "title": "Truck",
                 },
                 "color": {
                     "field": "batch",
@@ -3316,18 +3808,18 @@ def _render_supervisor_audit_trends(
 
         wearers_event = None
         if using_placeholder_wearers:
-            st.vega_lite_chart(wearers_chart_spec, use_container_width=True)
+            st.vega_lite_chart(wearers_chart_spec, width='stretch')
         else:
             try:
                 wearers_event = st.vega_lite_chart(
                     wearers_chart_spec,
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_wearers_trend_chart",
                     on_select="rerun",
                     selection_mode=["wearers_pick"],
                 )
             except TypeError:
-                st.vega_lite_chart(wearers_chart_spec, use_container_width=True)
+                st.vega_lite_chart(wearers_chart_spec, width='stretch')
 
         if bool(render_details_panel):
             details_state_key = "sup_audit_trends_selected_details"
@@ -3633,18 +4125,17 @@ def _render_supervisor_audit_trends(
             },
             "encoding": {
                 "x": {
-                    "field": "route",
-                    "type": "nominal",
-                    "sort": {"op": "sum", "field": "qty", "order": "descending"},
-                    "title": "Route",
-                    "axis": {"labelAngle": -35},
-                },
-                "y": {
                     "field": "qty",
                     "type": "quantitative",
                     "title": "Qty Short" if is_shortages_view else ("Qty Removed" if show_qty_mode else "Share of Route Qty"),
                     "stack": "zero" if (show_qty_mode or is_shortages_view) else "normalize",
                     "axis": {"format": ",d" if (show_qty_mode or is_shortages_view) else ".0%"},
+                },
+                "y": {
+                    "field": "route",
+                    "type": "nominal",
+                    "sort": {"op": "sum", "field": "qty", "order": "ascending"},
+                    "title": "Route",
                 },
                 "color": {
                     "field": "category",
@@ -3692,18 +4183,18 @@ def _render_supervisor_audit_trends(
 
         route_event = None
         if using_placeholder_route_rows:
-            st.vega_lite_chart(route_chart_spec, use_container_width=True)
+            st.vega_lite_chart(route_chart_spec, width='stretch')
         else:
             try:
                 route_event = st.vega_lite_chart(
                     route_chart_spec,
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_audit_route_click_chart",
                     on_select="rerun",
                     selection_mode=["route_bar_pick"],
                 )
             except TypeError:
-                st.vega_lite_chart(route_chart_spec, use_container_width=True)
+                st.vega_lite_chart(route_chart_spec, width='stretch')
 
         route_point = _extract_selected_point(route_event, "route_bar_pick")
         if (not using_placeholder_route_rows) and isinstance(route_point, dict) and route_point:
@@ -3769,7 +4260,7 @@ def _render_tracked_items_management_dropdown():
 
         if mode == "Categories":
             new_category_name = str(st.text_input("Add category", key="mgmt_tracked_add_category") or "").strip()
-            if st.button("Add category", use_container_width=True, key="mgmt_tracked_add_category_btn"):
+            if st.button("Add category", width='stretch', key="mgmt_tracked_add_category_btn"):
                 if not new_category_name:
                     st.warning("Enter a category name.")
                 elif new_category_name.lower() == "bulk":
@@ -3804,7 +4295,7 @@ def _render_tracked_items_management_dropdown():
                 )
                 save_col, delete_col = st.columns(2)
                 with save_col:
-                    if st.button("Save category items", use_container_width=True, key="mgmt_tracked_save_category_items"):
+                    if st.button("Save category items", width='stretch', key="mgmt_tracked_save_category_items"):
                         parsed_items = _parse_tracked_items_lines(edited_text)
                         if not parsed_items:
                             st.warning("Category must include at least one item.")
@@ -3815,7 +4306,7 @@ def _render_tracked_items_management_dropdown():
                             _queue_management_confirmation(f"Saved items for {selected_category}.")
                             st.rerun()
                 with delete_col:
-                    if st.button("Delete category", use_container_width=True, key="mgmt_tracked_delete_category"):
+                    if st.button("Delete category", width='stretch', key="mgmt_tracked_delete_category"):
                         if len(non_bulk_categories) <= 1:
                             st.warning("At least one non-bulk category is required.")
                         else:
@@ -3829,7 +4320,7 @@ def _render_tracked_items_management_dropdown():
 
         else:
             new_group_name = str(st.text_input("Add bulk subcategory", key="mgmt_tracked_add_bulk_group") or "").strip()
-            if st.button("Add bulk subcategory", use_container_width=True, key="mgmt_tracked_add_bulk_group_btn"):
+            if st.button("Add bulk subcategory", width='stretch', key="mgmt_tracked_add_bulk_group_btn"):
                 if not new_group_name:
                     st.warning("Enter a bulk subcategory name.")
                 elif new_group_name in bulk_map:
@@ -3864,7 +4355,7 @@ def _render_tracked_items_management_dropdown():
                 )
                 save_group_col, delete_group_col = st.columns(2)
                 with save_group_col:
-                    if st.button("Save bulk items", use_container_width=True, key="mgmt_tracked_save_bulk_items"):
+                    if st.button("Save bulk items", width='stretch', key="mgmt_tracked_save_bulk_items"):
                         parsed_group_items = _parse_tracked_items_lines(edited_group_text)
                         if not parsed_group_items:
                             st.warning("Bulk subcategory must include at least one item.")
@@ -3876,7 +4367,7 @@ def _render_tracked_items_management_dropdown():
                             _queue_management_confirmation(f"Saved items for Bulk - {selected_group}.")
                             st.rerun()
                 with delete_group_col:
-                    if st.button("Delete bulk subcategory", use_container_width=True, key="mgmt_tracked_delete_bulk_group"):
+                    if st.button("Delete bulk subcategory", width='stretch', key="mgmt_tracked_delete_bulk_group"):
                         bulk_map.pop(selected_group, None)
                         tracked_map["Bulk"] = bulk_map
                         _set_tracked_items_map(tracked_map)
@@ -3938,7 +4429,7 @@ def _render_reporting_audit_removals_dropdown() -> None:
                 )
             )
 
-            submit_audit_removal = st.form_submit_button("Add Audit Removal", use_container_width=True)
+            submit_audit_removal = st.form_submit_button("Add Audit Removal", width='stretch')
 
         if submit_audit_removal:
             if not selected_item:
@@ -6200,6 +6691,58 @@ def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOA
     )
 
 
+def _render_persistent_bottom_toast(message: str, toast_id: str = "truckapp-persistent-toast"):
+    text = str(message or "").strip()
+    if not text:
+        return
+    toast_id_json = json.dumps(str(toast_id or "truckapp-persistent-toast"))
+    message_json = json.dumps(text)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            try {{
+                const root = window.parent.document;
+                const TOAST_ID = {toast_id_json};
+                const TOAST_TEXT = {message_json};
+
+                let host = root.getElementById(TOAST_ID);
+                if (!host) {{
+                    host = root.createElement('div');
+                    host.id = TOAST_ID;
+                    host.style.position = 'fixed';
+                    host.style.left = '50%';
+                    host.style.bottom = '18px';
+                    host.style.transform = 'translateX(-50%)';
+                    host.style.zIndex = '99999';
+                    host.style.maxWidth = 'min(92vw, 760px)';
+                    host.style.minWidth = 'min(340px, 86vw)';
+                    host.style.padding = '11px 14px';
+                    host.style.borderRadius = '12px';
+                    host.style.background = 'rgba(15,23,42,0.95)';
+                    host.style.border = '1px solid rgba(148,163,184,0.55)';
+                    host.style.boxShadow = '0 12px 28px rgba(0,0,0,0.38)';
+                    host.style.color = '#e2e8f0';
+                    host.style.fontSize = '0.95rem';
+                    host.style.lineHeight = '1.25';
+                    host.style.fontWeight = '700';
+                    host.style.letterSpacing = '0.01em';
+                    host.style.textAlign = 'center';
+                    host.style.pointerEvents = 'auto';
+                    root.body.appendChild(host);
+                }}
+
+                host.textContent = TOAST_TEXT;
+                host.style.display = 'block';
+            }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def _inject_inprogress_visibility_guard():
     components.html(
         """
@@ -6402,7 +6945,7 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                 placeholder="Enter your password",
                 key="portal_password_field",
             )
-            submitted = st.form_submit_button("Login", use_container_width=True)
+            submitted = st.form_submit_button("Login", width='stretch')
         
         # Process login submission
         if submitted:
@@ -6410,57 +6953,44 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                 st.error("Username and password are required")
             else:
                 try:
-                    # Load authentication database
-                    with open(AUTH_USERS_FILE, "r") as f:
-                        auth_data = json.load(f)
-                    
-                    # Find user by username (case-insensitive)
-                    found_user = None
-                    for user_key in auth_data.get("users", {}):
-                        if user_key.lower() == username.lower():
-                            found_user = user_key
-                            break
-                    
-                    if not found_user:
-                        st.error("❌ Username not found")
-                    else:
-                        user_info = auth_data["users"][found_user]
-                        
-                        # Check if user is enabled
-                        if not user_info.get("enabled", True):
-                            st.error("❌ User account is disabled")
-                        else:
-                            # Validate password hash using bcrypt
-                            stored_hash = user_info.get("password", "")
-                            try:
-                                # bcrypt.checkpw expects bytes for both password and hash
-                                password_bytes = password.encode("utf-8")
-                                hash_bytes = stored_hash.encode("utf-8")
-                                
-                                if bcrypt.checkpw(password_bytes, hash_bytes):
-                                    # Successful authentication - set session state
-                                    st.session_state.authentication_status = True
-                                    st.session_state.username = found_user
-                                    st.session_state.name = user_info.get("name", found_user)
-                                    st.session_state.role = user_info.get("role", "user")
-                                    
-                                    # Close the portal and trigger redirect
-                                    st.session_state.auth_login_portal_pending = False
-                                    st.session_state.auth_login_portal_requested_at = 0.0
-                                    
-                                    st.success("✅ Login successful! Redirecting...")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Invalid password")
-                            except Exception as pwd_err:
-                                st.error(f"❌ Password validation error: {str(pwd_err)}")
-                    
-                except FileNotFoundError:
-                    st.error("❌ Authentication database not found")
-                except json.JSONDecodeError:
-                    st.error("❌ Authentication database format error")
+                    users = _load_auth_users()
+                    canonical_username = ""
+                    entered_username = str(username or "").strip()
+                    entered_username_l = entered_username.lower()
+                    for user_key, user_info in users.items():
+                        if str(user_key).strip().lower() != entered_username_l:
+                            continue
+                        if not _to_bool((user_info or {}).get("enabled"), True):
+                            st.error("? User account is disabled")
+                            return
+                        canonical_username = str(user_key)
+                        break
+
+                    if not canonical_username:
+                        st.error("? Username not found")
+                        return
+
+                    login_ok = False
+                    if hasattr(authenticator, "authentication_controller"):
+                        login_ok = bool(
+                            authenticator.authentication_controller.login(
+                                username=canonical_username,
+                                password=str(password),
+                            )
+                        )
+
+                    if login_ok:
+                        if hasattr(authenticator, "cookie_controller"):
+                            authenticator.cookie_controller.set_cookie()
+                        st.session_state.auth_silent_cookie_attempts = 0
+                        st.session_state.auth_login_portal_pending = False
+                        st.session_state.auth_login_portal_requested_at = 0.0
+                        st.success("? Login successful! Redirecting...")
+                        st.rerun()
+
+                    st.error("? Invalid password")
                 except Exception as e:
-                    st.error(f"❌ Login error: {str(e)}")
+                    st.error(f"? Login error: {str(e)}")
 
     _login_dialog()
 
@@ -6497,7 +7027,7 @@ def _show_account_request_portal():
                 key="auth_request_role",
             )
             request_notes = st.text_area("Notes (optional)", value="", key="auth_request_notes")
-            submit_request = st.form_submit_button("Submit request", use_container_width=True)
+            submit_request = st.form_submit_button("Submit request", width='stretch')
 
         if not submit_request:
             return
@@ -6567,6 +7097,21 @@ def _show_account_request_portal():
     _request_dialog()
 
 
+def _render_pending_auth_portals(authenticator) -> None:
+    if authenticator is None:
+        return
+
+    auth_status = st.session_state.get("authentication_status")
+    meta = st.session_state.get("authenticator_meta", {})
+
+    if auth_status is not True and bool(st.session_state.get("auth_request_portal_pending", False)):
+        _show_account_request_portal()
+        return
+
+    if auth_status is not True and bool(st.session_state.get("auth_login_portal_pending", False)):
+        _show_login_portal(authenticator, bool(meta.get("default_password")))
+
+
 def _apply_auth_gate():
     if not _auth_enabled():
         st.session_state.auth_name = "Local"
@@ -6599,7 +7144,9 @@ def _apply_auth_gate():
     auth_status = st.session_state.get("authentication_status")
     request_portal_pending = bool(st.session_state.get("auth_request_portal_pending", False))
 
-    if auth_status is None:
+    # streamlit-authenticator may transiently report False during reruns even when
+    # a valid auth cookie exists; retry silent cookie login for both None and False.
+    if auth_status is not True:
         silent_attempts = int(st.session_state.get("auth_silent_cookie_attempts") or 0)
         if silent_attempts < 2:
             st.session_state.auth_silent_cookie_attempts = silent_attempts + 1
@@ -6620,8 +7167,6 @@ def _apply_auth_gate():
             if st.session_state.get("auth_login_portal_pending", False):
                 should_show_login_portal = True
 
-        if should_show_login_portal:
-            _show_login_portal(authenticator, bool(meta.get("default_password")))
         auth_status = st.session_state.get("authentication_status")
 
     if auth_status is True:
@@ -6649,9 +7194,6 @@ def _apply_auth_gate():
         st.session_state.auth_username = "guest"
         st.session_state.auth_role = AUTH_ROLE_GUEST
         st.session_state.auth_login_portal_auto_prompted = False
-
-    if auth_status is not True and request_portal_pending:
-        _show_account_request_portal()
 
     return authenticator
 
@@ -6722,7 +7264,7 @@ def _render_user_management_dropdown():
             selected_user = edit_users.get(selected_username)
             if selected_user is None:
                 st.error("Selected user was not found.")
-                if st.button("Close", use_container_width=True, key="mgmt_user_dialog_close_missing"):
+                if st.button("Close", width='stretch', key="mgmt_user_dialog_close_missing"):
                     st.session_state["mgmt_user_dialog_target"] = ""
                     st.rerun()
                 return
@@ -6762,7 +7304,7 @@ def _render_user_management_dropdown():
 
             save_col, delete_col, cancel_col = st.columns(3)
             with save_col:
-                if st.button("Save", use_container_width=True, key="mgmt_user_dialog_save"):
+                if st.button("Save", width='stretch', key="mgmt_user_dialog_save"):
                     target_user = edit_users.get(selected_username)
                     if target_user is None:
                         st.error("Selected user was not found.")
@@ -6815,7 +7357,7 @@ def _render_user_management_dropdown():
                             st.rerun()
 
             with delete_col:
-                if st.button("Delete", use_container_width=True, key="mgmt_user_dialog_delete"):
+                if st.button("Delete", width='stretch', key="mgmt_user_dialog_delete"):
                     current_username = str(st.session_state.get("auth_username") or "")
                     target_user = edit_users.get(selected_username)
                     if target_user is None:
@@ -6836,7 +7378,7 @@ def _render_user_management_dropdown():
                         st.rerun()
 
             with cancel_col:
-                if st.button("Cancel", use_container_width=True, key="mgmt_user_dialog_cancel"):
+                if st.button("Cancel", width='stretch', key="mgmt_user_dialog_cancel"):
                     st.session_state["mgmt_user_dialog_target"] = ""
                     st.rerun()
 
@@ -6957,32 +7499,86 @@ def _render_user_management_dropdown():
         ]
 
         st.markdown("#### User Directory")
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stHorizontalBlock"] div[class*="st-key-mgmt_user_row_"] {
+                border: 1px solid rgba(148, 163, 184, 0.35);
+                border-radius: 8px;
+                padding: 0.22rem 0.42rem;
+                background: rgba(15, 23, 42, 0.38);
+                margin-bottom: 0.2rem;
+            }
+            .mgmt-user-role-chip {
+                display: inline-block;
+                border: 1px solid rgba(125, 211, 252, 0.5);
+                border-radius: 999px;
+                padding: 0.06rem 0.46rem;
+                font-weight: 700;
+                color: #bae6fd;
+                background: rgba(8, 47, 73, 0.35);
+                font-size: 0.78rem;
+                letter-spacing: 0.01em;
+            }
+            .mgmt-user-status-enabled {
+                color: #22c55e;
+                font-weight: 700;
+            }
+            .mgmt-user-status-disabled {
+                color: #ef4444;
+                font-weight: 700;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         if filtered_user_options:
+            header_cols = st.columns([2.35, 1.05, 0.95, 0.72], gap="small")
+            with header_cols[0]:
+                st.markdown("**Name**")
+            with header_cols[1]:
+                st.markdown("**Role**")
+            with header_cols[2]:
+                st.markdown("**Status**")
+            with header_cols[3]:
+                st.markdown("**Action**")
+
             for username in filtered_user_options:
                 user_data = users.get(username, {})
                 display_name = str(user_data.get("name") or username).strip() or username
                 role_value = _normalize_auth_role(user_data.get("role"))
                 role_label = _auth_role_label(role_value)
-                enabled_label = "Enabled" if bool(user_data.get("enabled", True)) else "Disabled"
-                role_badge_symbol = {
-                    AUTH_ROLE_ADMIN: "🟦",
-                    AUTH_ROLE_SUPERVISOR: "🟦",
-                    AUTH_ROLE_LEAD: "🟪",
-                    AUTH_ROLE_LOADER: "🟩",
-                    AUTH_ROLE_UNLOADER: "🟧",
-                    AUTH_ROLE_GUEST: "⬛",
-                }.get(role_value, "⬛")
-                card_label = (
-                    f"{role_badge_symbol} {role_label.upper()} · {display_name} · {enabled_label}"
-                )
-                if st.button(
-                    card_label,
-                    use_container_width=True,
-                    key=f"mgmt_user_card_select_{username}",
-                    help="Open user edit dialog",
-                ):
-                    st.session_state["mgmt_user_dialog_target"] = username
-                    st.rerun()
+                is_enabled = bool(user_data.get("enabled", True))
+                status_label = "Enabled" if is_enabled else "Disabled"
+                status_class = "mgmt-user-status-enabled" if is_enabled else "mgmt-user-status-disabled"
+
+                row_cols = st.columns([2.35, 1.05, 0.95, 0.72], gap="small", vertical_alignment="center")
+                with row_cols[0]:
+                    safe_display_name = html.escape(str(display_name))
+                    st.markdown(
+                        f"<div><strong>{safe_display_name}</strong></div>",
+                        unsafe_allow_html=True,
+                    )
+                with row_cols[1]:
+                    st.markdown(
+                        f"<span class='mgmt-user-role-chip'>{html.escape(str(role_label).upper())}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with row_cols[2]:
+                    st.markdown(
+                        f"<span class='{status_class}'>{status_label}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with row_cols[3]:
+                    if st.button(
+                        "Edit",
+                        width='stretch',
+                        key=f"mgmt_user_card_select_{username}",
+                        help="Open user edit dialog",
+                    ):
+                        st.session_state["mgmt_user_dialog_target"] = username
+                        st.rerun()
         else:
             st.caption("No users match your search.")
 
@@ -7037,7 +7633,7 @@ def _render_user_management_dropdown():
 
                 approve_col, reject_col = st.columns(2)
                 with approve_col:
-                    if st.button("Approve request", use_container_width=True, key="mgmt_request_approve_btn"):
+                    if st.button("Approve request", width='stretch', key="mgmt_request_approve_btn"):
                         updated_requests = _normalize_auth_requests(requests)
                         updated_users = _normalize_auth_users(users)
                         target_request = updated_requests.get(pending_pick)
@@ -7075,7 +7671,7 @@ def _render_user_management_dropdown():
                                 st.rerun()
 
                 with reject_col:
-                    if st.button("Reject request", use_container_width=True, key="mgmt_request_reject_btn"):
+                    if st.button("Reject request", width='stretch', key="mgmt_request_reject_btn"):
                         updated_requests = _normalize_auth_requests(requests)
                         target_request = updated_requests.get(pending_pick)
                         if target_request is None:
@@ -7090,7 +7686,7 @@ def _render_user_management_dropdown():
                             _save_auth_requests(updated_requests)
                             _queue_management_confirmation(
                                 f"Rejected account request for {pending_pick}.",
-                                icon="⚠️",
+                                icon="??",
                             )
                             st.rerun()
 
@@ -7105,7 +7701,7 @@ def _render_user_management_dropdown():
             )
             new_enabled = st.checkbox("Enabled for login", value=True, key="mgmt_user_new_enabled")
 
-            if st.button("Create user", use_container_width=True, key="mgmt_user_new_create"):
+            if st.button("Create user", width='stretch', key="mgmt_user_new_create"):
                 username_clean = str(new_username or "").strip()
                 if not username_clean:
                     st.error("Username is required.")
@@ -7146,7 +7742,7 @@ def _render_user_management_dropdown():
 
             st.caption("Guest access remains read-only.")
 
-            if st.button("Apply role workflow settings", use_container_width=True, key="mgmt_role_workflow_apply"):
+            if st.button("Apply role workflow settings", width='stretch', key="mgmt_role_workflow_apply"):
                 updated_role_workflow_settings = _normalize_role_workflow_settings(
                     st.session_state.get("role_workflow_settings")
                 )
@@ -7545,6 +8141,7 @@ defaults = {
     "setup_done": False,
     "run_date": None,
     "run_date_key": None,
+    "sup_last_run_day_completed_key": "",
     "last_setup_date": None,
     "ship_dates": [],
 
@@ -8357,9 +8954,18 @@ st.markdown(
             pointer-events: none;
             z-index: 1700;
         }
+        @media (min-width: 981px) {
+            .shop-notice-wrap.shop-notice-wrap-communications-quarter .shop-notice {
+                left: 12px;
+                top: 88px;
+                transform: none;
+                width: min(280px, calc(100vw - 28px));
+                max-width: min(280px, calc(100vw - 28px));
+            }
+        }
         .notice-bar {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
+            display: flex;
+            justify-content: space-between;
             align-items: center;
             padding: 8px 12px;
             cursor: pointer;
@@ -8371,17 +8977,16 @@ st.markdown(
         }
         .notice-bar-title {
             letter-spacing: 0.04em;
-            grid-column: 2;
-            justify-self: center;
+            flex: 1;
             text-align: center;
             color: #f8fafc;
         }
         .notice-bar-toggle {
             opacity: 0.9;
             font-size: 0.85rem;
-            grid-column: 3;
-            justify-self: end;
             color: #cbd5e1;
+            white-space: nowrap;
+            margin-left: 12px;
         }
         .notice-day-header {
             text-align: center;
@@ -8565,36 +9170,22 @@ st.markdown(
             }
         }
         /* Dialog/Modal Styling - Light dimming backdrop */
-        [data-testid="stModal"]::before,
-        .stModal::before {
-            content: "" !important;
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            background: rgba(0, 0, 0, 0.25) !important;
+        dialog::backdrop {
+            background: rgba(2, 6, 23, 0.08) !important;
+        }
+        div[data-testid="stDialog"] {
+            background: rgba(2, 6, 23, 0.12) !important;
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
-            z-index: 1000 !important;
         }
-        [data-testid="stModal"],
-        .stModal,
-        [role="dialog"] {
-            position: fixed !important;
-            z-index: 1001 !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
+        div[data-testid="stDialog"] > div {
+            background: transparent !important;
+        }
+        div[data-testid="stDialog"] div[role="dialog"] {
             background: #0f172a !important;
             border: 1px solid rgba(148, 163, 184, 0.3) !important;
             border-radius: 8px !important;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45) !important;
-        }
-        /* Ensure modals appear on top of page content */
-        [data-testid="stModal"] > *,
-        .stModal > * {
-            z-index: 1001 !important;
         }
     </style>
     """,
@@ -8759,7 +9350,7 @@ components.html(
                 scheduleApply();
             }
 
-            // ── Permanently suppress Streamlit's dynamic section.main padding-top ──────
+            // -- Permanently suppress Streamlit's dynamic section.main padding-top ------
             // Streamlit JS sets section.main's padding-top to the header height after
             // every React reconciliation cycle. We must watch specifically for that
             // style attribute change and immediately re-zero it. The observer is safe
@@ -8778,14 +9369,14 @@ components.html(
                         if (current && current !== '0px' && current !== '0') {
                             sectionMain.style.setProperty('padding-top', '0', 'important');
                         } else if (!current || current === '') {
-                            // Not an inline style — nothing to fight. Apply once as safety.
+                            // Not an inline style � nothing to fight. Apply once as safety.
                             sectionMain.style.setProperty('padding-top', '0', 'important');
                         }
                     };
 
                     zeroTopPadding();
 
-                    // Watch only this element's style attribute — very cheap and safe.
+                    // Watch only this element's style attribute � very cheap and safe.
                     if (!hostWin.__truckSectionMainPaddingObserver) {
                         const obs = new hostWin.MutationObserver(() => zeroTopPadding());
                         obs.observe(sectionMain, { attributes: true, attributeFilter: ['style'] });
@@ -8797,7 +9388,7 @@ components.html(
             // Retry a few times in case section.main isn't mounted yet at script eval.
             [80, 220, 500, 1200].forEach(ms => hostWin.setTimeout(patchSectionMainPadding, ms));
 
-            // ── Hide spacer element-containers before any .page-heading ────────────────
+            // -- Hide spacer element-containers before any .page-heading ----------------
             // The per-page mobile compress functions skip desktop; this runs everywhere.
             const collapseHeadingSpacers = () => {
                 try {
@@ -8956,6 +9547,59 @@ def _consume_watchdog_diag_query_params(qp: dict):
         diag_stall_ms=None,
         diag_hidden_ms=None,
         diag_vis=None,
+    )
+
+
+def _consume_startup_render_timing_query_params(qp: dict):
+    render_ms_raw = _query_param_first_value(qp, "startup_render_ms")
+    if render_ms_raw in (None, ""):
+        return
+
+    backend_raw = str(_query_param_first_value(qp, "startup_backend_s") or "").strip()
+    fcp_raw = str(_query_param_first_value(qp, "startup_fcp_ms") or "").strip()
+    dom_raw = str(_query_param_first_value(qp, "startup_dom_ms") or "").strip()
+
+    try:
+        render_ms = float(str(render_ms_raw).strip())
+    except Exception:
+        render_ms = -1.0
+
+    if render_ms <= 0:
+        _set_query_params(
+            startup_render_ms=None,
+            startup_backend_s=None,
+            startup_fcp_ms=None,
+            startup_dom_ms=None,
+            startup_render_sent=None,
+        )
+        return
+
+    app_key = _startup_progress_app_key()
+    rendered_seconds = render_ms / 1000.0
+    payload_sig = f"{app_key}|{rendered_seconds:.3f}"
+    if os.environ.get("TRUCKAPP_STARTUP_RENDER_LOGGED") != payload_sig:
+        os.environ["TRUCKAPP_STARTUP_RENDER_LOGGED"] = payload_sig
+        detail_parts = [f"render={rendered_seconds:.3f}s"]
+        if backend_raw:
+            detail_parts.append(f"backend={backend_raw}s")
+        if fcp_raw:
+            detail_parts.append(f"fcp={fcp_raw}ms")
+        if dom_raw:
+            detail_parts.append(f"dom={dom_raw}ms")
+
+        detail_line = "[TruckApp][startup] Client full render timing: " + ", ".join(detail_parts)
+        total_line = f"[TruckApp][startup] Total startup load time: {rendered_seconds:.3f}s"
+        print(_colorize_startup_line(detail_line, _ANSI_GREEN), flush=True)
+        print(_colorize_startup_line(total_line, _ANSI_GREEN), flush=True)
+        logging.info(detail_line)
+        logging.info(total_line)
+
+    _set_query_params(
+        startup_render_ms=None,
+        startup_backend_s=None,
+        startup_fcp_ms=None,
+        startup_dom_ms=None,
+        startup_render_sent=None,
     )
 
 def _page_param_for_screen(screen: str | None) -> str | None:
@@ -9695,7 +10339,7 @@ def render_rollover_prompt_if_needed():
                 data=generate_end_of_day_pdf_bytes(),
                 file_name=f"end_of_day_{run_date.isoformat()}.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                width='stretch',
                 key="rollover_dialog_download_end_of_day_pdf",
             )
 
@@ -9704,7 +10348,7 @@ def render_rollover_prompt_if_needed():
                 if st.button(
                     "Snooze Until Next Shift",
                     key="rollover_dialog_snooze_until_next_shift",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     snooze_until = _next_shift_start_epoch(now_local)
                     _set_user_shift_value("end_of_day_prompt_snooze_until", snooze_until)
@@ -9750,26 +10394,44 @@ def push_shop_notice(message: str, kind: str = "shop", notice_type: str | None =
     st.session_state.hide_shop_notice = False
 
 
-def _queue_management_confirmation(message: str, icon: str = "✅") -> None:
+def _queue_management_confirmation(message: str, icon: str = "ℹ️") -> None:
     text = str(message or "").strip()
     if not text:
         return
     st.session_state["management_confirmation_message"] = text
-    st.session_state["management_confirmation_icon"] = str(icon or "✅").strip() or "✅"
+    st.session_state["management_confirmation_icon"] = str(icon or "ℹ️").strip() or "ℹ️"
 
 
 def _render_management_confirmation_if_any() -> None:
     text = str(st.session_state.pop("management_confirmation_message", "") or "").strip()
     if not text:
         return
-    icon = str(st.session_state.pop("management_confirmation_icon", "✅") or "✅").strip() or "✅"
-    st.toast(text, icon=icon)
+    icon = str(st.session_state.pop("management_confirmation_icon", "ℹ️") or "ℹ️").strip() or "ℹ️"
+    try:
+        st.toast(text, icon=icon)
+    except Exception:
+        st.toast(text, icon="ℹ️")
 
 def render_shop_notice():
     shop_trucks = sorted(st.session_state.shop_set)
     log = list(st.session_state.get("shop_notice_log") or [])
+
+    # Keep only notices from today and yesterday.
+    tzinfo = _get_tzinfo()
+    now_dt = datetime.now(tz=tzinfo) if tzinfo else datetime.now()
+    notice_cutoff_day = now_dt.date() - timedelta(days=1)
+    filtered_log: list[dict] = []
+    for entry in log:
+        try:
+            entry_ts = float(entry.get("ts", time.time()))
+            entry_dt = datetime.fromtimestamp(entry_ts, tz=tzinfo) if tzinfo else datetime.fromtimestamp(entry_ts)
+            if entry_dt.date() >= notice_cutoff_day:
+                filtered_log.append(entry)
+        except Exception:
+            continue
+
     overlay_enabled_for_screen = SHOP_NOTICE_OVERLAY_ENABLED
-    if not log and not shop_trucks:
+    if not overlay_enabled_for_screen and not filtered_log and not shop_trucks:
         components.html(
             """
             <script>
@@ -9805,13 +10467,22 @@ def render_shop_notice():
             width=0,
         )
 
-        if not log and shop_trucks:
+        if not filtered_log and shop_trucks:
             safe_items = ", ".join(f"#{t}" for t in shop_trucks)
             push_shop_notice(f"Sent to shop: {safe_items}", kind="shop")
             log = list(st.session_state.get("shop_notice_log") or [])
+            filtered_log = []
+            for entry in log:
+                try:
+                    entry_ts = float(entry.get("ts", time.time()))
+                    entry_dt = datetime.fromtimestamp(entry_ts, tz=tzinfo) if tzinfo else datetime.fromtimestamp(entry_ts)
+                    if entry_dt.date() >= notice_cutoff_day:
+                        filtered_log.append(entry)
+                except Exception:
+                    continue
             save_state()
 
-        recent = log[-10:]
+        recent = filtered_log[-10:]
         with st.expander("Notices", expanded=False):
             if not recent:
                 st.caption("No notices.")
@@ -9851,13 +10522,22 @@ def render_shop_notice():
                     st.markdown(f"<div>{html.escape(stamp)} {msg}</div>", unsafe_allow_html=True)
         return
 
-    if not log and shop_trucks:
+    if not filtered_log and shop_trucks:
         safe_items = ", ".join(f"#{t}" for t in shop_trucks)
         push_shop_notice(f"Sent to shop: {safe_items}", kind="shop")
         log = list(st.session_state.get("shop_notice_log") or [])
+        filtered_log = []
+        for entry in log:
+            try:
+                entry_ts = float(entry.get("ts", time.time()))
+                entry_dt = datetime.fromtimestamp(entry_ts, tz=tzinfo) if tzinfo else datetime.fromtimestamp(entry_ts)
+                if entry_dt.date() >= notice_cutoff_day:
+                    filtered_log.append(entry)
+            except Exception:
+                continue
         save_state()
 
-    recent = log[-10:]
+    recent = filtered_log[-10:]
     lines: list[str] = []
     last_day_key = None
     for entry in reversed(recent):
@@ -9897,9 +10577,21 @@ def render_shop_notice():
             "</div>"
         )
 
-    notice_id = str(log[-1].get("ts", time.time()))
+    notice_id = str(filtered_log[-1].get("ts", time.time())) if filtered_log else ""
+    if not lines:
+        lines.append(
+            "<div class='notice-item'>"
+            "  <span class='timestamp'>--:--</span>"
+            "  <span class='body' style='opacity:0.75;'>No notices.</span>"
+            "</div>"
+        )
+    active_screen = str(st.session_state.get("active_screen") or "").strip().upper()
+    wrap_class = "shop-notice-wrap"
+    if active_screen == "COMMUNICATIONS":
+        wrap_class += " shop-notice-wrap-communications-quarter"
+
     overlay_markup = (
-        "<div class='shop-notice-wrap'>"
+        f"<div class='{wrap_class}'>"
         f"  <div class='shop-notice' data-notice-id='{notice_id}'>"
         "    <div class='notice-bar'>"
         "      <span class='notice-bar-title'>Notices</span>"
@@ -9915,77 +10607,14 @@ def render_shop_notice():
 
     notice_overlay_script = """
         <script>
-        (function(){{
-            try {{
+        (function() {
+            try {
                 const parentWin = window.parent;
                 const root = parentWin.document;
 
-                const appRoot =
-                    root.querySelector('[data-testid="stAppViewContainer"]') ||
-                    root.querySelector('.stApp');
-                if (!appRoot) {{
-                    const staleHost = root.getElementById('shop-notice-overlay-host');
-                    if (staleHost) staleHost.remove();
-                    return;
-                }}
-
-                const mainContainer =
-                    root.querySelector('[data-testid="stMainBlockContainer"]') ||
-                    root.querySelector('[data-testid="stMain"]') ||
-                    root.querySelector('section.main');
-                if (!mainContainer) {{
-                    const staleHost = root.getElementById('shop-notice-overlay-host');
-                    if (staleHost) staleHost.remove();
-                    return;
-                }}
-                const mainRect =
-                    typeof mainContainer.getBoundingClientRect === 'function'
-                        ? mainContainer.getBoundingClientRect()
-                        : {{ width: 0, height: 0 }};
-                const isVisibleNode = (node, minWidth = 16, minHeight = 10) => {{
-                    try {{
-                        if (!node || typeof node.getBoundingClientRect !== 'function') return false;
-                        const style = parentWin.getComputedStyle ? parentWin.getComputedStyle(node) : null;
-                        if (style) {{
-                            const opacity = Number(style.opacity);
-                            if (style.display === 'none' || style.visibility === 'hidden' || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
-                                return false;
-                            }}
-                        }}
-                        const rect = node.getBoundingClientRect();
-                        return rect.width >= minWidth && rect.height >= minHeight;
-                    }} catch (e) {{
-                        return false;
-                    }}
-                }};
-                const selectors = [
-                    '[data-testid="stButton"]',
-                    '[data-testid="stSelectbox"]',
-                    '[data-testid="stMultiSelect"]',
-                    '[data-testid="stTextInput"]',
-                    '[data-testid="stNumberInput"]',
-                    '[data-testid="stTextArea"]',
-                    '[data-testid="stTable"]',
-                    '[data-testid="stDataFrame"]',
-                    '[data-testid="stAlert"]',
-                    '[data-testid="stHeading"]',
-                    '[data-testid="stMarkdownContainer"]',
-                    'button',
-                    'input',
-                    'textarea',
-                    'table'
-                ].join(', ');
-                const mainHasVisibleContent = Array.from(mainContainer.querySelectorAll(selectors)).some((node) => isVisibleNode(node));
-                const mainReady = mainRect.width > 80 && mainRect.height > 60 && mainHasVisibleContent;
-                if (!mainReady) {{
-                    const staleHost = root.getElementById('shop-notice-overlay-host');
-                    if (staleHost) staleHost.remove();
-                    return;
-                }}
-
                 const overlayHostId = 'shop-notice-overlay-host';
                 let overlayHost = root.getElementById(overlayHostId);
-                if (!overlayHost) {{
+                if (!overlayHost) {
                     overlayHost = root.createElement('div');
                     overlayHost.id = overlayHostId;
                     overlayHost.style.setProperty('position', 'fixed', 'important');
@@ -9996,7 +10625,7 @@ def render_shop_notice():
                     overlayHost.style.setProperty('pointer-events', 'none', 'important');
                     overlayHost.style.setProperty('z-index', '1700', 'important');
                     root.body.appendChild(overlayHost);
-                }}
+                }
                 overlayHost.innerHTML = __OVERLAY_MARKUP__;
 
                 const notice = overlayHost.querySelector('.shop-notice');
@@ -10004,153 +10633,137 @@ def render_shop_notice():
                 const toggle = notice ? notice.querySelector('.notice-bar-toggle') : null;
                 if (!notice || !bar || !toggle) return;
 
-                const storage = (() => {{
-                    try {{ return parentWin.localStorage; }} catch(e) {{ return null; }}
-                }})();
-                const getStored = (key, fallback) => {{
-                    try {{
+                const storage = (() => {
+                    try { return parentWin.localStorage; } catch (e) { return null; }
+                })();
+                const getStored = (key, fallback) => {
+                    try {
                         if (!storage) return fallback;
                         const val = storage.getItem(key);
                         return val == null ? fallback : val;
-                    }} catch (e) {{
+                    } catch (e) {
                         return fallback;
-                    }}
-                }};
-                const setStored = (key, value) => {{
-                    try {{
+                    }
+                };
+                const setStored = (key, value) => {
+                    try {
                         if (storage) storage.setItem(key, value);
-                    }} catch (e) {{}}
-                }};
+                    } catch (e) {}
+                };
 
-                const isMobileSidebarOpen = (viewportW) => {{
-                    try {{
-                        if (Number(viewportW || 0) > 980) return false;
-                        const sidebar = root.querySelector('section[data-testid="stSidebar"]');
-                        if (!sidebar) return false;
-
-                        const style = parentWin.getComputedStyle ? parentWin.getComputedStyle(sidebar) : null;
-                        if (style) {{
-                            const opacity = Number(style.opacity);
-                            if (style.display === 'none' || style.visibility === 'hidden' || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
-                                return false;
-                            }}
-                        }}
-
-                        const rect =
-                            typeof sidebar.getBoundingClientRect === 'function'
-                                ? sidebar.getBoundingClientRect()
-                                : {{ left: -9999, right: -9999, width: 0, height: 0 }};
-                        if (rect.width < 90 || rect.height < 120) return false;
-
-                        const expandedAttr = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase();
-                        if (expandedAttr === 'true') return true;
-
-                        return rect.right > 70 && rect.left < (Number(viewportW || 0) - 20);
-                    }} catch (e) {{
-                        return false;
-                    }}
-                }};
-
-                const syncNoticeInteractivity = (viewportW) => {{
-                    const sidebarOpen = isMobileSidebarOpen(viewportW);
-                    if (sidebarOpen) {{
-                        notice.style.setProperty('pointer-events', 'none', 'important');
-                        notice.style.setProperty('visibility', 'hidden', 'important');
-                    }} else {{
-                        notice.style.setProperty('pointer-events', 'auto', 'important');
-                        notice.style.setProperty('visibility', 'visible', 'important');
-                    }}
-                }};
-
-                const positionNotice = () => {{
-                    try {{
+                const positionNotice = () => {
+                    try {
                         const viewportW = Math.max(0, parentWin.innerWidth || root.documentElement.clientWidth || 0);
                         const viewportH = Math.max(0, parentWin.innerHeight || root.documentElement.clientHeight || 0);
                         const header = root.querySelector('header[data-testid="stHeader"]');
+                        const communicationsRailMode = !!notice.closest('.shop-notice-wrap-communications-quarter');
+
                         let headerBottom = 0;
-                        if (header) {{
-                            const headerRect = header.getBoundingClientRect();
-                            const headerStyle = parentWin.getComputedStyle ? parentWin.getComputedStyle(header) : null;
-                            const headerVisible = !!(
-                                headerRect &&
-                                headerRect.height > 6 &&
-                                (!headerStyle || (
-                                    headerStyle.display !== 'none' &&
-                                    headerStyle.visibility !== 'hidden' &&
-                                    Number(headerStyle.opacity || 1) > 0.02
-                                ))
-                            );
-                            // Guard against stale/oversized header geometry that creates artificial top whitespace.
-                            if (headerVisible && Number.isFinite(headerRect.bottom) && headerRect.bottom <= 72) {{
-                                headerBottom = Math.max(0, Math.round(headerRect.bottom));
-                            }}
-                        }}
+                        if (header) {
+                            const hrect = header.getBoundingClientRect();
+                            if (hrect && Number.isFinite(hrect.bottom) && hrect.height > 6 && hrect.bottom <= 72) {
+                                headerBottom = Math.max(0, Math.round(hrect.bottom));
+                            }
+                        }
 
                         const main =
                             root.querySelector('[data-testid="stMainBlockContainer"]') ||
                             root.querySelector('section.main > div.block-container') ||
                             root.querySelector('.main .block-container');
 
+                        const edgePad = viewportW <= 980 ? 8 : 14;
                         let leftPx = Math.round(viewportW / 2);
                         let widthPx = Math.max(280, Math.min(1080, viewportW - 20));
-                        const topPx = headerBottom + (viewportW <= 980 ? 4 : 6);
+                        let topPx = headerBottom + (viewportW <= 980 ? 4 : 6);
 
-                        if (main) {{
-                            const rect = main.getBoundingClientRect();
-                            if (rect && rect.width > 240) {{
-                                leftPx = Math.round(rect.left + (rect.width / 2));
-                                widthPx = Math.max(280, Math.min(1080, Math.round(rect.width - 8)));
-                            }}
-                        }}
+                        if (communicationsRailMode && viewportW > 980) {
+                            const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                            let sidebarRightPx = 0;
+                            if (sidebar) {
+                                const srect = sidebar.getBoundingClientRect();
+                                const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() !== 'false';
+                                if (expanded && srect && srect.width > 40 && srect.right > 0) {
+                                    sidebarRightPx = Math.max(0, Math.round(srect.right));
+                                }
+                            }
 
-                        const edgePad = viewportW <= 980 ? 8 : 14;
+                            let mainLeftPx = Math.round(viewportW - 12);
+                            if (main) {
+                                const mrect = main.getBoundingClientRect();
+                                if (mrect && Number.isFinite(mrect.left) && mrect.left > 0) {
+                                    mainLeftPx = Math.round(mrect.left);
+                                }
+                            }
+
+                            const railGap = 10;
+                            const railLeft = Math.max(8, sidebarRightPx + railGap);
+                            const railRight = Math.max(railLeft + 220, mainLeftPx - railGap);
+                            leftPx = railLeft;
+                            widthPx = Math.max(220, Math.min(420, railRight - railLeft));
+                            topPx = headerBottom + 88;
+                        } else if (main) {
+                            const mrect = main.getBoundingClientRect();
+                            if (mrect && mrect.width > 240) {
+                                leftPx = Math.round(mrect.left + (mrect.width / 2));
+                                widthPx = Math.max(280, Math.min(1080, Math.round(mrect.width - 8)));
+                            }
+                        }
+
                         notice.style.setProperty('position', 'fixed', 'important');
                         notice.style.setProperty('left', String(leftPx) + 'px', 'important');
                         notice.style.setProperty('top', String(topPx) + 'px', 'important');
                         notice.style.setProperty('width', String(widthPx) + 'px', 'important');
                         notice.style.setProperty('max-width', 'calc(100vw - ' + String(edgePad * 2) + 'px)', 'important');
+                        notice.style.setProperty('transform', communicationsRailMode && viewportW > 980 ? 'none' : 'translateX(-50%)', 'important');
                         notice.style.setProperty('z-index', '1705', 'important');
-                        syncNoticeInteractivity(viewportW);
+                        notice.style.setProperty('pointer-events', 'auto', 'important');
+                        notice.style.setProperty('visibility', 'visible', 'important');
 
                         const body = notice.querySelector('.notice-body');
-                        if (body) {{
+                        if (body) {
                             const maxBodyPx = viewportW <= 980
                                 ? Math.max(120, Math.round(viewportH * 0.34))
                                 : Math.max(160, Math.round(viewportH * 0.48));
                             body.style.setProperty('max-height', String(maxBodyPx) + 'px', 'important');
-                        }}
-                    }} catch (e) {{}}
-                }};
+                        }
+                    } catch (e) {}
+                };
 
                 const id = notice.getAttribute('data-notice-id') || '';
-                const applyState = () => {{
-                    const collapsed = getStored('shopNoticeCollapsed', '0') === '1';
-                    if (collapsed) {{
+                const applyState = () => {
+                    const collapsed = getStored('shopNoticeCollapsed', '1') === '1';
+                    if (collapsed) {
                         notice.classList.add('collapsed');
                         toggle.textContent = 'Expand';
-                    }} else {{
+                    } else {
                         notice.classList.remove('collapsed');
                         toggle.textContent = 'Collapse';
-                    }}
-                }};
+                    }
+                };
 
-                const applyFlashState = () => {{
-                    const collapsed = getStored('shopNoticeCollapsed', '0') === '1';
+                const applyFlashState = () => {
+                    const collapsed = getStored('shopNoticeCollapsed', '1') === '1';
                     const ackId = getStored('shopNoticeAckId', '');
-                    const hasUnacknowledged = id && ackId !== id;
+                    const hasUnacknowledged = !!id && ackId !== id;
                     notice.classList.remove('flash');
                     notice.classList.remove('flash-collapsed');
                     if (!hasUnacknowledged) return;
                     if (collapsed) notice.classList.add('flash-collapsed');
                     else notice.classList.add('flash');
-                }};
+                };
 
-                const acknowledgeNotice = () => {{
+                const acknowledgeNotice = () => {
                     if (!id) return;
                     setStored('shopNoticeAckId', id);
                     notice.classList.remove('flash');
                     notice.classList.remove('flash-collapsed');
-                }};
+                };
+
+                const ackId = getStored('shopNoticeAckId', '');
+                const hasUnacknowledged = !!id && ackId !== id;
+                if (hasUnacknowledged) {
+                    setStored('shopNoticeCollapsed', '0');
+                }
 
                 applyState();
                 applyFlashState();
@@ -10159,50 +10772,102 @@ def render_shop_notice():
                 setTimeout(positionNotice, 260);
                 setTimeout(positionNotice, 640);
 
-                bar.onclick = function() {{
+                bar.onclick = function() {
                     acknowledgeNotice();
                     const collapsed = notice.classList.contains('collapsed');
                     setStored('shopNoticeCollapsed', collapsed ? '0' : '1');
                     applyState();
                     positionNotice();
-                }};
+                };
 
                 parentWin.__positionShopNoticeOverlay = positionNotice;
-                if (!parentWin.__shopNoticeOverlayResizeBound) {{
+                if (!parentWin.__shopNoticeOverlayResizeBound) {
                     const raf = parentWin.requestAnimationFrame
                         ? parentWin.requestAnimationFrame.bind(parentWin)
                         : ((fn) => parentWin.setTimeout(fn, 16));
-                    parentWin.addEventListener('resize', () => {{
-                        try {{
+                    parentWin.addEventListener('resize', () => {
+                        try {
                             if (parentWin.__shopNoticeOverlayResizeRaf) return;
-                            parentWin.__shopNoticeOverlayResizeRaf = raf(() => {{
+                            parentWin.__shopNoticeOverlayResizeRaf = raf(() => {
                                 parentWin.__shopNoticeOverlayResizeRaf = null;
-                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {{
+                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
                                     parentWin.__positionShopNoticeOverlay();
-                                }}
-                            }});
-                        }} catch (e) {{}}
-                    }}, {{ passive: true }});
+                                }
+                            });
+                        } catch (e) {}
+                    }, { passive: true });
                     parentWin.__shopNoticeOverlayResizeBound = true;
-                }}
+                }
 
-                if (!parentWin.__shopNoticeOverlayInteractionBound) {{
-                    const schedulePositionSync = () => {{
-                        try {{
-                            parentWin.setTimeout(() => {{
-                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {{
+                if (!parentWin.__shopNoticeOverlaySidebarTrackBound) {
+                    const sidebar = root.querySelector('section[data-testid="stSidebar"]');
+                    const syncNow = () => {
+                        try {
+                            if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
+                                parentWin.__positionShopNoticeOverlay();
+                            }
+                        } catch (e) {}
+                    };
+                    const scheduleSync = () => {
+                        try {
+                            const raf = parentWin.requestAnimationFrame
+                                ? parentWin.requestAnimationFrame.bind(parentWin)
+                                : ((fn) => parentWin.setTimeout(fn, 16));
+                            if (parentWin.__shopNoticeOverlaySidebarTrackRaf) return;
+                            parentWin.__shopNoticeOverlaySidebarTrackRaf = raf(() => {
+                                parentWin.__shopNoticeOverlaySidebarTrackRaf = null;
+                                syncNow();
+                            });
+                        } catch (e) {}
+                    };
+
+                    if (sidebar) {
+                        try {
+                            const observer = new MutationObserver(() => scheduleSync());
+                            observer.observe(sidebar, {
+                                attributes: true,
+                                attributeFilter: ['style', 'class', 'aria-expanded'],
+                            });
+                            parentWin.__shopNoticeOverlaySidebarObserver = observer;
+                        } catch (e) {}
+
+                        try {
+                            sidebar.addEventListener('transitionrun', scheduleSync, true);
+                            sidebar.addEventListener('transitionstart', scheduleSync, true);
+                            sidebar.addEventListener('transitionend', scheduleSync, true);
+                        } catch (e) {}
+
+                        let sidebarPointerDown = false;
+                        try {
+                            sidebar.addEventListener('pointerdown', () => { sidebarPointerDown = true; }, true);
+                            parentWin.addEventListener('pointerup', () => { sidebarPointerDown = false; scheduleSync(); }, true);
+                            parentWin.addEventListener('pointercancel', () => { sidebarPointerDown = false; scheduleSync(); }, true);
+                            parentWin.addEventListener('pointermove', () => {
+                                if (sidebarPointerDown) scheduleSync();
+                            }, { passive: true, capture: true });
+                        } catch (e) {}
+                    }
+
+                    parentWin.__shopNoticeOverlaySidebarTrackBound = true;
+                }
+
+                if (!parentWin.__shopNoticeOverlayInteractionBound) {
+                    const schedulePositionSync = () => {
+                        try {
+                            parentWin.setTimeout(() => {
+                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
                                     parentWin.__positionShopNoticeOverlay();
-                                }}
-                            }}, 28);
-                        }} catch (e) {{}}
-                    }};
+                                }
+                            }, 28);
+                        } catch (e) {}
+                    };
                     root.addEventListener('pointerdown', schedulePositionSync, true);
                     root.addEventListener('click', schedulePositionSync, true);
                     root.addEventListener('keydown', schedulePositionSync, true);
                     parentWin.__shopNoticeOverlayInteractionBound = true;
-                }}
-            }} catch (e) {{}}
-        }})();
+                }
+            } catch (e) {}
+        })();
         </script>
         """
     components.html(
@@ -12123,7 +12788,7 @@ def render_numeric_truck_buttons(
                 if not str(label).strip():
                     st.markdown("&nbsp;", unsafe_allow_html=True)
                     continue
-                if st.button(label, key=f"{key_prefix}_{value}", use_container_width=True, type="primary"):
+                if st.button(label, key=f"{key_prefix}_{value}", width='stretch', type="primary"):
                     if _is_numeric:
                         return int(value)
                     return str(value)
@@ -12455,7 +13120,7 @@ def _render_fleet_left_rail_actions():
         def _render_unload_request_dialog_body():
             if not requestable_trucks:
                 st.info("No Dirty or Spare trucks are currently available for unload request.")
-                if st.button("Close", use_container_width=True, key="sup_manage_unload_request_close_empty"):
+                if st.button("Close", width='stretch', key="sup_manage_unload_request_close_empty"):
                     _close_unload_request_dialog()
                     st.rerun()
                 return
@@ -12487,7 +13152,7 @@ def _render_fleet_left_rail_actions():
 
             c_req, c_cancel = st.columns([1, 1])
             with c_req:
-                if st.button("Request Unload", use_container_width=True, key="sup_manage_unload_request_submit"):
+                if st.button("Request Unload", width='stretch', key="sup_manage_unload_request_submit"):
                     truck_num = int(st.session_state.get(unload_request_pick_key))
                     unload_request_set = _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())
                     unload_request_set.add(int(truck_num))
@@ -12503,7 +13168,7 @@ def _render_fleet_left_rail_actions():
                     _close_unload_request_dialog()
                     st.rerun()
             with c_cancel:
-                if st.button("Cancel", use_container_width=True, key="sup_manage_unload_request_cancel"):
+                if st.button("Cancel", width='stretch', key="sup_manage_unload_request_cancel"):
                     _close_unload_request_dialog()
                     st.rerun()
 
@@ -12524,13 +13189,13 @@ def _render_fleet_left_rail_actions():
             with mode_c1:
                 unload_request_pressed = st.button(
                     "Unload Request",
-                    use_container_width=True,
+                    width='stretch',
                     key="fleet_left_unload_request_mode",
                 )
             with mode_c2:
                 multi_pressed = st.button(
                     "Multi Select",
-                    use_container_width=True,
+                    width='stretch',
                     key="fleet_left_multi_mode",
                 )
 
@@ -12538,34 +13203,34 @@ def _render_fleet_left_rail_actions():
             with mode_c3:
                 swap_pressed = st.button(
                     "Swap Routes",
-                    use_container_width=True,
+                    width='stretch',
                     key="fleet_left_swap_mode",
                 )
             with mode_c4:
                 new_pressed = st.button(
                     "Add/Remove",
-                    use_container_width=True,
+                    width='stretch',
                     key="fleet_left_new_mode",
                 )
         else:
             unload_request_pressed = st.button(
                 "Unload Request",
-                use_container_width=True,
+                width='stretch',
                 key="fleet_left_unload_request_mode",
             )
             multi_pressed = st.button(
                 "Multi Select",
-                use_container_width=True,
+                width='stretch',
                 key="fleet_left_multi_mode",
             )
             swap_pressed = st.button(
                 "Swap Routes",
-                use_container_width=True,
+                width='stretch',
                 key="fleet_left_swap_mode",
             )
             new_pressed = st.button(
                 "Add/Remove",
-                use_container_width=True,
+                width='stretch',
                 key="fleet_left_new_mode",
             )
 
@@ -12648,11 +13313,11 @@ def _render_fleet_left_rail_actions():
 
         c1, c2 = st.columns([1, 1])
         with c1:
-            if st.button("Select All", use_container_width=True, key="fleet_left_multi_select_all"):
+            if st.button("Select All", width='stretch', key="fleet_left_multi_select_all"):
                 st.session_state[selected_trucks_key] = sorted({int(t) for t in FLEET})
                 st.rerun()
         with c2:
-            if st.button("Clear", use_container_width=True, key="fleet_left_multi_clear"):
+            if st.button("Clear", width='stretch', key="fleet_left_multi_clear"):
                 st.session_state[selected_trucks_key] = []
                 st.rerun()
 
@@ -12676,7 +13341,7 @@ def _render_fleet_left_rail_actions():
                 current_value=str(st.session_state.get("sup_manage_multi_status_load_on") or ""),
             )
 
-        if st.button("Apply status change", key="fleet_left_multi_apply", use_container_width=True):
+        if st.button("Apply status change", key="fleet_left_multi_apply", width='stretch'):
             if not target_trucks:
                 st.warning("Select at least one truck.")
             elif status_sel == "In Progress" and len(target_trucks) > 1:
@@ -12693,7 +13358,7 @@ def _render_fleet_left_rail_actions():
                     st.success(f"Updated {len(target_trucks)} trucks to {status_sel}.")
                 st.rerun()
 
-        if st.button("Exit Multi Select", use_container_width=True, key="fleet_left_multi_exit_mode"):
+        if st.button("Exit Multi Select", width='stretch', key="fleet_left_multi_exit_mode"):
             st.session_state.sup_manage_multi_mode = False
             st.session_state[selected_trucks_key] = []
             st.rerun()
@@ -12964,7 +13629,7 @@ def render_fleet_management():
             )
             pending_key = f"sup_remove_route_pending_{scope_key}"
 
-            if st.button("Remove route", use_container_width=True, key=f"sup_remove_route_btn_{scope_key}"):
+            if st.button("Remove route", width='stretch', key=f"sup_remove_route_btn_{scope_key}"):
                 st.session_state[pending_key] = int(remove_pick)
                 st.rerun()
 
@@ -12976,7 +13641,7 @@ def render_fleet_management():
                 )
                 c1, c2 = st.columns([1, 1])
                 with c1:
-                    if st.button("Confirm remove", use_container_width=True, key=f"sup_remove_route_confirm_{scope_key}"):
+                    if st.button("Confirm remove", width='stretch', key=f"sup_remove_route_confirm_{scope_key}"):
                         ok_remove, remove_message = _remove_truck_from_fleet(int(remove_pick))
                         st.session_state.pop(pending_key, None)
                         if ok_remove:
@@ -12984,7 +13649,7 @@ def render_fleet_management():
                             return True
                         st.warning(remove_message)
                 with c2:
-                    if st.button("Cancel", use_container_width=True, key=f"sup_remove_route_cancel_{scope_key}"):
+                    if st.button("Cancel", width='stretch', key=f"sup_remove_route_cancel_{scope_key}"):
                         st.session_state.pop(pending_key, None)
                         st.rerun()
 
@@ -13002,7 +13667,7 @@ def render_fleet_management():
                     route_changed = _render_add_remove_routes_panel("dialog")
                     c_close = st.columns([1, 1, 1])[1]
                     with c_close:
-                        if st.button("Close", use_container_width=True, key="sup_add_truck_close_dialog"):
+                        if st.button("Close", width='stretch', key="sup_add_truck_close_dialog"):
                             _close_new_truck_dialog()
                     if route_changed:
                         st.session_state["sup_manage_new_dialog_open"] = False
@@ -13012,7 +13677,7 @@ def render_fleet_management():
             else:
                 st.markdown("### Add/Remove Routes")
                 route_changed = _render_add_remove_routes_panel("inline")
-                if st.button("Close", use_container_width=True, key="sup_add_truck_close_inline"):
+                if st.button("Close", width='stretch', key="sup_add_truck_close_inline"):
                     _close_new_truck_dialog()
                 if route_changed:
                     st.session_state["sup_manage_new_dialog_open"] = False
@@ -13150,10 +13815,10 @@ def render_fleet_management():
                     _render_route_change_fields()
                     c_apply, c_cancel = st.columns([1, 1])
                     with c_apply:
-                        if st.button("Apply", use_container_width=True, key="sup_manage_route_change_apply"):
+                        if st.button("Apply", width='stretch', key="sup_manage_route_change_apply"):
                             _submit_route_change_dialog()
                     with c_cancel:
-                        if st.button("Cancel", use_container_width=True, key="sup_manage_route_change_cancel"):
+                        if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel"):
                             _cancel_route_change_dialog()
 
                 _render_route_change_dialog()
@@ -13163,10 +13828,10 @@ def render_fleet_management():
                 _render_route_change_fields()
                 c_apply, c_cancel = st.columns([1, 1])
                 with c_apply:
-                    if st.button("Apply", use_container_width=True, key="sup_manage_route_change_apply_inline"):
+                    if st.button("Apply", width='stretch', key="sup_manage_route_change_apply_inline"):
                         _submit_route_change_dialog()
                 with c_cancel:
-                    if st.button("Cancel", use_container_width=True, key="sup_manage_route_change_cancel_inline"):
+                    if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel_inline"):
                         _cancel_route_change_dialog()
         return
 
@@ -13185,7 +13850,7 @@ def render_fleet_management():
     render_truck_status_card(sel, size_variant="fleet")
     c_back = st.columns(3)[1]
     with c_back:
-        if st.button("Change Truck", use_container_width=True, key="sup_manage_back"):
+        if st.button("Change Truck", width='stretch', key="sup_manage_back"):
             st.session_state["sup_manage_option_dialog_open"] = False
             st.session_state["sup_manage_option_dialog_action"] = None
             st.session_state["sup_manage_option_dialog_truck"] = None
@@ -13288,6 +13953,7 @@ def render_fleet_management():
                 if daily_key not in st.session_state:
                     st.session_state[daily_key] = str(daily_note or "")
 
+                st.write("**Management notes**")
                 st.text_area(
                     "General notes (persist across days)",
                     height=110,
@@ -13301,25 +13967,25 @@ def render_fleet_management():
 
                 c1, c2, c3 = st.columns([1, 1, 1])
                 with c1:
-                    if st.button("Clear daily", use_container_width=True, key=f"sup_manage_dialog_clear_daily_{int(sel)}"):
-                        st.session_state.sup_notes_daily.pop(int(sel), None)
-                        save_state()
-                        st.session_state["sup_manage_option_feedback"] = "Daily note cleared."
+                    if st.button("Save notes", width='stretch', key=f"sup_manage_dialog_save_notes_{int(sel)}"):
+                        st.session_state.sup_notes_global[int(sel)] = str(st.session_state.get(global_key) or "").strip()
+                        st.session_state.sup_notes_daily[int(sel)] = str(st.session_state.get(daily_key) or "").strip()
+                        _mark_and_save()
+                        st.session_state["sup_manage_option_feedback"] = f"Notes saved for Truck {int(sel)}."
                         _close_option_dialog()
                         st.rerun()
                 with c2:
-                    if st.button("Save notes", use_container_width=True, key=f"sup_manage_dialog_save_notes_{int(sel)}"):
-                        st.session_state.sup_notes_global[int(sel)] = str(st.session_state.get(global_key) or "").strip()
-                        st.session_state.sup_notes_daily[int(sel)] = str(st.session_state.get(daily_key) or "").strip()
-                        save_state()
-                        st.session_state["sup_manage_option_feedback"] = "Notes saved."
+                    if st.button("Clear daily", width='stretch', key=f"sup_manage_dialog_clear_daily_{int(sel)}"):
+                        st.session_state.sup_notes_daily.pop(int(sel), None)
+                        _mark_and_save()
+                        st.session_state["sup_manage_option_feedback"] = f"Daily note cleared for Truck {int(sel)}."
                         _close_option_dialog()
                         st.rerun()
                 with c3:
-                    if st.button("Clear global", use_container_width=True, key=f"sup_manage_dialog_clear_global_{int(sel)}"):
+                    if st.button("Clear global", width='stretch', key=f"sup_manage_dialog_clear_global_{int(sel)}"):
                         st.session_state.sup_notes_global.pop(int(sel), None)
-                        save_state()
-                        st.session_state["sup_manage_option_feedback"] = "General note cleared."
+                        _mark_and_save()
+                        st.session_state["sup_manage_option_feedback"] = f"General note cleared for Truck {int(sel)}."
                         _close_option_dialog()
                         st.rerun()
 
@@ -13340,7 +14006,7 @@ def render_fleet_management():
                         current_value=str((st.session_state.get("shop_spares") or {}).get(int(sel), "") or ""),
                     )
 
-                if st.button("Apply status change", use_container_width=True, key=f"sup_manage_dialog_apply_status_{int(sel)}"):
+                if st.button("Apply status change", width='stretch', key=f"sup_manage_dialog_apply_status_{int(sel)}"):
                     _apply_truck_status_change(int(sel), status_sel, shop_load_on=shop_load_on)
                     _mark_and_save()
                     st.session_state["sup_manage_option_feedback"] = _status_update_feedback_message(int(sel), status_sel)
@@ -13386,7 +14052,7 @@ def render_fleet_management():
                     _close_option_dialog()
                     st.rerun()
 
-                if st.button("Send to Shop", use_container_width=True, key=f"sup_manage_dialog_send_shop_{int(sel)}"):
+                if st.button("Send to Shop", width='stretch', key=f"sup_manage_dialog_send_shop_{int(sel)}"):
                     if is_duplicate_notice(int(sel), "shop_send"):
                         st.session_state.shop_send_confirm = {
                             "truck": int(sel),
@@ -13401,14 +14067,14 @@ def render_fleet_management():
                     st.warning(f"Truck {int(sel)} already has a Shop notice today. Send again?")
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button("Confirm send", use_container_width=True, key=f"sup_manage_dialog_send_shop_confirm_{int(sel)}"):
+                        if st.button("Confirm send", width='stretch', key=f"sup_manage_dialog_send_shop_confirm_{int(sel)}"):
                             _send_to_shop(str(confirm_send.get("reason", "")), str(confirm_send.get("spare", "")))
                     with c2:
-                        if st.button("Cancel", use_container_width=True, key=f"sup_manage_dialog_send_shop_cancel_{int(sel)}"):
+                        if st.button("Cancel", width='stretch', key=f"sup_manage_dialog_send_shop_cancel_{int(sel)}"):
                             st.session_state.shop_send_confirm = None
                             st.rerun()
 
-                if st.button("Returned", use_container_width=True, key=f"sup_manage_dialog_returned_shop_{int(sel)}"):
+                if st.button("Returned", width='stretch', key=f"sup_manage_dialog_returned_shop_{int(sel)}"):
                     ok_returned, _ = _return_truck_from_shop(int(sel))
                     if ok_returned:
                         _mark_and_save()
@@ -13420,7 +14086,7 @@ def render_fleet_management():
             elif dialog_action == "Ran Special":
                 special_key = f"sup_manage_dialog_special_note_{int(sel)}"
                 special_note = st.text_input("Special note (optional)", key=special_key)
-                if st.button("Mark Ran Special", use_container_width=True, key=f"sup_manage_dialog_mark_special_{int(sel)}"):
+                if st.button("Mark Ran Special", width='stretch', key=f"sup_manage_dialog_mark_special_{int(sel)}"):
                     if is_duplicate_notice(int(sel), "ran_special"):
                         st.session_state.ran_special_confirm = {
                             "truck": int(sel),
@@ -13437,14 +14103,14 @@ def render_fleet_management():
                     st.warning(f"Truck {int(sel)} already has a Ran Special notice today. Send again?")
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button("Confirm ran special", use_container_width=True, key=f"sup_manage_dialog_confirm_special_{int(sel)}"):
+                        if st.button("Confirm ran special", width='stretch', key=f"sup_manage_dialog_confirm_special_{int(sel)}"):
                             _mark_ran_special_from_dialog(str(confirm_special.get("note", "")))
                             st.session_state.ran_special_confirm = None
                             st.session_state["sup_manage_option_feedback"] = f"Truck {int(sel)} marked Ran Special (needs unload)."
                             _close_option_dialog()
                             st.rerun()
                     with c2:
-                        if st.button("Cancel", use_container_width=True, key=f"sup_manage_dialog_cancel_special_{int(sel)}"):
+                        if st.button("Cancel", width='stretch', key=f"sup_manage_dialog_cancel_special_{int(sel)}"):
                             st.session_state.ran_special_confirm = None
                             st.rerun()
 
@@ -13459,7 +14125,7 @@ def render_fleet_management():
 
                 if st.button(
                     "Request Unload",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"sup_manage_dialog_request_unload_{int(sel)}",
                     disabled=already_requested,
                 ):
@@ -13473,7 +14139,7 @@ def render_fleet_management():
 
             elif dialog_action == "Add/Remove":
                 st.write("### Remove truck from fleet")
-                if st.button("Remove truck", key=f"sup_manage_dialog_remove_{int(sel)}", use_container_width=True):
+                if st.button("Remove truck", key=f"sup_manage_dialog_remove_{int(sel)}", width='stretch'):
                     st.session_state.sup_pending_remove = int(sel)
                     st.rerun()
 
@@ -13485,7 +14151,7 @@ def render_fleet_management():
                     )
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button("Confirm remove", key=f"sup_manage_dialog_confirm_remove_{int(sel)}", use_container_width=True):
+                        if st.button("Confirm remove", key=f"sup_manage_dialog_confirm_remove_{int(sel)}", width='stretch'):
                             t = int(sel)
                             _remove_truck_from_fleet(t)
                             st.session_state.sup_manage_truck = None
@@ -13497,7 +14163,7 @@ def render_fleet_management():
                             _close_option_dialog()
                             st.rerun()
                     with c2:
-                        if st.button("Cancel removal", key=f"sup_manage_dialog_cancel_remove_{int(sel)}", use_container_width=True):
+                        if st.button("Cancel removal", key=f"sup_manage_dialog_cancel_remove_{int(sel)}", width='stretch'):
                             st.session_state.sup_pending_remove = None
                             st.rerun()
 
@@ -13517,7 +14183,7 @@ def render_fleet_management():
                 else:
                     elapsed_secs = elapsed_seconds()
                     st.caption(f"Elapsed: {seconds_to_mmss(elapsed_secs)}")
-                    if st.button("Finish Loading", use_container_width=True, key=f"sup_manage_dialog_finish_loading_{int(sel)}"):
+                    if st.button("Finish Loading", width='stretch', key=f"sup_manage_dialog_finish_loading_{int(sel)}"):
                         t = int(sel)
                         sec = elapsed_seconds()
                         st.session_state.load_durations[t] = sec
@@ -13567,7 +14233,7 @@ def render_fleet_management():
                         st.caption("Loaded trucks are unavailable for assignment.")
                     if st.button(
                         "Assign",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"sup_manage_dialog_assign_apply_{int(sel)}",
                         disabled=picked_truck_locked,
                     ):
@@ -13579,7 +14245,7 @@ def render_fleet_management():
                         st.warning(msg_assign)
 
             st.divider()
-            if st.button("Close", use_container_width=True, key=f"sup_manage_dialog_close_{dialog_action}_{int(sel)}"):
+            if st.button("Close", width='stretch', key=f"sup_manage_dialog_close_{dialog_action}_{int(sel)}"):
                 st.session_state.shop_send_confirm = None
                 st.session_state.ran_special_confirm = None
                 _close_option_dialog()
@@ -13609,7 +14275,7 @@ def render_fleet_management():
         for idx, label in enumerate(action_labels):
             col = cols[idx % 3]
             with col:
-                if st.button(label, key=f"sup_manage_action_btn_{label}", use_container_width=True):
+                if st.button(label, key=f"sup_manage_action_btn_{label}", width='stretch'):
                     st.session_state["sup_manage_option_dialog_open"] = True
                     st.session_state["sup_manage_option_dialog_action"] = str(label)
                     st.session_state["sup_manage_option_dialog_truck"] = int(sel)
@@ -13620,7 +14286,7 @@ def render_fleet_management():
 
     c_back_action = st.columns(3)[1]
     with c_back_action:
-        if st.button("Change Option", use_container_width=True, key="sup_manage_back_action"):
+        if st.button("Change Option", width='stretch', key="sup_manage_back_action"):
             st.session_state["sup_manage_option_dialog_open"] = False
             st.session_state["sup_manage_option_dialog_action"] = None
             st.session_state["sup_manage_option_dialog_truck"] = None
@@ -13664,18 +14330,18 @@ def render_fleet_management():
         )
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            if st.button("Clear daily", use_container_width=True, key="sup_manage_clear_note_daily"):
+            if st.button("Clear daily", width='stretch', key="sup_manage_clear_note_daily"):
                 st.session_state.sup_notes_daily.pop(int(sel), None)
                 st.success("Daily note cleared.")
                 save_state()
         with c2:
-            if st.button("Save notes", use_container_width=True, key="sup_manage_save_note"):
+            if st.button("Save notes", width='stretch', key="sup_manage_save_note"):
                 st.session_state.sup_notes_global[int(sel)] = (note_val_global or "").strip()
                 st.session_state.sup_notes_daily[int(sel)] = (note_val_daily or "").strip()
                 st.success("Notes saved.")
                 save_state()
         with c3:
-            if st.button("Clear global", use_container_width=True, key="sup_manage_clear_note_global"):
+            if st.button("Clear global", width='stretch', key="sup_manage_clear_note_global"):
                 st.session_state.sup_notes_global.pop(int(sel), None)
                 st.success("General note cleared.")
                 save_state()
@@ -13833,7 +14499,7 @@ def render_fleet_management():
             st.success(f"Truck {sel} sent to Shop.")
             st.rerun()
 
-        if st.button("Send to Shop", use_container_width=True, key="sup_manage_send_shop"):
+        if st.button("Send to Shop", width='stretch', key="sup_manage_send_shop"):
             if is_duplicate_notice(sel, "shop_send"):
                 st.session_state.shop_send_confirm = {"truck": sel, "reason": shop_reason, "spare": shop_spare}
             else:
@@ -13845,14 +14511,14 @@ def render_fleet_management():
             st.warning(f"Truck {sel} already has a Shop notice today. Send again?")
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button("Confirm send", use_container_width=True, key="sup_manage_send_shop_confirm"):
+                if st.button("Confirm send", width='stretch', key="sup_manage_send_shop_confirm"):
                     st.session_state.shop_send_confirm = None
                     _send_to_shop(confirm_send.get("reason", ""), confirm_send.get("spare", ""))
             with c2:
-                if st.button("Cancel", use_container_width=True, key="sup_manage_send_shop_cancel"):
+                if st.button("Cancel", width='stretch', key="sup_manage_send_shop_cancel"):
                     st.session_state.shop_send_confirm = None
                     st.rerun()
-        if st.button("Returned", use_container_width=True, key="sup_manage_returned_shop"):
+        if st.button("Returned", width='stretch', key="sup_manage_returned_shop"):
             ok_returned, _ = _return_truck_from_shop(sel)
             if ok_returned:
                 _mark_and_save()
@@ -13888,7 +14554,7 @@ def render_fleet_management():
             st.success(f"Truck {sel} marked Ran Special (needs unload).")
             st.rerun()
 
-        if st.button("Mark Ran Special", use_container_width=True, key="sup_manage_special"):
+        if st.button("Mark Ran Special", width='stretch', key="sup_manage_special"):
             if is_duplicate_notice(sel, "ran_special"):
                 st.session_state.ran_special_confirm = {"truck": sel, "note": special_note}
             else:
@@ -13900,11 +14566,11 @@ def render_fleet_management():
             st.warning(f"Truck {sel} already has a Ran Special notice today. Send again?")
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button("Confirm ran special", use_container_width=True, key="sup_manage_special_confirm"):
+                if st.button("Confirm ran special", width='stretch', key="sup_manage_special_confirm"):
                     st.session_state.ran_special_confirm = None
                     _mark_ran_special(confirm_special.get("note", ""))
             with c2:
-                if st.button("Cancel", use_container_width=True, key="sup_manage_special_cancel"):
+                if st.button("Cancel", width='stretch', key="sup_manage_special_cancel"):
                     st.session_state.ran_special_confirm = None
                     st.rerun()
 
@@ -13915,7 +14581,7 @@ def render_fleet_management():
         st.caption(f"Current status: {current_status_label(int(sel))}")
         if already_requested:
             st.success(f"Truck {int(sel)} already has an active unload request.")
-        if st.button("Request Unload", use_container_width=True, key="sup_manage_request_unload", disabled=already_requested):
+        if st.button("Request Unload", width='stretch', key="sup_manage_request_unload", disabled=already_requested):
             unload_request_set.add(int(sel))
             st.session_state.unload_request_set = unload_request_set
             log_action(f"Unload request added for Truck {int(sel)}")
@@ -13971,7 +14637,7 @@ def render_fleet_management():
                     )
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button("Yes", use_container_width=True, key="sup_manage_swap_both_yes"):
+                        if st.button("Yes", width='stretch', key="sup_manage_swap_both_yes"):
                             ok_swap, swap_message = _set_two_way_route_swap(int(sel), int(pending_second))
                             st.session_state[pending_second_key] = None
                             if ok_swap:
@@ -13980,7 +14646,7 @@ def render_fleet_management():
                                 st.rerun()
                             st.warning(swap_message)
                     with c2:
-                        if st.button("No", use_container_width=True, key="sup_manage_swap_both_no"):
+                        if st.button("No", width='stretch', key="sup_manage_swap_both_no"):
                             st.session_state[pending_second_key] = None
                             st.rerun()
 
@@ -14922,7 +15588,7 @@ def _render_route_card_assign_dialog_if_needed():
 
             if not ordered_options:
                 st.warning("No trucks are currently available for assignment.")
-                if st.button("Close", use_container_width=True, key=f"route_card_assign_close_empty_{int(route_num)}"):
+                if st.button("Close", width='stretch', key=f"route_card_assign_close_empty_{int(route_num)}"):
                     _close_dialog()
                 return
 
@@ -14939,7 +15605,7 @@ def _render_route_card_assign_dialog_if_needed():
                 st.caption("Loaded trucks are unavailable for assignment.")
             c_assign, c_cancel = st.columns([1, 1])
             with c_assign:
-                if st.button("Assign", use_container_width=True, key=f"route_card_assign_apply_{int(route_num)}", disabled=picked_truck_locked):
+                if st.button("Assign", width='stretch', key=f"route_card_assign_apply_{int(route_num)}", disabled=picked_truck_locked):
                     if assignment_source == "shop":
                         ok_assign, msg_assign = _assign_truck_to_shop_route(int(route_num), int(picked_truck))
                     elif assignment_source == "swap":
@@ -14952,7 +15618,7 @@ def _render_route_card_assign_dialog_if_needed():
                         st.rerun()
                     st.warning(msg_assign)
             with c_cancel:
-                if st.button("Cancel", use_container_width=True, key=f"route_card_assign_cancel_{int(route_num)}"):
+                if st.button("Cancel", width='stretch', key=f"route_card_assign_cancel_{int(route_num)}"):
                     _close_dialog()
 
         _route_card_assign_dialog()
@@ -14972,7 +15638,7 @@ def _render_route_card_assign_dialog_if_needed():
                 st.caption("Loaded trucks are unavailable for assignment.")
             c_assign, c_cancel = st.columns([1, 1])
             with c_assign:
-                if st.button("Assign", use_container_width=True, key=f"route_card_assign_apply_inline_{int(route_num)}", disabled=picked_truck_locked):
+                if st.button("Assign", width='stretch', key=f"route_card_assign_apply_inline_{int(route_num)}", disabled=picked_truck_locked):
                     if assignment_source == "shop":
                         ok_assign, msg_assign = _assign_truck_to_shop_route(int(route_num), int(picked_truck))
                     elif assignment_source == "swap":
@@ -14985,11 +15651,11 @@ def _render_route_card_assign_dialog_if_needed():
                         st.rerun()
                     st.warning(msg_assign)
             with c_cancel:
-                if st.button("Cancel", use_container_width=True, key=f"route_card_assign_cancel_inline_{int(route_num)}"):
+                if st.button("Cancel", width='stretch', key=f"route_card_assign_cancel_inline_{int(route_num)}"):
                     _close_dialog()
         else:
             st.info("No trucks are currently available for assignment.")
-            if st.button("Close", use_container_width=True, key=f"route_card_assign_close_inline_{int(route_num)}"):
+            if st.button("Close", width='stretch', key=f"route_card_assign_close_inline_{int(route_num)}"):
                 _close_dialog()
 
 
@@ -15053,8 +15719,7 @@ def _render_route_card(
         if int(route_num) not in off_today_routes
     ]
     if (
-        not always_show
-        and not oos_assignments
+        not oos_assignments
         and not swap_assignments
         and not unassigned_oos_routes
         and not unassigned_shop_routes
@@ -15459,7 +16124,7 @@ def _render_route_card(
         for route_num in route_assign_trigger_routes:
             trigger_label = f"RouteAssignTrigger {int(route_num)}"
             trigger_key = f"route_card_assign_trigger_{collapse_scope}_{int(route_num)}"
-            if st.button(trigger_label, key=trigger_key, use_container_width=True):
+            if st.button(trigger_label, key=trigger_key, width='stretch'):
                 st.session_state.route_card_assign_route = int(route_num)
                 st.rerun()
 
@@ -15725,6 +16390,9 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
     watch_count = len(watch_by_truck)
     watch_label = "truck" if watch_count == 1 else "trucks"
 
+    if watch_count == 0:
+        return
+
     card_body_html = (
         "<div style='display:block; width:100%; max-width:100%; min-width:0; box-sizing:border-box; "
         "border-radius:16px; overflow:hidden;'>"
@@ -15779,7 +16447,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
         for truck_num in special_trigger_trucks:
             trigger_label = f"UnloadWatchSpecialTrigger {int(truck_num)}"
             trigger_key = f"unload_watch_special_trigger_{collapse_scope}_{int(truck_num)}"
-            if st.button(trigger_label, key=trigger_key, use_container_width=True):
+            if st.button(trigger_label, key=trigger_key, width='stretch'):
                 if bool(st.session_state.get("batching_disabled")):
                     _complete_unload_with_batching_disabled(int(truck_num), redirect_screen="UNLOAD")
                     _set_query_params(page="UNLOAD", pick=None, truck=None, start=None)
@@ -16567,7 +17235,7 @@ def render_next_up_controls(context_key: str, show_start_button: bool = False):
             if st.button(
                 f"Start Next Up (Truck {int(current)})",
                 key=f"next_up_start_{context_key}",
-                use_container_width=True,
+                width='stretch',
             ):
                 if _start_next_up_from_queue_if_possible():
                     st.rerun()
@@ -16591,7 +17259,7 @@ def render_next_up_controls(context_key: str, show_start_button: bool = False):
     )
     c1, c2 = st.columns([1, 1])
     with c1:
-        if st.button("Set Next Up", key=f"next_up_set_{context_key}", use_container_width=True):
+        if st.button("Set Next Up", key=f"next_up_set_{context_key}", width='stretch'):
             if int(pick) in off_today_set and int(pick) not in off_day_loadable_set:
                 st.session_state.next_up_pending = int(pick)
             else:
@@ -16603,7 +17271,7 @@ def render_next_up_controls(context_key: str, show_start_button: bool = False):
                     st.session_state.next_up_return_screen = None
                 st.rerun()
     with c2:
-        if st.button("Clear Next Up", key=f"next_up_clear_{context_key}", use_container_width=True):
+        if st.button("Clear Next Up", key=f"next_up_clear_{context_key}", width='stretch'):
             st.session_state.next_up_truck = None
             _mark_and_save()
             st.success("Next up cleared.")
@@ -16617,7 +17285,7 @@ def render_next_up_controls(context_key: str, show_start_button: bool = False):
         st.warning(f"Truck #{int(pending_next)} is off Day {_current_ship_day_num() or '?'} - set as Next Up anyway?")
         c3, c4 = st.columns([1, 1])
         with c3:
-            if st.button("Confirm Next Up", key=f"next_up_confirm_{context_key}", use_container_width=True):
+            if st.button("Confirm Next Up", key=f"next_up_confirm_{context_key}", width='stretch'):
                 st.session_state.next_up_truck = int(pending_next)
                 st.session_state.next_up_pending = None
                 _mark_and_save()
@@ -16627,7 +17295,7 @@ def render_next_up_controls(context_key: str, show_start_button: bool = False):
                     st.session_state.next_up_return_screen = None
                 st.rerun()
         with c4:
-            if st.button("Cancel", key=f"next_up_cancel_{context_key}", use_container_width=True):
+            if st.button("Cancel", key=f"next_up_cancel_{context_key}", width='stretch'):
                 st.session_state.next_up_pending = None
                 st.rerun()
 
@@ -16971,7 +17639,7 @@ def _render_batch_capacity_warning_dialog_if_needed():
             f"Current {current_total}/{cap}, incoming {incoming_wearers}, projected {projected_total}/{cap}."
         )
         st.caption("Use a new batch for this truck.")
-        if st.button("OK", use_container_width=True, key="batch_capacity_warning_ok"):
+        if st.button("OK", width='stretch', key="batch_capacity_warning_ok"):
             st.session_state["batch_capacity_warning_dialog_open"] = False
             st.rerun()
 
@@ -17228,12 +17896,12 @@ def render_shorts_button_flow(
             for idx, (entry_type, label) in enumerate(row_entries):
                 with row_cols[idx]:
                     if entry_type == "cat":
-                        if st.button(label, use_container_width=True, key=f"shorts_cat_{t}_{label}"):
+                        if st.button(label, width='stretch', key=f"shorts_cat_{t}_{label}"):
                             next_step = "bulk_group" if label == "Bulk" else "item"
                             _set_shorts_button_state(t, {"step": next_step, "category": label, "bulk_group": None, "item": None, "qty": 1})
                             st.rerun()
                     else:
-                        if st.button(label, use_container_width=True, key=f"shorts_cat_{t}_recents"):
+                        if st.button(label, width='stretch', key=f"shorts_cat_{t}_recents"):
                             _set_shorts_button_state(t, {"step": "recents", "category": None, "bulk_group": None, "item": None, "qty": 1})
                             st.rerun()
         if not inprog_safe_mode:
@@ -17284,7 +17952,7 @@ def render_shorts_button_flow(
         else:
             for idx, r in enumerate(recent_rows):
                 label = f"{r.get('item','')}"
-                if st.button(label, use_container_width=True, key=f"shorts_recent_{t}_{idx}"):
+                if st.button(label, width='stretch', key=f"shorts_recent_{t}_{idx}"):
                     # Try to parse category and bulk_group from label
                     item_label = r.get('item','')
                     qty_val = r.get('qty',1)
@@ -17300,7 +17968,7 @@ def render_shorts_button_flow(
                     else:
                         _set_shorts_button_state(t, {"step": "qty", "category": None, "bulk_group": None, "item": item_label, "qty": qty_val})
                     st.rerun()
-        if st.button("Back to categories", use_container_width=True, key=f"shorts_recents_back_{t}"):
+        if st.button("Back to categories", width='stretch', key=f"shorts_recents_back_{t}"):
             _reset_shorts_button_state(t)
             st.rerun()
         return
@@ -17314,12 +17982,12 @@ def render_shorts_button_flow(
             row_cols = st.columns(cols_per_row)
             for idx, group in enumerate(row_groups):
                 with row_cols[idx]:
-                    if st.button(group, use_container_width=True, key=f"shorts_bulk_{t}_{group}"):
+                    if st.button(group, width='stretch', key=f"shorts_bulk_{t}_{group}"):
                         _set_shorts_button_state(t, {"step": "item", "category": "Bulk", "bulk_group": group, "item": None, "qty": 1})
                         st.rerun()
         if not inprog_safe_mode:
             _force_mobile_button_grid(groups, mobile_cols=2)
-        if st.button("Back to categories", use_container_width=True, key=f"shorts_bulk_back_{t}"):
+        if st.button("Back to categories", width='stretch', key=f"shorts_bulk_back_{t}"):
             _reset_shorts_button_state(t)
             st.rerun()
         return
@@ -17338,13 +18006,13 @@ def render_shorts_button_flow(
             row_cols = st.columns(cols_per_row)
             for idx, it in enumerate(row_items):
                 with row_cols[idx]:
-                    if st.button(it, use_container_width=True, key=f"shorts_item_{t}_{it}"):
+                    if st.button(it, width='stretch', key=f"shorts_item_{t}_{it}"):
                         state = {"step": "qty", "category": category, "bulk_group": bulk_group, "item": it, "qty": 1}
                         _set_shorts_button_state(t, state)
                         st.rerun()
         if not inprog_safe_mode:
             _force_mobile_button_grid(items, mobile_cols=2)
-        if st.button("Back", use_container_width=True, key=f"shorts_item_back_{t}"):
+        if st.button("Back", width='stretch', key=f"shorts_item_back_{t}"):
             prev_step = "bulk_group" if category == "Bulk" else "category"
             _set_shorts_button_state(t, {"step": prev_step, "category": category if prev_step != "category" else None, "bulk_group": bulk_group if prev_step == "bulk_group" else None, "item": None, "qty": 1})
             st.rerun()
@@ -17392,7 +18060,7 @@ def render_shorts_button_flow(
 
         c1, c2 = st.columns([1, 1])
         with c1:
-            if st.button("Add custom amount", use_container_width=True, key=f"shorts_custom_add_{t}"):
+            if st.button("Add custom amount", width='stretch', key=f"shorts_custom_add_{t}"):
                 if category == "Bulk":
                     full_label = f"Bulk - {bulk_group} - {label}" if bulk_group else f"Bulk - {label}"
                 elif category:
@@ -17403,7 +18071,7 @@ def render_shorts_button_flow(
                 _reset_shorts_button_state(t)
                 st.rerun()
         with c2:
-            if st.button("Back", use_container_width=True, key=f"shorts_qty_back_{t}"):
+            if st.button("Back", width='stretch', key=f"shorts_qty_back_{t}"):
                 _set_shorts_button_state(t, {"step": "item", "category": category, "bulk_group": bulk_group, "item": None, "qty": 1})
                 st.rerun()
         return
@@ -17949,8 +18617,11 @@ def _compress_status_shop_mobile_header_gap() -> None:
                         const sendRect = sendHost.getBoundingClientRect();
                         const currentGap = Math.round(sendRect.top - headingRect.bottom);
                         if (currentGap > 22 && currentGap < 420) {
-                            const reduceBy = Math.min(currentGap - 10, 220);
-                            sendHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                            const targetGap = 12;
+                            const reduceBy = Math.min(Math.max(0, currentGap - targetGap), 150);
+                            if (reduceBy > 2) {
+                                sendHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                            }
                         }
                     }
                 };
@@ -18709,7 +19380,7 @@ def _fix_page_top_gap() -> None:
 
 def _compress_mobile_fleet_like_status_heading_gap(heading_slug: str) -> None:
     safe_slug = re.sub(r"[^a-z0-9\-]", "", str(heading_slug or "").strip().lower())
-    if safe_slug not in {"dirty", "unloaded", "off", "oos-spare"}:
+    if safe_slug not in {"dirty", "unloaded", "off", "oos-spare", "fleet-management", "load-management", "unload-management"}:
         return
 
     key_fragment_map = {
@@ -18717,6 +19388,9 @@ def _compress_mobile_fleet_like_status_heading_gap(heading_slug: str) -> None:
         "unloaded": "st-key-bubble_status_unloaded_",
         "off": "st-key-bubble_status_off_",
         "oos-spare": "st-key-bubble_status_oos_",
+        "fleet-management": "",
+        "load-management": "",
+        "unload-management": "",
     }
     key_fragment = key_fragment_map.get(safe_slug, "")
 
@@ -19008,7 +19682,7 @@ def sidebar_badge_link(
         if st.button(
             display_text,
             key=f"sidebar_badge_{target_page}",
-            use_container_width=True,
+            width='stretch',
             disabled=button_disabled,
         ):
             if not target_allowed:
@@ -19599,7 +20273,7 @@ def _render_batching_information_panel(*, include_info_text: bool = False) -> No
         data=_get_cached_batch_cards_pdf_bytes(),
         file_name=f"batch_cards_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf",
         mime="application/pdf",
-        use_container_width=True,
+        width='stretch',
     )
 
 
@@ -20691,6 +21365,7 @@ if is_first_client_page_load:
 # ==========================================================
 qp = _get_query_params()
 _consume_watchdog_diag_query_params(qp)
+_consume_startup_render_timing_query_params(qp)
 qp = _get_query_params()
 raw_page = qp.get("page", None)
 requested = raw_page[0] if isinstance(raw_page, list) else raw_page
@@ -21156,7 +21831,11 @@ if (st.session_state.get("authentication_status") is True and
 
 role_access_notice = st.session_state.pop("role_access_notice", None)
 if role_access_notice:
+    # One-shot redirect notice only; do not persist across reruns/screens.
     st.warning(str(role_access_notice))
+
+st.session_state.pop("role_access_notice_persistent", None)
+st.session_state.pop("role_access_notice_persistent_until", None)
 
 # ==========================================================
 # SIDEBAR
@@ -21376,6 +22055,56 @@ if _is_mobile_client() or _is_tablet_client():
                 height=0,
         )
 if st.session_state.setup_done:
+    current_run_day_key = str(_current_run_date_key() or "").strip()
+    completed_run_day_key = str(st.session_state.get("sup_last_run_day_completed_key") or "").strip()
+    show_sidebar_run_day_alert = bool(
+        _screen_allowed_for_current_user("SUPERVISOR")
+        and current_run_day_key
+        and completed_run_day_key != current_run_day_key
+    )
+
+    if show_sidebar_run_day_alert:
+        st.sidebar.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] .st-key-sidebar_run_day_alert_btn button {
+                border: 2px solid rgba(251, 191, 36, 0.95) !important;
+                box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.28), 0 0 18px rgba(251, 191, 36, 0.55) !important;
+                animation: sidebarRunDayPulse 1.1s ease-in-out infinite !important;
+                font-weight: 900 !important;
+                letter-spacing: 0.03em !important;
+            }
+            @keyframes sidebarRunDayPulse {
+                0%, 100% {
+                    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25), 0 0 14px rgba(251, 191, 36, 0.45);
+                    filter: brightness(1);
+                }
+                50% {
+                    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55), 0 0 26px rgba(251, 191, 36, 0.82);
+                    filter: brightness(1.08);
+                }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.sidebar.button("Run Day", key="sidebar_run_day_alert_btn", width='stretch'):
+            st.session_state["sup_run_day_flow_active"] = True
+            st.session_state["sup_dust_clothes_dialog_open"] = True
+            st.session_state["sup_run_day_spares_dialog_open"] = False
+            st.session_state["sup_run_day_specials_dialog_open"] = False
+            st.session_state["sup_operations_audit_dialog_open"] = False
+            st.session_state["sup_operations_view_audits_dialog_open"] = False
+            st.session_state["sup_comms_history_dialog_open"] = False
+            st.session_state["sup_pdf_download_dialog_open"] = False
+            st.session_state["mgmt_dev_shortages_dialog_open"] = False
+            st.session_state["mgmt_dev_backup_import_dialog_open"] = False
+            st.session_state["mgmt_dev_direct_import_dialog_open"] = False
+            st.session_state["sup_configure_load_day_open_once"] = True
+            st.session_state.active_screen = "SUPERVISOR"
+            _mark_and_save()
+            st.rerun()
+
     run = st.session_state.run_date
     ship = st.session_state.ship_dates[0] if st.session_state.ship_dates else None
     ship_day = ship_day_number(ship) if ship else None
@@ -21437,17 +22166,17 @@ with st.sidebar:
     )
 
 # Unload at top, Load middle
-if _screen_allowed_for_current_user("UNLOAD") and st.sidebar.button("Unload", use_container_width=True):
+if _screen_allowed_for_current_user("UNLOAD") and st.sidebar.button("Unload", width='stretch'):
     st.session_state.active_screen = "UNLOAD"
     _mark_and_save()
     st.rerun()
 
-if _screen_allowed_for_current_user("LOAD") and st.sidebar.button("Load", use_container_width=True):
+if _screen_allowed_for_current_user("LOAD") and st.sidebar.button("Load", width='stretch'):
     st.session_state.active_screen = "LOAD"
     _mark_and_save()
     st.rerun()
 
-if _screen_allowed_for_current_user("FLEET") and st.sidebar.button("Fleet", use_container_width=True):
+if _screen_allowed_for_current_user("FLEET") and st.sidebar.button("Fleet", width='stretch'):
     st.session_state.sup_manage_truck = None
     st.session_state.sup_manage_new_mode = False
     st.session_state.sup_manage_action = None
@@ -21468,7 +22197,7 @@ communications_nav_flash_active = (
     and str(st.session_state.get("active_screen") or "").upper() != "COMMUNICATIONS"
 )
 
-if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Communications", use_container_width=True):
+if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Communications", width='stretch'):
     st.session_state.active_screen = "COMMUNICATIONS"
     st.session_state.communications_last_seen_ts = _latest_communications_message_ts()
     st.session_state.communications_nav_flash_until = 0.0
@@ -21508,7 +22237,7 @@ if _current_auth_role() == AUTH_ROLE_GUEST and _auth_enabled():
         """,
         unsafe_allow_html=True,
     )
-    if st.sidebar.button("Login", key="auth_open_login_nav_btn", use_container_width=True):
+    if st.sidebar.button("Login", key="auth_open_login_nav_btn", width='stretch'):
         st.session_state.auth_request_portal_pending = False
         st.session_state.auth_login_portal_pending = True
         st.session_state.auth_login_portal_requested_at = time.time()
@@ -21523,7 +22252,7 @@ break_start = st.session_state.get("break_start_time")
 if break_start:
     break_remaining = (st.session_state.break_duration or 0) - (time.time() - break_start)
     if break_remaining > 0 and _screen_allowed_for_current_user("BREAK"):
-        if st.sidebar.button("On Break", use_container_width=True):
+        if st.sidebar.button("On Break", width='stretch'):
             st.session_state.active_screen = "BREAK"
             _mark_and_save()
             st.rerun()
@@ -21631,7 +22360,7 @@ if (
                 const sidebar = root.querySelector('section[data-testid="stSidebar"]');
                 if (!sidebar) return;
 
-                const normalize = (s) => String(s || '').replace(/\u2063/g, '').replace(/\s+/g, ' ').trim();
+                const normalize = (s) => String(s || '').replace(/\u2063/g, '').replace(/\\s+/g, ' ').trim();
                 const targetForText = (rawText) => {
                     const text = normalize(rawText);
                     if (text.startsWith('Dirty -')) return 'STATUS_DIRTY';
@@ -21697,7 +22426,7 @@ if st.session_state.setup_done:
         if loaded_list:
             sorted_loaded_list = sorted(loaded_list)
             pick = st.sidebar.selectbox("Short Sheet", options=sorted_loaded_list, key="sidebar_shorts_pick")
-            if st.sidebar.button("Open selected short sheet", key="sidebar_open_shorts_pick", use_container_width=True):
+            if st.sidebar.button("Open selected short sheet", key="sidebar_open_shorts_pick", width='stretch'):
                 sel = int(pick)
                 st.session_state.shorts_truck = sel
                 st.session_state.shorts_source_truck = int(sel)
@@ -21712,7 +22441,7 @@ if st.session_state.setup_done:
     if _current_auth_role() == AUTH_ROLE_GUEST:
         st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
         st.sidebar.caption("Need access to more screens?")
-        if st.sidebar.button("Request Account", key="auth_open_request_btn", use_container_width=True):
+        if st.sidebar.button("Request Account", key="auth_open_request_btn", width='stretch'):
             st.session_state.auth_login_portal_pending = False
             st.session_state.auth_login_portal_requested_at = 0.0
             st.session_state.auth_request_portal_pending = True
@@ -21720,19 +22449,19 @@ if st.session_state.setup_done:
 
     if _screen_allowed_for_current_user("SUPERVISOR"):
         st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
-        if _screen_allowed_for_current_user("TRENDS") and st.sidebar.button("Trends", use_container_width=True, key="sidebar_trends_bottom"):
+        if _screen_allowed_for_current_user("TRENDS") and st.sidebar.button("Trends", width='stretch', key="sidebar_trends_bottom"):
             st.session_state.active_screen = "TRENDS"
             _mark_and_save()
             st.rerun()
 
-        if _screen_allowed_for_current_user("AUDIT_FLEET") and st.sidebar.button("Audit", use_container_width=True, key="sidebar_audits_bottom"):
+        if _screen_allowed_for_current_user("AUDIT_FLEET") and st.sidebar.button("Audit", width='stretch', key="sidebar_audits_bottom"):
             st.session_state.audit_fleet_return_screen = str(st.session_state.get("active_screen") or "LOAD")
             st.session_state.audit_fleet_selected_truck = None
             st.session_state.active_screen = "AUDIT_FLEET"
             _mark_and_save()
             st.rerun()
 
-        if st.sidebar.button("Management", use_container_width=True, key="sidebar_management_bottom"):
+        if st.sidebar.button("Management", width='stretch', key="sidebar_management_bottom"):
             st.session_state.sup_manage_truck = None
             st.session_state.sup_manage_new_mode = False
             st.session_state.sup_manage_multi_mode = False
@@ -21787,7 +22516,7 @@ if (
     and _current_auth_role() != AUTH_ROLE_GUEST
 ):
     st.sidebar.markdown("<hr style='margin:8px 0 6px 0;'>", unsafe_allow_html=True)
-    if st.sidebar.button("Logout", key="auth_logout_nav_btn", use_container_width=True):
+    if st.sidebar.button("Logout", key="auth_logout_nav_btn", width='stretch'):
         if authenticator is not None:
             try:
                 authenticator.logout(location="unrendered", key="truckapp_sidebar_logout")
@@ -21832,20 +22561,22 @@ if _is_mobile_client():
             var doc = root.document;
             if (!doc) return;
             var HINT_ID = 'truck-swipe-login-hint';
-            if (doc.getElementById(HINT_ID)) return;
-
-            var hint = doc.createElement('div');
-            hint.id = HINT_ID;
-            hint.innerHTML = '<div style="font-size:1.3rem;line-height:1;">&#8594;</div><div style="font-size:0.55rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin-top:8px;writing-mode:vertical-lr;">Menu</div>';
-            hint.style.cssText = (
-                'position:fixed;left:0;top:50%;transform:translateY(-50%);' +
-                'background:rgba(59,130,246,0.88);color:#fff;' +
-                'border-radius:0 10px 10px 0;padding:28px 6px 28px 4px;' +
-                'z-index:99999;display:flex;flex-direction:column;align-items:center;' +
-                'box-shadow:3px 0 14px rgba(0,0,0,0.35);cursor:pointer;' +
-                'font-family:sans-serif;text-align:center;user-select:none;width:22px;' +
-                'animation:truckSwipeHintPulse 1.9s ease-in-out infinite;'
-            );
+            var hint = doc.getElementById(HINT_ID);
+            if (!hint) {
+                hint = doc.createElement('div');
+                hint.id = HINT_ID;
+                hint.innerHTML = '<div style="font-size:1.3rem;line-height:1;">&#8594;</div><div style="font-size:0.55rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin-top:8px;writing-mode:vertical-lr;">Menu</div>';
+                hint.style.cssText = (
+                    'position:fixed;left:0;top:50%;transform:translateY(-50%);' +
+                    'background:rgba(59,130,246,0.88);color:#fff;' +
+                    'border-radius:0 10px 10px 0;padding:28px 6px 28px 4px;' +
+                    'z-index:99999;display:flex;flex-direction:column;align-items:center;' +
+                    'box-shadow:3px 0 14px rgba(0,0,0,0.35);cursor:pointer;' +
+                    'font-family:sans-serif;text-align:center;user-select:none;width:22px;' +
+                    'pointer-events:auto;' +
+                    'animation:truckSwipeHintPulse 1.9s ease-in-out infinite;'
+                );
+            }
 
             var styleEl = doc.createElement('style');
             styleEl.textContent = (
@@ -21854,33 +22585,168 @@ if _is_mobile_client():
                 '[data-testid="stSidebarCollapseButton"] button{animation:truckCollapseButtonPulse 1.9s ease-in-out infinite;}'
             );
             doc.head.appendChild(styleEl);
-            doc.body.appendChild(hint);
+            if (!hint.parentElement) {
+                doc.body.appendChild(hint);
+            }
 
             var isSidebarOpen = function() {
                 var sb = doc.querySelector('section[data-testid="stSidebar"]');
                 if (!sb) return false;
-                return String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                var ariaOpen = String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                try {
+                    var rect = sb.getBoundingClientRect();
+                    var vw = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
+                    var visibleByRect = rect && rect.width > 24 && rect.right > 10 && rect.left < Math.max(40, vw - 10);
+                    if (visibleByRect) return true;
+                    if (!ariaOpen) return false;
+                    // If aria says open but geometry says mostly off-screen, treat as closed.
+                    return !!(rect && rect.right > 18);
+                } catch (e) {
+                    return ariaOpen;
+                }
             };
 
             var updateVisibility = function() {
                 hint.style.display = isSidebarOpen() ? 'none' : 'flex';
             };
 
-            hint.addEventListener('click', function() {
+            var forceOpenSidebar = function() {
                 var selectors = [
                     '[data-testid="stSidebarCollapseButton"] button',
                     '[data-testid="stSidebarCollapsedControl"] button',
                     '[data-testid="collapsedControl"] button',
-                    '[aria-label="Open sidebar"]'
+                    '[aria-label="Open sidebar"]',
+                    '[title="Open sidebar"]'
                 ];
                 for (var i = 0; i < selectors.length; i++) {
                     var btn = doc.querySelector(selectors[i]);
-                    if (btn) { btn.click(); return; }
+                    if (btn) {
+                        try { btn.click(); } catch (e) {}
+                        return;
+                    }
                 }
-            });
+                // Fallback when Streamlit collapsed control is not present in DOM.
+                var sb = doc.querySelector('section[data-testid="stSidebar"]');
+                if (!sb) return;
+                try {
+                    sb.setAttribute('aria-expanded', 'true');
+                    sb.style.setProperty('transform', 'translateX(0%)', 'important');
+                } catch (e) {}
+            };
+
+            hint.onclick = function() {
+                forceOpenSidebar();
+            };
 
             updateVisibility();
-            setInterval(updateVisibility, 600);
+            if (!root.__truckSwipeSidebarHintTimer) {
+                root.__truckSwipeSidebarHintTimer = setInterval(updateVisibility, 600);
+            }
+        } catch(e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+else:
+    components.html(
+        """
+        <script>
+        (function(){
+        try {
+            var root = window.parent || window;
+            var doc = root.document;
+            if (!doc) return;
+            var HINT_ID = 'truck-desktop-sidebar-open-hint';
+
+            var hint = doc.getElementById(HINT_ID);
+            if (!hint) {
+                hint = doc.createElement('button');
+                hint.id = HINT_ID;
+                hint.type = 'button';
+                hint.innerHTML = '<div style="font-size:0.62rem;font-weight:900;letter-spacing:0.12em;text-transform:uppercase;line-height:1;">Menu</div><div style="font-size:1.15rem;line-height:1;margin-top:4px;">&#8594;</div>';
+                hint.setAttribute('aria-label', 'Open sidebar menu');
+                hint.style.cssText = (
+                    'position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:99999;' +
+                    'padding:10px 6px 10px 4px;border-radius:0 10px 10px 0;border:1px solid rgba(147,197,253,0.7);' +
+                    'background:rgba(30,64,175,0.92);color:#eff6ff;font-weight:900;font-size:0.78rem;' +
+                    'display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;' +
+                    'letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;min-width:24px;' +
+                    'pointer-events:auto;' +
+                    'box-shadow:0 8px 18px rgba(0,0,0,0.35);display:none;' +
+                    'animation:truckDesktopMenuHintBounce 1.35s ease-in-out infinite;'
+                );
+
+                var styleId = 'truck-desktop-sidebar-open-hint-style';
+                if (!doc.getElementById(styleId)) {
+                    var styleEl = doc.createElement('style');
+                    styleEl.id = styleId;
+                    styleEl.textContent = (
+                        '@keyframes truckDesktopMenuHintBounce{' +
+                        '0%,100%{transform:translateY(-50%) translateX(0);}' +
+                        '50%{transform:translateY(-50%) translateX(12px);}' +
+                        '}'
+                    );
+                    doc.head.appendChild(styleEl);
+                }
+
+                doc.body.appendChild(hint);
+            }
+
+            var isSidebarOpen = function() {
+                var sb = doc.querySelector('section[data-testid="stSidebar"]');
+                if (!sb) return false;
+                var ariaOpen = String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
+                try {
+                    var rect = sb.getBoundingClientRect();
+                    var vw = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
+                    var visibleByRect = rect && rect.width > 24 && rect.right > 10 && rect.left < Math.max(40, vw - 10);
+                    if (visibleByRect) return true;
+                    if (!ariaOpen) return false;
+                    return !!(rect && rect.right > 18);
+                } catch (e) {
+                    return ariaOpen;
+                }
+            };
+
+            var updateVisibility = function() {
+                hint.style.display = isSidebarOpen() ? 'none' : 'inline-flex';
+            };
+
+            var forceOpenSidebar = function() {
+                var selectors = [
+                    '[data-testid="stSidebarCollapseButton"] button',
+                    '[data-testid="stSidebarCollapsedControl"] button',
+                    '[data-testid="collapsedControl"] button',
+                    '[aria-label="Open sidebar"]',
+                    '[title="Open sidebar"]'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var btn = doc.querySelector(selectors[i]);
+                    if (btn) {
+                        try { btn.click(); } catch (e) {}
+                        return;
+                    }
+                }
+                // Fallback when Streamlit collapsed control is missing.
+                var sb = doc.querySelector('section[data-testid="stSidebar"]');
+                if (!sb) return;
+                try {
+                    sb.setAttribute('aria-expanded', 'true');
+                    sb.style.setProperty('transform', 'translateX(0%)', 'important');
+                } catch (e) {}
+            };
+
+            hint.onclick = function() {
+                forceOpenSidebar();
+            };
+
+            updateVisibility();
+            setTimeout(updateVisibility, 120);
+            setTimeout(updateVisibility, 420);
+            if (!root.__truckDesktopSidebarHintTimer) {
+                root.__truckDesktopSidebarHintTimer = root.setInterval(updateVisibility, 700);
+            }
         } catch(e) {}
         })();
         </script>
@@ -22024,7 +22890,7 @@ if bool(st.session_state.get("archive_view_mode")):
                     format_func=lambda d: f"{fmt_long_date(d)} ({d.isoformat()})",
                 )
 
-                if st.button("Open Day", key="archive_view_open_btn", use_container_width=True):
+                if st.button("Open Day", key="archive_view_open_btn", width='stretch'):
                     target_date = nav_selected_date if isinstance(nav_selected_date, date) else nav_default_date
                     if not bool(st.session_state.get("archive_view_mode")):
                         st.session_state["archive_live_state_snapshot"] = _serialize_state()
@@ -22037,7 +22903,7 @@ if bool(st.session_state.get("archive_view_mode")):
             if st.button(
                 "Prev Day",
                 key="archive_view_prev_btn",
-                use_container_width=True,
+                width='stretch',
                 disabled=archive_prev_date is None,
             ):
                 target_date = archive_prev_date
@@ -22050,7 +22916,7 @@ if bool(st.session_state.get("archive_view_mode")):
             if st.button(
                 "Next Day",
                 key="archive_view_next_btn",
-                use_container_width=True,
+                width='stretch',
                 disabled=archive_next_date is None,
             ):
                 target_date = archive_next_date
@@ -22060,7 +22926,7 @@ if bool(st.session_state.get("archive_view_mode")):
                 st.rerun()
 
         with archive_live_col:
-            if st.button("Exit Archive", key="archive_view_exit_btn", use_container_width=True, type="primary"):
+            if st.button("Exit Archive", key="archive_view_exit_btn", width='stretch', type="primary"):
                 restored_ok = _restore_state_from_snapshot(st.session_state.get("archive_live_state_snapshot"))
                 st.session_state["archive_view_mode"] = False
                 st.session_state["archive_view_date_key"] = ""
@@ -22232,7 +23098,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     )
                     if st.button(
                         "Send",
-                        use_container_width=True,
+                        width='stretch',
                         key="status_shop_mode_send_btn",
                         type=send_btn_type,
                     ):
@@ -22241,7 +23107,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         st.rerun()
                     if st.button(
                         "Return",
-                        use_container_width=True,
+                        width='stretch',
                         key="status_shop_mode_return_btn",
                         type=return_btn_type,
                     ):
@@ -22428,7 +23294,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 )
                 if st.button(
                     "Send",
-                    use_container_width=True,
+                    width='stretch',
                     key="status_shop_mode_send_btn",
                     type=send_btn_type,
                 ):
@@ -22437,7 +23303,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     st.rerun()
                 if st.button(
                     "Return",
-                    use_container_width=True,
+                    width='stretch',
                     key="status_shop_mode_return_btn",
                     type=return_btn_type,
                 ):
@@ -22535,8 +23401,8 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         source_truck=int(modal_truck),
                         current_value=str((st.session_state.get("shop_spares") or {}).get(int(modal_truck), "") or ""),
                     )
-                    confirm = st.button("Confirm Send", key=f"shop_send_modal_confirm_{modal_truck}", use_container_width=True)
-                    cancel = st.button("Cancel", key=f"shop_send_modal_cancel_{modal_truck}", use_container_width=True)
+                    confirm = st.button("Confirm Send", key=f"shop_send_modal_confirm_{modal_truck}", width='stretch')
+                    cancel = st.button("Cancel", key=f"shop_send_modal_cancel_{modal_truck}", width='stretch')
                     if confirm:
                         _confirm_send_to_shop(load_on_val)
                     elif cancel:
@@ -22555,8 +23421,8 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         source_truck=int(modal_truck),
                         current_value=str((st.session_state.get("shop_spares") or {}).get(int(modal_truck), "") or ""),
                     )
-                    confirm = st.button("Confirm Send", key=f"shop_send_modal_confirm_{modal_truck}", use_container_width=True)
-                    cancel = st.button("Cancel", key=f"shop_send_modal_cancel_{modal_truck}", use_container_width=True)
+                    confirm = st.button("Confirm Send", key=f"shop_send_modal_confirm_{modal_truck}", width='stretch')
+                    cancel = st.button("Cancel", key=f"shop_send_modal_cancel_{modal_truck}", width='stretch')
                     if confirm:
                         _confirm_send_to_shop(load_on_val)
                     elif cancel:
@@ -22949,18 +23815,18 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         st.warning(f"Ready to begin loading?  Next Up: Truck {int(next_up)}")
                     else:
                         st.warning(f"Next up: Truck {int(next_up)}. Start loading now?")
-                    if st.button("Yes, start next up", use_container_width=True, key="start_next_up_status_loaded"):
+                    if st.button("Yes, start next up", width='stretch', key="start_next_up_status_loaded"):
                         st.session_state.shorts_pending_next_up_confirm_for_truck = None
                         if _start_next_up_from_queue_if_possible():
                             st.rerun()
                         st.warning("Next Up truck is no longer available to start.")
-                    if st.button("Change Next Up", use_container_width=True, key="change_next_up_status_loaded"):
+                    if st.button("Change Next Up", width='stretch', key="change_next_up_status_loaded"):
                         st.session_state.shorts_pending_next_up_confirm_for_truck = None
                         st.session_state.active_screen = "LOAD"
                         _mark_and_save()
                         st.rerun()
                     if not st.session_state.get("break_used"):
-                        if st.button("Start Break", use_container_width=True, key="start_break_status_loaded"):
+                        if st.button("Start Break", width='stretch', key="start_break_status_loaded"):
                             st.session_state.shorts_pending_next_up_confirm_for_truck = None
                             st.session_state.break_start_time = time.time()
                             st.session_state.break_used = True
@@ -22972,7 +23838,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 st.divider()
                 can_open_short_sheet = _screen_allowed_for_current_user("SHORTS")
                 if can_open_short_sheet:
-                    if st.button("Open short sheet", use_container_width=True, key=f"status_loaded_open_short_sheet_{int(t)}"):
+                    if st.button("Open short sheet", width='stretch', key=f"status_loaded_open_short_sheet_{int(t)}"):
                         st.session_state.shorts_pending_next_up_confirm_for_truck = None
                         st.session_state.shorts_truck = t
                         st.session_state.shorts_source_truck = int(t)
@@ -22982,7 +23848,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         st.rerun()
                 else:
                     st.caption("Short sheet access is restricted for your role.")
-                if st.button("Go to Unloaded", use_container_width=True):
+                if st.button("Go to Unloaded", width='stretch'):
                     st.session_state.shorts_pending_next_up_confirm_for_truck = None
                     st.session_state.active_screen = "STATUS_UNLOADED"
                     _mark_and_save()
@@ -23145,7 +24011,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     if selected_route_is_assignable_oos and not selected_route_off_today and existing_spare is not None:
                         if st.button(
                             "Clear assignment",
-                            use_container_width=True,
+                            width='stretch',
                             key=f"clear_oos_assignment_{int(route_to_cover)}_{int(selected_route)}",
                         ):
                             cleared_spare = assignments.pop(int(selected_route), None)
@@ -23175,7 +24041,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             _mark_and_save()
                             st.rerun()
                 with c2:
-                    if st.button("Cancel", use_container_width=True, key=f"cancel_oos_assignment_{int(route_to_cover)}"):
+                    if st.button("Cancel", width='stretch', key=f"cancel_oos_assignment_{int(route_to_cover)}"):
                         st.session_state.pending_oos_route = None
                         _mark_and_save()
                         st.rerun()
@@ -23197,7 +24063,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 st.warning(f"Truck {pending_t} is marked Shop. Has it returned? Confirm to start loading.")
                 c1, c2 = st.columns([1, 1])
                 with c1:
-                    if st.button("Confirm and start", use_container_width=True, key="confirm_shop_return_start"):
+                    if st.button("Confirm and start", width='stretch', key="confirm_shop_return_start"):
                         mark_return_from_shop(pending_t, "In Progress")
                         if not st.session_state.inprog_set:
                             start_loading_truck(pending_t)
@@ -23210,7 +24076,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         _mark_and_save()
                         st.rerun()
                 with c2:
-                    if st.button("No, cancel", use_container_width=True, key="cancel_shop_return_start"):
+                    if st.button("No, cancel", width='stretch', key="cancel_shop_return_start"):
                         st.session_state.pending_start_truck = None
                         _mark_and_save()
                         st.rerun()
@@ -23218,7 +24084,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 st.warning(f"Truck {pending_t} is scheduled Off for the load day. Override and load anyway?")
                 c1, c2 = st.columns([1, 1])
                 with c1:
-                    if st.button("Override and load", use_container_width=True, key="override_start_load"):
+                    if st.button("Override and load", width='stretch', key="override_start_load"):
                         if not st.session_state.inprog_set:
                             start_loading_truck(pending_t)
                             st.session_state.active_screen = "IN_PROGRESS"
@@ -23230,7 +24096,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         _mark_and_save()
                         st.rerun()
                 with c2:
-                    if st.button("No, cancel", use_container_width=True, key="cancel_start_load_off"):
+                    if st.button("No, cancel", width='stretch', key="cancel_start_load_off"):
                         st.session_state.pending_start_truck = None
                         _mark_and_save()
                         st.rerun()
@@ -23249,7 +24115,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     if unassigned_oos_routes:
                         if st.button(
                             "Assign route first",
-                            use_container_width=True,
+                            width='stretch',
                             key=f"guard_assign_spare_route_{int(pending_t)}",
                         ):
                             st.session_state.pending_oos_route = int(unassigned_oos_routes[0])
@@ -23261,7 +24127,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 with c2:
                     if st.button(
                         "No, cancel",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"cancel_start_load_spare_guard_{int(pending_t)}",
                     ):
                         st.session_state.pending_start_truck = None
@@ -23354,14 +24220,14 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         with c1:
                             if st.button(
                                 confirm_label,
-                                use_container_width=True,
+                                width='stretch',
                                 key=f"confirm_start_load_dialog_{int(pending_t)}",
                             ):
                                 _confirm_start_load_from_cleaned()
                         with c2:
                             if st.button(
                                 "No, cancel",
-                                use_container_width=True,
+                                width='stretch',
                                 key=f"cancel_start_load_dialog_{int(pending_t)}",
                             ):
                                 _cancel_start_load_from_cleaned()
@@ -23386,10 +24252,10 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     st.markdown(prompt_html, unsafe_allow_html=True)
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button(confirm_label, use_container_width=True, key="confirm_start_load"):
+                        if st.button(confirm_label, width='stretch', key="confirm_start_load"):
                             _confirm_start_load_from_cleaned()
                     with c2:
-                        if st.button("No, cancel", use_container_width=True, key="cancel_start_load"):
+                        if st.button("No, cancel", width='stretch', key="cancel_start_load"):
                             _cancel_start_load_from_cleaned()
 
     if st.session_state.active_screen == "STATUS_UNLOADED" and st.session_state.get("pending_holiday_start_truck") is not None:
@@ -23460,14 +24326,14 @@ if st.session_state.active_screen.startswith("STATUS_"):
                     with c1:
                         if st.button(
                             "Start loading",
-                            use_container_width=True,
+                            width='stretch',
                             key=f"confirm_holiday_start_day_dialog_{int(holiday_pick_truck)}",
                         ):
                             _confirm_holiday_day_pick()
                     with c2:
                         if st.button(
                             "No, cancel",
-                            use_container_width=True,
+                            width='stretch',
                             key=f"cancel_holiday_start_day_dialog_{int(holiday_pick_truck)}",
                         ):
                             _cancel_holiday_day_pick()
@@ -23485,14 +24351,14 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 with c1:
                     if st.button(
                         "Start loading",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"confirm_holiday_start_day_inline_{int(holiday_pick_truck)}",
                     ):
                         _confirm_holiday_day_pick()
                 with c2:
                     if st.button(
                         "No, cancel",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"cancel_holiday_start_day_inline_{int(holiday_pick_truck)}",
                     ):
                         _cancel_holiday_day_pick()
@@ -23526,20 +24392,20 @@ if st.session_state.active_screen.startswith("STATUS_"):
             )
             c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
-                if st.button("Set As Next Up", use_container_width=True, disabled=(attempt_truck is None), key="status_unloaded_start_blocked_set_next"):
+                if st.button("Set As Next Up", width='stretch', disabled=(attempt_truck is None), key="status_unloaded_start_blocked_set_next"):
                     st.session_state.next_up_truck = int(attempt_truck)
                     st.session_state.active_screen = "IN_PROGRESS"
                     _dismiss_start_blocked_dialog()
                     _mark_and_save()
                     st.rerun()
             with c2:
-                if st.button("Finish Loading", use_container_width=True, key="status_unloaded_start_blocked_finish_loading"):
+                if st.button("Finish Loading", width='stretch', key="status_unloaded_start_blocked_finish_loading"):
                     st.session_state.active_screen = "IN_PROGRESS"
                     _dismiss_start_blocked_dialog()
                     _mark_and_save()
                     st.rerun()
             with c3:
-                if st.button("Dismiss", use_container_width=True, key="status_unloaded_start_blocked_dismiss"):
+                if st.button("Dismiss", width='stretch', key="status_unloaded_start_blocked_dismiss"):
                     _dismiss_start_blocked_dialog()
                     st.rerun()
 
@@ -23577,7 +24443,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
 
     if st.session_state.active_screen == "STATUS_UNLOADED" and _is_mobile_client():
         st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
-        _render_route_card(always_show=True, dock_left=False, expanded=False, mobile_docked=True)
+        _render_route_card(always_show=False, dock_left=False, expanded=False, mobile_docked=True)
 
 # --------------------------
 # In Progress
@@ -23999,7 +24865,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
                     if st.button(
                         "Save Next Up",
-                        use_container_width=True,
+                        width='stretch',
                         key="inprog_next_up_dialog_set",
                     ):
                         st.session_state.next_up_truck = (
@@ -24037,7 +24903,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             if is_mobile_inprog:
                 if st.button(
                     next_up_button_label,
-                    use_container_width=True,
+                    width='stretch',
                     key=set_button_key,
                 ):
                     st.session_state["inprog_manage_next_up_dialog_open"] = True
@@ -24047,7 +24913,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 with manage_col:
                     if st.button(
                         next_up_button_label,
-                        use_container_width=True,
+                        width='stretch',
                         key=set_button_key,
                     ):
                         st.session_state["inprog_manage_next_up_dialog_open"] = True
@@ -24124,7 +24990,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     with audit_col:
                         if st.button(
                             "Audit Next Up" if not st.session_state.get("inprog_audit_dialog_open") else "Close Audit",
-                            use_container_width=True,
+                            width='stretch',
                             key="inprog_open_audit_dialog_left",
                             disabled=_next_up_for_audit is None and not st.session_state.get("inprog_audit_dialog_open"),
                             help=None if _next_up_for_audit is not None else "No Next Up truck set.",
@@ -24246,7 +25112,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     )
 
                     if can_start_from_inprog:
-                        if st.button("Start next up", use_container_width=True, key="start_inprog_next_up"):
+                        if st.button("Start next up", width='stretch', key="start_inprog_next_up"):
                             if _start_next_up_from_queue_if_possible():
                                 st.rerun()
                             st.warning("Next Up truck is no longer available to start.")
@@ -24255,7 +25121,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
                 if true_available and can_start_from_inprog:
                     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-                    if st.button("View Unloaded Trucks", use_container_width=True, key="start_inprog_suggested"):
+                    if st.button("View Unloaded Trucks", width='stretch', key="start_inprog_suggested"):
                         st.session_state.active_screen = "STATUS_UNLOADED"
                         _mark_and_save()
                         st.rerun()
@@ -24547,7 +25413,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             if not guest_read_only:
                 if st.button(
                     "Audit" if not st.session_state.get("inprog_audit_top_dialog_open") else "Close Audit",
-                    use_container_width=True,
+                    width='stretch',
                     key="inprog_open_audit_dialog_top",
                 ):
                     st.session_state["inprog_audit_top_dialog_open"] = not st.session_state.get("inprog_audit_top_dialog_open")
@@ -24569,14 +25435,14 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     )
                     if st.button(
                         "Finish Loading",
-                        use_container_width=True,
+                        width='stretch',
                         key=finish_loading_key,
                     ):
                         _finish_in_progress_loading(finish_loading_message)
                 else:
                     if st.button(
                         "Finish Loading",
-                        use_container_width=True,
+                        width='stretch',
                         key="inprog_finish_loading_top",
                     ):
                         _finish_in_progress_loading(
@@ -24686,13 +25552,13 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     action_cols = st.columns(2, gap="small")
                     with action_cols[0]:
                         if st.button(
-                            "Audit Next Up" if not st.session_state.get("inprog_audit_dialog_open") else "Close Audit",
-                            use_container_width=True,
+                            "Audit Next Up",
+                            width='stretch',
                             key="inprog_open_audit_dialog_mobile",
-                            disabled=_next_up_for_audit is None and not st.session_state.get("inprog_audit_dialog_open"),
+                            disabled=_next_up_for_audit is None,
                             help=None if _next_up_for_audit is not None else "No Next Up truck set.",
                         ):
-                            st.session_state["inprog_audit_dialog_open"] = not st.session_state.get("inprog_audit_dialog_open")
+                            st.session_state["inprog_audit_dialog_open"] = True
                             st.rerun()
 
                     with action_cols[1]:
@@ -24703,7 +25569,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                             shorts_button_help = "Shortages are restricted for your role."
                         if st.button(
                             "Add Shortages",
-                            use_container_width=True,
+                            width='stretch',
                             key="inprog_open_shorts_dialog_mobile",
                             disabled=not can_open_mobile_shorts_dialog,
                             help=shorts_button_help,
@@ -24712,13 +25578,24 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                             st.rerun()
 
                     if _next_up_for_audit is not None and st.session_state.get("inprog_audit_dialog_open"):
-                        _render_audit_capture_panel(int(_next_up_for_audit), show_header=True, source="IN_PROGRESS")
+                        @st.dialog("Audit Next Up", width="small")
+                        def _render_inprog_audit_dialog_mobile():
+                            st.markdown(
+                                f"<div style='text-align:center; font-size:1.8rem; font-weight:900; margin:0 0 0.5rem 0;'>Truck #{int(_next_up_for_audit)}</div>",
+                                unsafe_allow_html=True,
+                            )
+                            _render_audit_capture_panel(int(_next_up_for_audit), show_header=False, source="IN_PROGRESS")
+                            if st.button("Close", width='stretch', key="inprog_close_audit_dialog_mobile"):
+                                st.session_state["inprog_audit_dialog_open"] = False
+                                st.rerun()
+
+                        _render_inprog_audit_dialog_mobile()
 
                     if can_open_mobile_shorts_dialog and st.session_state.get("inprog_shorts_dialog_open"):
                         @st.dialog("Add Shortages", width="small")
                         def _render_inprog_shorts_dialog_mobile():
                             _render_inprog_shortages_controls(show_header=False)
-                            if st.button("Close", use_container_width=True, key="inprog_close_shorts_dialog_mobile"):
+                            if st.button("Close", width='stretch', key="inprog_close_shorts_dialog_mobile"):
                                 st.session_state["inprog_shorts_dialog_open"] = False
                                 st.rerun()
 
@@ -25007,13 +25884,13 @@ elif st.session_state.active_screen == "BREAK":
                 unsafe_allow_html=True,
             )
 
-        if st.button("End Break", use_container_width=True, key="end_break"):
+        if st.button("End Break", width='stretch', key="end_break"):
             st.session_state.break_start_time = None
             st.session_state.active_screen = "STATUS_LOADED"
             _mark_and_save()
             st.rerun()
 
-        if st.button("Change Next Up", use_container_width=True, key="break_change_next_up"):
+        if st.button("Change Next Up", width='stretch', key="break_change_next_up"):
             st.session_state.next_up_return_screen = "BREAK"
             st.session_state.active_screen = "LOAD"
             _mark_and_save()
@@ -25022,7 +25899,7 @@ elif st.session_state.active_screen == "BREAK":
         can_start_next_up_now = bool(next_up is not None and not st.session_state.inprog_set)
         if st.button(
             "Start Next Up",
-            use_container_width=True,
+            width='stretch',
             key="break_start_next_up",
             disabled=not can_start_next_up_now,
         ):
@@ -25075,6 +25952,8 @@ elif st.session_state.active_screen == "FLEET":
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
     _fix_page_top_gap()
     render_page_heading("Fleet Management")
+    if _is_mobile_client():
+        _compress_mobile_fleet_like_status_heading_gap("fleet-management")
     _render_batch_capacity_warning_dialog_if_needed()
     is_mobile_fleet = _is_mobile_client()
     if is_mobile_fleet:
@@ -25092,16 +25971,6 @@ elif st.session_state.active_screen == "FLEET":
         if is_mobile_fleet:
             _render_fleet_left_rail_actions()
         render_fleet_management()
-        if not is_mobile_fleet:
-            _normalize_management_header_gap(
-                "fleet-management",
-                [
-                    '[class*="st-key-sup_manage_pick_"] button',
-                    '[class*="st-key-sup_manage_pick_"]',
-                ],
-                desired_gap_px=10,
-                desktop_only=True,
-            )
     if fleet_right_col is not None:
         with fleet_right_col:
             _render_route_card(always_show=True, dock_left=False, expanded=False)
@@ -25109,7 +25978,7 @@ elif st.session_state.active_screen == "FLEET":
     if is_mobile_fleet:
         _compress_fleet_heading_to_grid_gap()
         st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
-        _render_route_card(always_show=True, dock_left=False, expanded=False, mobile_docked=True)
+        _render_route_card(always_show=False, dock_left=False, expanded=False, mobile_docked=True)
 
 # --------------------------
 # Management page
@@ -25163,6 +26032,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         "sup_dust_clothes_dialog_open",
         "sup_run_day_spares_dialog_open",
         "sup_run_day_specials_dialog_open",
+        "sup_run_day_daily_notes_dialog_open",
         "sup_operations_audit_dialog_open",
         "sup_operations_view_audits_dialog_open",
         "sup_comms_history_dialog_open",
@@ -25190,114 +26060,28 @@ elif st.session_state.active_screen == "SUPERVISOR":
         for dialog_key in supervisor_dialog_keys:
             st.session_state[dialog_key] = dialog_key == keep_key
 
-    components.html(
-        """
-        <script>
-        (function() {
-            try {
-                const root = window.parent.document;
-                const sectionTitles = new Set([
-                    'configure load day',
-                    'notes',
-                    'audit',
-                    'manage fleet',
-                    'user management',
-                    'app settings',
-                    'communication settings',
-                    'add audit removals',
-                    'tracked items',
-                    'download pdfs',
-                    'development',
-                    'activity history',
-                    'reset workday data (management)',
-                ]);
-
-                const getManagedExpanders = () => {
-                    return Array.from(root.querySelectorAll('[data-testid="stExpander"] details')).filter((detailsEl) => {
-                        const summary = detailsEl.querySelector('summary');
-                        if (!summary) return false;
-                        const title = (summary.innerText || summary.textContent || '')
-                            .replace(/\s+/g, ' ')
-                            .trim()
-                            .toLowerCase();
-                        return sectionTitles.has(title);
-                    });
-                };
-
-                const closeOthers = (activeDetails) => {
-                    const managed = getManagedExpanders();
-                    if (!managed.includes(activeDetails)) return;
-                    managed.forEach((detailsEl) => {
-                        if (detailsEl !== activeDetails && detailsEl.open) {
-                            detailsEl.open = false;
-                        }
-                    });
-                };
-
-                if (!window.parent.__managementAccordionBound) {
-                    window.parent.__managementAccordionBound = true;
-                    root.addEventListener('toggle', (event) => {
-                        const target = event.target;
-                        if (!(target instanceof HTMLElement)) return;
-                        if (target.tagName !== 'DETAILS' || !target.open) return;
-                        closeOthers(target);
-                    }, true);
-
-                    // Fallback for browsers/renders where toggle timing is inconsistent.
-                    root.addEventListener('click', (event) => {
-                        const target = event.target;
-                        if (!(target instanceof HTMLElement)) return;
-                        const summary = target.closest('summary');
-                        if (!summary) return;
-                        const details = summary.closest('details');
-                        if (!(details instanceof HTMLElement)) return;
-                        setTimeout(() => {
-                            if (details.open) {
-                                closeOthers(details);
-                            }
-                        }, 0);
-                    }, true);
-                }
-
-                // Normalize on each render in case multiple are already open.
-                const managedNow = getManagedExpanders();
-                const opened = managedNow.filter((detailsEl) => detailsEl.open);
-                if (opened.length > 1) {
-                    const keep = opened[opened.length - 1];
-                    managedNow.forEach((detailsEl) => {
-                        detailsEl.open = detailsEl === keep;
-                    });
-                }
-            } catch (e) {}
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
     _render_management_section_chip("Operations", "#fed7aa")
 
     configure_load_day_expanded = bool(st.session_state.pop("sup_configure_load_day_open_once", False))
-    with st.expander("Configure load day", expanded=configure_load_day_expanded):
+    with st.expander("Current Load Day", expanded=configure_load_day_expanded):
         current_run_date_raw = st.session_state.get("run_date")
         current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
-
-        st.info(
-            "Load day changes are automatic now. The app advances to the next load day at 6:00 AM (start of 1st shift)."
-        )
         st.caption(
             f"Current run date: {current_run_date.isoformat()} | Next ship date: {(current_run_date + timedelta(days=1)).isoformat()}"
         )
 
-        if st.button("Run Day", use_container_width=True, key="sup_run_day_btn"):
+        if st.button("Run Day", width='stretch', key="sup_run_day_btn"):
             st.session_state["sup_run_day_flow_active"] = True
             _open_supervisor_dialog("sup_dust_clothes_dialog_open")
             st.rerun()
 
+        if st.button("Current Day Summary", width='stretch', key="sup_current_day_summary_btn"):
+            _open_supervisor_dialog("sup_current_day_summary_dialog_open")
+            st.rerun()
+
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
         sup_dust_button_label = "Edit Dust Garments" if sup_dust_clothes_set_today else "Set Dust Clothes"
-        if st.button(sup_dust_button_label, use_container_width=True, key="sup_open_dust_clothes_dialog"):
+        if st.button(sup_dust_button_label, width='stretch', key="sup_open_dust_clothes_dialog"):
             st.session_state["sup_run_day_flow_active"] = False
             _open_supervisor_dialog("sup_dust_clothes_dialog_open")
             st.rerun()
@@ -25311,7 +26095,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             def _render_sup_dust_clothes_dialog():
                 run_day_flow_active = bool(st.session_state.get("sup_run_day_flow_active"))
                 if run_day_flow_active:
-                    st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 1 of 3</h2>", unsafe_allow_html=True)
+                    st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 1 of 4</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Select dust trucks with garments (80-95, except 91).</p>", unsafe_allow_html=True)
                 st.markdown(
                     """
@@ -25375,7 +26159,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                     dust_save = st.form_submit_button(
                         "Save and Continue" if run_day_flow_active else "Save Dust Clothes",
-                        use_container_width=True,
+                        width='stretch',
                     )
 
                 if dust_save:
@@ -25392,25 +26176,106 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.rerun()
 
                 if run_day_flow_active:
-                    skip_col, close_col = st.columns([1, 1])
+                    close_col, skip_col = st.columns([1, 1])
+                    with close_col:
+                        if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
+                            st.session_state["sup_dust_clothes_dialog_open"] = False
+                            st.session_state["sup_run_day_flow_active"] = False
+                            st.rerun()
                     with skip_col:
-                        if st.button("Skip", use_container_width=True, key="sup_dust_clothes_skip"):
+                        if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
                             st.session_state["sup_dust_clothes_dialog_open"] = False
                             st.session_state["sup_run_day_flow_active"] = False
                             _open_supervisor_dialog("sup_run_day_spares_dialog_open")
                             st.rerun()
-                    with close_col:
-                        if st.button("Close", use_container_width=True, key="sup_dust_clothes_dialog_close"):
-                            st.session_state["sup_dust_clothes_dialog_open"] = False
-                            st.session_state["sup_run_day_flow_active"] = False
-                            st.rerun()
                 else:
-                    if st.button("Close", use_container_width=True, key="sup_dust_clothes_dialog_close"):
+                    if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
                         st.session_state["sup_dust_clothes_dialog_open"] = False
                         st.session_state["sup_run_day_flow_active"] = False
                         st.rerun()
 
             _render_sup_dust_clothes_dialog()
+
+        if "sup_current_day_summary_dialog_open" not in st.session_state:
+            st.session_state["sup_current_day_summary_dialog_open"] = False
+
+        if st.session_state.get("sup_current_day_summary_dialog_open"):
+            @st.dialog("Current Day Summary")
+            def _render_sup_current_day_summary_dialog():
+                current_run_date_raw = st.session_state.get("run_date")
+                current_run_date = current_run_date_raw if isinstance(current_run_date_raw, date) else date.today()
+                next_ship_date = current_run_date + timedelta(days=1)
+                current_load_day = _normalize_load_day_num(st.session_state.get("load_day_num"))
+
+                # Get all fleet status
+                dirty_set = {int(t) for t in (st.session_state.get("dirty_set") or set())}
+                in_progress_set = {int(t) for t in (st.session_state.get("in_progress_set") or set())}
+                loaded_set = {int(t) for t in (st.session_state.get("loaded_set") or set())}
+                unloaded_set = {int(t) for t in (st.session_state.get("unloaded_set") or set())}
+                off_set = {int(t) for t in (st.session_state.get("off_set") or set())}
+                shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
+                oos_spare_set = {int(t) for t in (st.session_state.get("oos_spare_set") or set())}
+
+                all_trucks = set(int(t) for t in FLEET)
+                total_trucks = len(all_trucks)
+
+                # Header with date info
+                st.markdown("<div style='text-align:center;margin-bottom:1.5rem;'>", unsafe_allow_html=True)
+                st.markdown(f"<h3 style='margin:0;'>{current_run_date.isoformat()}</h3>", unsafe_allow_html=True)
+                load_day_label = f"Load Day {int(current_load_day)}" if current_load_day is not None else "Load Day -"
+                st.markdown(f"<p style='margin:0.25rem 0 0;color:rgba(250,250,250,0.7);'>{load_day_label} | Ship Date: {next_ship_date.isoformat()}</p>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # Status grid: 2 columns of 3 rows
+                col1, col2 = st.columns(2)
+                
+                def _render_status_card(col, status_name: str, count: int, color: str):
+                    with col:
+                        st.markdown(
+                            f"<div style='background:{color}20; border:2px solid {color}; border-radius:10px; padding:1rem; text-align:center; margin-bottom:0.5rem;'>"
+                            f"<div style='font-size:2rem; font-weight:800; color:{color};'>{count}</div>"
+                            f"<div style='font-size:0.875rem; color:rgba(250,250,250,0.8); margin-top:0.25rem;'>{status_name}</div>"
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                with col1:
+                    _render_status_card(col1, "Dirty", len(dirty_set), "#ef4444")
+                with col2:
+                    _render_status_card(col2, "In Progress", len(in_progress_set), "#f97316")
+                
+                with col1:
+                    _render_status_card(col1, "Loaded", len(loaded_set), "#22c55e")
+                with col2:
+                    _render_status_card(col2, "Unloaded", len(unloaded_set), "#3b82f6")
+
+                with col1:
+                    _render_status_card(col1, "Off/Schedule", len(off_set), "#8b5cf6")
+                with col2:
+                    _render_status_card(col2, "Shop", len(shop_set), "#ec4899")
+
+                st.markdown("<hr style='margin:1.5rem 0;'>", unsafe_allow_html=True)
+
+                # Summary stats
+                st.markdown("<div style='text-align:center;margin:1rem 0;'>", unsafe_allow_html=True)
+                st.markdown(f"<p style='margin:0.5rem 0;font-size:1.1rem;'><strong>Fleet Total:</strong> {total_trucks} trucks</p>", unsafe_allow_html=True)
+                active_trucks = total_trucks - len(off_set)
+                st.markdown(f"<p style='margin:0.5rem 0;font-size:1.1rem;'><strong>Active:</strong> {active_trucks} trucks</p>", unsafe_allow_html=True)
+                load_rate = (len(loaded_set) / active_trucks * 100) if active_trucks > 0 else 0
+                st.markdown(f"<p style='margin:0.5rem 0;font-size:1.1rem;'><strong>Load Rate:</strong> {load_rate:.1f}%</p>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                st.markdown("<hr style='margin:1.5rem 0;'>", unsafe_allow_html=True)
+
+                # OOS/Spare list
+                if oos_spare_set:
+                    st.markdown(f"<p style='font-size:0.875rem;color:rgba(250,250,250,0.7);margin:0.5rem 0;'><strong>OOS/Spare Trucks:</strong> {', '.join(str(t) for t in sorted(oos_spare_set))}</p>", unsafe_allow_html=True)
+
+                if st.button("Close", width='stretch', key="sup_current_day_summary_dialog_close"):
+                    st.session_state["sup_current_day_summary_dialog_open"] = False
+                    st.rerun()
+
+            _render_sup_current_day_summary_dialog()
 
         def _dismiss_sup_run_day_spares_dialog():
             st.session_state["sup_run_day_spares_dialog_open"] = False
@@ -25419,7 +26284,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         if st.session_state.get("sup_run_day_spares_dialog_open"):
             @st.dialog("Run Day", on_dismiss=_dismiss_sup_run_day_spares_dialog)
             def _render_sup_run_day_spares_dialog():
-                st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 2 of 3</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 2 of 4</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Set any spares or route swaps for this run day.</p>", unsafe_allow_html=True)
 
                 run_day_swap_feedback_key = "sup_run_day_swap_feedback"
@@ -25503,27 +26368,18 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 else:
                     st.caption("No eligible trucks available for Load On.")
 
-                apply_col, continue_col, skip_col = st.columns([1, 1, 1])
-                with apply_col:
-                    if st.button("Apply Swap", use_container_width=True, key="sup_run_day_spares_apply"):
-                        route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
-                        load_on_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
-                        route_raw = str(route_pick) if route_pick is not None else ""
-                        load_on_raw = str(load_on_pick) if load_on_pick is not None else ""
-                        ok_swap, swap_message = _apply_manual_route_change(route_raw, load_on_raw)
-                        st.session_state[run_day_swap_feedback_key] = {
-                            "ok": bool(ok_swap),
-                            "message": str(swap_message),
-                        }
-                        if ok_swap:
-                            _mark_and_save()
-                        st.rerun()
-                with continue_col:
-                    if st.button("Save and Continue", use_container_width=True, key="sup_run_day_spares_finish"):
-                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
+                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                    st.rerun()
+
+                back_col, skip_col = st.columns([1, 1])
+                with back_col:
+                    if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
+                        st.session_state["sup_run_day_flow_active"] = True
+                        _open_supervisor_dialog("sup_dust_clothes_dialog_open")
                         st.rerun()
                 with skip_col:
-                    if st.button("Skip", use_container_width=True, key="sup_run_day_spares_skip"):
+                    if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
                         _open_supervisor_dialog("sup_run_day_specials_dialog_open")
                         st.rerun()
 
@@ -25535,7 +26391,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         if st.session_state.get("sup_run_day_specials_dialog_open"):
             @st.dialog("Run Day", on_dismiss=_dismiss_sup_run_day_specials_dialog)
             def _render_sup_run_day_specials_dialog():
-                st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 3 of 3</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 3 of 4</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.75rem 0;'>What trucks are NOT here or possibly ran special?</p>", unsafe_allow_html=True)
                 st.markdown(
                     """
@@ -25603,28 +26459,72 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 else:
                     st.caption("No off-schedule trucks for today.")
 
-                if st.button("Save and Continue", use_container_width=True, key="sup_run_day_specials_finish"):
+                if st.button("Save and Continue", width='stretch', key="sup_run_day_specials_finish"):
                     st.session_state[absent_key] = set(absent_picks)
                     for t in dirty_picks:
                         _apply_truck_status_change(t, "Dirty")
                     if dirty_picks:
                         _mark_and_save()
-                    st.session_state["sup_run_day_specials_dialog_open"] = False
-                    _queue_management_confirmation("Run day setup complete.")
+                    _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
                     st.rerun()
 
-                skip_col, close_col = st.columns([1, 1])
-                with skip_col:
-                    if st.button("Skip", use_container_width=True, key="sup_run_day_specials_skip"):
-                        st.session_state["sup_run_day_specials_dialog_open"] = False
-                        _queue_management_confirmation("Run day setup complete.")
+                back_col, skip_col = st.columns([1, 1])
+                with back_col:
+                    if st.button("Back", width='stretch', key="sup_run_day_specials_back"):
+                        st.session_state["sup_run_day_flow_active"] = True
+                        _open_supervisor_dialog("sup_run_day_spares_dialog_open")
                         st.rerun()
-                with close_col:
-                    if st.button("Close", use_container_width=True, key="sup_run_day_specials_close"):
-                        st.session_state["sup_run_day_specials_dialog_open"] = False
+                with skip_col:
+                    if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
+                        _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
                         st.rerun()
 
             _render_sup_run_day_specials_dialog()
+
+        def _dismiss_sup_run_day_daily_notes_dialog():
+            st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+            st.session_state["sup_run_day_flow_active"] = False
+
+        if st.session_state.get("sup_run_day_daily_notes_dialog_open"):
+            @st.dialog("Run Day", on_dismiss=_dismiss_sup_run_day_daily_notes_dialog)
+            def _render_sup_run_day_daily_notes_dialog():
+                st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 4 of 4</h2>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Add any notes about today's run day.</p>", unsafe_allow_html=True)
+
+                daily_notes_key = "sup_run_day_daily_notes"
+                current_notes = st.session_state.get(daily_notes_key, "")
+                
+                notes_input = st.text_area(
+                    "Daily Notes",
+                    value=current_notes,
+                    key=daily_notes_key,
+                    height=100,
+                    placeholder="Enter any notes about today's run day...",
+                )
+
+                if st.button("Save and Finish", width='stretch', key="sup_run_day_daily_notes_finish"):
+                    st.session_state["sup_last_run_day_completed_key"] = str(_current_run_date_key() or "")
+                    st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+                    st.session_state["sup_run_day_flow_active"] = False
+                    _queue_management_confirmation("Run day setup complete.")
+                    _mark_and_save()
+                    st.rerun()
+
+                back_col, skip_col = st.columns([1, 1])
+                with back_col:
+                    if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
+                        st.session_state["sup_run_day_flow_active"] = True
+                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                        st.rerun()
+                with skip_col:
+                    if st.button("Skip", width='stretch', key="sup_run_day_daily_notes_skip"):
+                        st.session_state["sup_last_run_day_completed_key"] = str(_current_run_date_key() or "")
+                        st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+                        st.session_state["sup_run_day_flow_active"] = False
+                        _queue_management_confirmation("Run day setup complete.")
+                        st.rerun()
+
+            _render_sup_run_day_daily_notes_dialog()
 
 
         st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
@@ -25701,7 +26601,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 c_batch_a, c_batch_b, c_batch_c = st.columns([1, 1, 1])
                 with c_batch_a:
-                    if st.button("Update wearers", use_container_width=True, key="sup_batch_manage_update_wearers"):
+                    if st.button("Update wearers", width='stretch', key="sup_batch_manage_update_wearers"):
                         if int(projected_total) > int(BATCH_CAP):
                             _queue_batch_capacity_warning(
                                 batch_id=int(selected_batch_id),
@@ -25724,7 +26624,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             )
                             st.rerun()
                 with c_batch_b:
-                    if st.button("Move truck", use_container_width=True, key="sup_batch_manage_move_truck"):
+                    if st.button("Move truck", width='stretch', key="sup_batch_manage_move_truck"):
                         target_total = int(st.session_state.batches.get(int(target_batch), {}).get("total") or 0)
                         if int(target_total) + int(current_wearers) > int(BATCH_CAP):
                             _queue_batch_capacity_warning(
@@ -25745,7 +26645,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             )
                             st.rerun()
                 with c_batch_c:
-                    if st.button("Remove from batch", use_container_width=True, key="sup_batch_manage_remove_truck"):
+                    if st.button("Remove from batch", width='stretch', key="sup_batch_manage_remove_truck"):
                         remove_truck_from_batches(int(selected_batch_truck))
                         st.session_state.wearers.pop(int(selected_batch_truck), None)
                         _append_batch_history_entry(
@@ -25809,7 +26709,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
                 c_notes_a, c_notes_b = st.columns([1, 1])
                 with c_notes_a:
-                    if st.button("Save Always", use_container_width=True, key=f"mgmt_ops_notes_always_save_{int(notes_route)}"):
+                    if st.button("Save Always", width='stretch', key=f"mgmt_ops_notes_always_save_{int(notes_route)}"):
                         note_text = str(always_new_note or "").strip()
                         if note_text:
                             st.session_state.sup_notes_global[int(notes_route)] = note_text
@@ -25819,7 +26719,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         _queue_management_confirmation(f"Always note saved for Truck {int(notes_route)}.")
                         st.rerun()
                 with c_notes_b:
-                    if st.button("Clear Always", use_container_width=True, key=f"mgmt_ops_notes_always_clear_{int(notes_route)}"):
+                    if st.button("Clear Always", width='stretch', key=f"mgmt_ops_notes_always_clear_{int(notes_route)}"):
                         st.session_state.sup_notes_global.pop(int(notes_route), None)
                         save_state()
                         _queue_management_confirmation(f"Always note cleared for Truck {int(notes_route)}.")
@@ -25869,7 +26769,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 c_day_a, c_day_b = st.columns([1, 1])
                 with c_day_a:
-                    if st.button("Save Load Day Note", use_container_width=True, key=f"mgmt_ops_notes_load_day_save_{int(notes_route)}"):
+                    if st.button("Save Load Day Note", width='stretch', key=f"mgmt_ops_notes_load_day_save_{int(notes_route)}"):
                         if not selected_days:
                             st.warning("Select at least one load day.")
                         else:
@@ -25905,7 +26805,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             )
                             st.rerun()
                 with c_day_b:
-                    if st.button("Clear Selected Days", use_container_width=True, key=f"mgmt_ops_notes_load_day_clear_{int(notes_route)}"):
+                    if st.button("Clear Selected Days", width='stretch', key=f"mgmt_ops_notes_load_day_clear_{int(notes_route)}"):
                         if not selected_days:
                             st.warning("Select at least one load day.")
                         else:
@@ -25936,11 +26836,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
     with st.expander("Audit", expanded=False):
         audit_action_cols = st.columns([1, 1])
         with audit_action_cols[0]:
-            if st.button("Audit", use_container_width=True, key="sup_operations_open_audit_dialog"):
+            if st.button("Audit", width='stretch', key="sup_operations_open_audit_dialog"):
                 _open_supervisor_dialog("sup_operations_audit_dialog_open")
                 st.rerun()
         with audit_action_cols[1]:
-            if st.button("View Audits", use_container_width=True, key="sup_operations_open_view_audits_dialog"):
+            if st.button("View Audits", width='stretch', key="sup_operations_open_view_audits_dialog"):
                 _open_supervisor_dialog("sup_operations_view_audits_dialog_open")
                 st.rerun()
 
@@ -26016,7 +26916,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
             )
 
-            if st.button("Add Audit Request", use_container_width=True, key="sup_operations_audit_add"):
+            if st.button("Add Audit Request", width='stretch', key="sup_operations_audit_add"):
                 if not selected_category:
                     st.warning("Select a category.")
                 elif not selected_subcategory:
@@ -26041,7 +26941,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     else:
                         st.error("Could not save audit entry.")
 
-            if st.button("Close", use_container_width=True, key="sup_operations_audit_close"):
+            if st.button("Close", width='stretch', key="sup_operations_audit_close"):
                 st.session_state["sup_operations_audit_dialog_open"] = False
                 st.rerun()
 
@@ -26053,7 +26953,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             entries = _load_audit_history()
             if not entries:
                 st.info("No audit entries found.")
-                if st.button("Close", use_container_width=True, key="sup_operations_view_audits_close_empty"):
+                if st.button("Close", width='stretch', key="sup_operations_view_audits_close_empty"):
                     st.session_state["sup_operations_view_audits_dialog_open"] = False
                     st.rerun()
                 return
@@ -26087,7 +26987,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             )
             if selected_idx < 0:
                 st.warning("Could not load the selected entry.")
-                if st.button("Close", use_container_width=True, key="sup_operations_view_audits_close_badpick"):
+                if st.button("Close", width='stretch', key="sup_operations_view_audits_close_badpick"):
                     st.session_state["sup_operations_view_audits_dialog_open"] = False
                     st.rerun()
                 return
@@ -26188,7 +27088,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
             edit_cols = st.columns([1, 1])
             with edit_cols[0]:
-                if st.button("Save Changes", use_container_width=True, key="sup_operations_view_audits_save"):
+                if st.button("Save Changes", width='stretch', key="sup_operations_view_audits_save"):
                     updated_item = str(edit_category)
                     if str(edit_subcategory).lower() != "general":
                         updated_item = f"{edit_category} - {edit_subcategory}"
@@ -26208,7 +27108,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     else:
                         st.error("Could not save audit changes.")
             with edit_cols[1]:
-                if st.button("Delete Entry", use_container_width=True, key="sup_operations_view_audits_delete"):
+                if st.button("Delete Entry", width='stretch', key="sup_operations_view_audits_delete"):
                     remaining_entries = [
                         e for e in entries if str(e.get("entry_id") or "") != str(selected_entry_id)
                     ]
@@ -26229,9 +27129,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 for e in sorted(entries, key=lambda x: str(x.get("ts") or ""), reverse=True)[:12]
             ]
             st.caption("Recent audits")
-            st.dataframe(recent_rows, use_container_width=True, hide_index=True)
+            st.dataframe(recent_rows, width='stretch', hide_index=True)
 
-            if st.button("Close", use_container_width=True, key="sup_operations_view_audits_close"):
+            if st.button("Close", width='stretch', key="sup_operations_view_audits_close"):
                 st.session_state["sup_operations_view_audits_dialog_open"] = False
                 st.rerun()
 
@@ -26297,7 +27197,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     }.get(int(day_num), f"Day {int(day_num)}")
                 ),
             )
-            off_schedule_submit = st.form_submit_button("Apply truck schedule", use_container_width=True)
+            off_schedule_submit = st.form_submit_button("Apply truck schedule", width='stretch')
 
         if off_schedule_submit:
             selected_truck = int(st.session_state.get(schedule_truck_key))
@@ -26342,15 +27242,130 @@ elif st.session_state.active_screen == "SUPERVISOR":
         if fleet_manage_mode == "View fleet":
             default_set = set(DEFAULT_FLEET_TRUCKS) | set(PERSISTENT_SPARE_TRUCKS)
             extra_set = {int(t) for t in FLEET if t not in default_set}
+
+            scheduled_today_set = {int(t) for t in (scheduled_trucks_for_current_load_day() or set())}
+            unload_today_set = {int(t) for t in (unload_trucks_for_current_day() or set())}
+            off_today_set = {int(t) for t in (off_trucks_for_today() or [])}
+            unload_request_set = {int(t) for t in _normalize_spare_tracking_set(st.session_state.get("unload_request_set") or set())}
+
+            active_swaps = _active_route_swap_assignments()
+            covering_route_by_truck = {int(truck): int(route) for route, truck in active_swaps.items()}
+            route_target_by_truck = _truck_route_targets()
+
+            wearers_raw = st.session_state.get("wearers") or {}
+            load_durations_raw = st.session_state.get("load_durations") or {}
+            shop_notes_raw = st.session_state.get("shop_notes") or {}
+            off_notes_raw = st.session_state.get("off_notes") or {}
+            next_up_raw = st.session_state.get("next_up_truck")
+            try:
+                next_up_truck = int(next_up_raw) if next_up_raw is not None else None
+            except Exception:
+                next_up_truck = None
+
             fleet_rows = []
             for t in sorted(FLEET):
+                truck_num = int(t)
+                truck_status = str(current_status_label(int(truck_num)) or "").strip() or "Dirty"
+                load_day_num = _effective_truck_load_day(int(truck_num))
+
+                try:
+                    wearers_count = int(wearers_raw.get(int(truck_num)) or 0)
+                except Exception:
+                    wearers_count = 0
+
+                duration_label = ""
+                try:
+                    duration_raw = load_durations_raw.get(int(truck_num))
+                    if duration_raw is not None:
+                        duration_label = seconds_to_mmss(int(duration_raw))
+                except Exception:
+                    duration_label = ""
+
+                route_target = route_target_by_truck.get(int(truck_num))
+                covering_route = covering_route_by_truck.get(int(truck_num))
+
                 fleet_rows.append({
-                    "Truck": int(t),
-                    "Type": "Spare" if t in set(PERSISTENT_SPARE_TRUCKS) else ("Added" if t in extra_set else "Default"),
+                    "Truck": int(truck_num),
+                    "Type": "Spare" if truck_num in set(PERSISTENT_SPARE_TRUCKS) else ("Spare" if truck_num in extra_set else "Daily"),
+                    "Status": truck_status,
+                    "Scheduled Today": "Yes" if int(truck_num) in scheduled_today_set else "No",
+                    "Unload Due Today": "Yes" if int(truck_num) in unload_today_set else "No",
+                    "Off Today (Schedule)": "Yes" if int(truck_num) in off_today_set else "No",
+                    "Next Up": "Yes" if next_up_truck is not None and int(truck_num) == int(next_up_truck) else "No",
+                    "Unload Requested": "Yes" if int(truck_num) in unload_request_set else "No",
+                    "Route Target": int(route_target) if route_target is not None else int(truck_num),
+                    "Covering Route": int(covering_route) if covering_route is not None else "",
+                    "Load Day": int(load_day_num) if load_day_num is not None else "",
+                    "Wearers": int(wearers_count),
+                    "Load Duration": str(duration_label),
+                    "Shop Note": str(shop_notes_raw.get(int(truck_num)) or "").strip(),
+                    "Off Note": str(off_notes_raw.get(int(truck_num)) or "").strip(),
                 })
-            st.caption(f"{len(FLEET)} truck(s) active — {len(extra_set)} added beyond defaults")
+
+            tzinfo = _get_tzinfo()
+            try:
+                refreshed_dt = datetime.now(tzinfo) if tzinfo else datetime.now()
+                refreshed_label = refreshed_dt.strftime("%Y-%m-%d %I:%M:%S %p").lstrip("0")
+            except Exception:
+                refreshed_label = "Now"
+
+            st.caption(
+                f"{len(FLEET)} truck(s) active | {len(extra_set)} added beyond defaults | "
+                f"Live snapshot: {refreshed_label}"
+            )
             if fleet_rows:
-                st.dataframe(fleet_rows, hide_index=True, use_container_width=True)
+                status_counts: dict[str, int] = {}
+                for row in fleet_rows:
+                    status_name = str(row.get("Status") or "Unknown")
+                    status_counts[status_name] = int(status_counts.get(status_name, 0)) + 1
+                status_summary = ", ".join(
+                    f"{name}: {count}" for name, count in sorted(status_counts.items(), key=lambda pair: pair[0])
+                )
+                if status_summary:
+                    st.caption(f"Status totals - {status_summary}")
+
+                row_height = 35
+                header_height = 38
+                max_visible_rows = 18
+                visible_rows = max(1, min(len(fleet_rows), max_visible_rows))
+                table_height = header_height + (row_height * visible_rows)
+                st.dataframe(fleet_rows, hide_index=True, width='stretch', height=table_height)
+
+                csv_fields = [
+                    "Truck",
+                    "Type",
+                    "Status",
+                    "Scheduled Today",
+                    "Unload Due Today",
+                    "Off Today (Schedule)",
+                    "Next Up",
+                    "Unload Requested",
+                    "Route Target",
+                    "Covering Route",
+                    "Load Day",
+                    "Wearers",
+                    "Load Duration",
+                    "Shop Note",
+                    "Off Note",
+                ]
+                csv_buffer = StringIO()
+                csv_writer = csv.DictWriter(csv_buffer, fieldnames=csv_fields)
+                csv_writer.writeheader()
+                for row in fleet_rows:
+                    csv_writer.writerow({field: row.get(field, "") for field in csv_fields})
+
+                st.download_button(
+                    "Download daily fleet sheet (.csv)",
+                    data=csv_buffer.getvalue().encode("utf-8"),
+                    file_name=f"fleet_daily_view_{date.today().isoformat()}.csv",
+                    mime="text/csv",
+                    key="mgmt_fleet_view_download_csv",
+                    width='stretch',
+                    help="CSV opens directly in Excel and includes current live fleet state.",
+                )
+
+                if st.button("Refresh now", key="mgmt_fleet_view_refresh_now", width='stretch'):
+                    st.rerun()
             else:
                 st.info("Fleet is empty.")
 
@@ -26368,7 +27383,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
         elif fleet_manage_mode == "Remove truck":
             if not FLEET:
-                st.info("Fleet is empty — nothing to remove.")
+                st.info("Fleet is empty � nothing to remove.")
             else:
                 remove_pick = st.selectbox(
                     "Select truck to remove",
@@ -26376,7 +27391,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     format_func=lambda t: f"Truck {int(t)}",
                     key="mgmt_fleet_remove_pick",
                 )
-                if st.button("Remove truck", use_container_width=True, key="mgmt_fleet_remove_btn"):
+                if st.button("Remove truck", width='stretch', key="mgmt_fleet_remove_btn"):
                     st.session_state["mgmt_fleet_pending_remove"] = int(remove_pick)
                     st.rerun()
 
@@ -26388,13 +27403,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     )
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if st.button("Confirm remove", use_container_width=True, key="mgmt_fleet_confirm_remove"):
+                        if st.button("Confirm remove", width='stretch', key="mgmt_fleet_confirm_remove"):
                             ok, msg = _remove_truck_from_fleet(int(remove_pick))
                             st.session_state["mgmt_fleet_pending_remove"] = None
-                            _queue_management_confirmation(msg, icon="✅" if ok else "⚠️")
+                            _queue_management_confirmation(msg, icon="?" if ok else "??")
                             st.rerun()
                     with c2:
-                        if st.button("Cancel", use_container_width=True, key="mgmt_fleet_cancel_remove"):
+                        if st.button("Cancel", width='stretch', key="mgmt_fleet_cancel_remove"):
                             st.session_state["mgmt_fleet_pending_remove"] = None
                             st.rerun()
 
@@ -26404,7 +27419,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 f"This will restore the fleet to the {len(default_fleet)} default truck(s) "
                 f"and clear all additions/removals."
             )
-            if st.button("Reset fleet to defaults", use_container_width=True, key="mgmt_fleet_reset_btn"):
+            if st.button("Reset fleet to defaults", width='stretch', key="mgmt_fleet_reset_btn"):
                 st.session_state["mgmt_fleet_pending_reset"] = True
                 st.rerun()
 
@@ -26412,7 +27427,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 st.warning("All added trucks will be removed and the fleet will be restored to defaults. Continue?")
                 r1, r2 = st.columns([1, 1])
                 with r1:
-                    if st.button("Confirm reset", use_container_width=True, key="mgmt_fleet_confirm_reset"):
+                    if st.button("Confirm reset", width='stretch', key="mgmt_fleet_confirm_reset"):
                         st.session_state["extra_fleet"] = []
                         st.session_state["removed_fleet"] = []
                         try:
@@ -26425,7 +27440,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         _queue_management_confirmation("Fleet reset to defaults.")
                         st.rerun()
                 with r2:
-                    if st.button("Cancel", use_container_width=True, key="mgmt_fleet_cancel_reset"):
+                    if st.button("Cancel", width='stretch', key="mgmt_fleet_cancel_reset"):
                         st.session_state["mgmt_fleet_pending_reset"] = False
                         st.rerun()
 
@@ -26520,7 +27535,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 key="mgmt_badge_color_off",
             )
 
-        if st.button("Apply app settings", use_container_width=True, key="mgmt_app_settings_apply"):
+        if st.button("Apply app settings", width='stretch', key="mgmt_app_settings_apply"):
             st.session_state.timezone_key = tz_pick
             st.session_state.ui_theme = "Dark"
             st.session_state.live_button_styling = bool(live_button_styling_pick)
@@ -26544,7 +27559,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         with reset_settings_col:
             if st.button(
                 "Reset to defaults color scheme",
-                use_container_width=True,
+                width='stretch',
                 key="mgmt_app_settings_reset_color_defaults",
             ):
                 st.session_state.status_badge_colors = dict(DEFAULT_STATUS_BADGE_COLORS)
@@ -26568,7 +27583,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         )
         add_word_col, stats_col = st.columns([1, 1])
         with add_word_col:
-            if st.button("Add censored word", use_container_width=True, key="mgmt_comms_add_censor_word_btn"):
+            if st.button("Add censored word", width='stretch', key="mgmt_comms_add_censor_word_btn"):
                 parsed_words = _normalize_chat_censor_words([new_censor_word])
                 if not parsed_words:
                     st.warning("Enter a valid word (letters/numbers, at least 2 characters).")
@@ -26594,7 +27609,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
         st.write("##### Message history")
         st.caption("Open message history in a dialog for easier scanning.")
-        if st.button("Open communications history", use_container_width=True, key="mgmt_comms_open_history_dialog"):
+        if st.button("Open communications history", width='stretch', key="mgmt_comms_open_history_dialog"):
             _open_supervisor_dialog("sup_comms_history_dialog_open")
             st.rerun()
 
@@ -26636,9 +27651,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     history_max_visible_rows = 14
                     history_visible_rows = max(1, min(len(history_rows), history_max_visible_rows))
                     history_height = history_header_height + (history_row_height * history_visible_rows)
-                    st.dataframe(history_rows, use_container_width=True, hide_index=True, height=history_height)
+                    st.dataframe(history_rows, width='stretch', hide_index=True, height=history_height)
 
-                if st.button("Close", use_container_width=True, key="mgmt_comms_history_dialog_close"):
+                if st.button("Close", width='stretch', key="mgmt_comms_history_dialog_close"):
                     st.session_state["sup_comms_history_dialog_open"] = False
                     st.rerun()
 
@@ -26653,7 +27668,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state["sup_pdf_download_dialog_open"] = False
 
         st.caption("Open report downloads in a focused dialog.")
-        if st.button("Open report downloads", use_container_width=True, key="sup_open_pdf_download_dialog"):
+        if st.button("Open report downloads", width='stretch', key="sup_open_pdf_download_dialog"):
             _open_supervisor_dialog("sup_pdf_download_dialog_open")
             st.rerun()
 
@@ -26668,7 +27683,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         f"truck_readiness_{(st.session_state.run_date.isoformat() if st.session_state.run_date else 'workday')}.pdf"
                     ),
                     mime="application/pdf",
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_pdf_download_load_shortages",
                 )
 
@@ -26681,7 +27696,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         f"batch_cards_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf"
                     ),
                     mime="application/pdf",
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_pdf_download_batch_cards",
                 )
 
@@ -26694,7 +27709,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         f"removal_requests_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf"
                     ),
                     mime="application/pdf",
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_pdf_download_removal_requests",
                 )
 
@@ -26707,17 +27722,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         f"end_of_day_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf"
                     ),
                     mime="application/pdf",
-                    use_container_width=True,
+                    width='stretch',
                     key="sup_pdf_download_eod",
                 )
 
-                if st.button("Close", use_container_width=True, key="sup_pdf_download_dialog_close"):
+                if st.button("Close", width='stretch', key="sup_pdf_download_dialog_close"):
                     st.session_state["sup_pdf_download_dialog_open"] = False
                     st.rerun()
 
             _render_sup_pdf_download_dialog()
 
-    st.markdown("#### Advanced and Reset")
+    _render_management_section_chip("Advanced and Reset", "#991b1b")
     with st.expander("Development", expanded=False):
         st.caption("Developer tools are condensed into nested sections and import dialogs.")
 
@@ -26773,7 +27788,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         format_func=lambda d: f"{fmt_long_date(d)} ({d.isoformat()})",
                     )
 
-                    if st.button("View archived day", use_container_width=True, key="sup_open_archive_day_btn"):
+                    if st.button("View archived day", width='stretch', key="sup_open_archive_day_btn"):
                         target_date = selected_archive_date if isinstance(selected_archive_date, date) else default_archive_date
                         if not bool(st.session_state.get("archive_view_mode")):
                             st.session_state["archive_live_state_snapshot"] = _serialize_state()
@@ -26785,7 +27800,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 else:
                     st.caption("No saved state history files found yet.")
 
-            if st.button("Apply management settings", use_container_width=True, key="sup_apply_management_settings_dev"):
+            if st.button("Apply management settings", width='stretch', key="sup_apply_management_settings_dev"):
                 st.session_state.shorts_mode = shorts_mode
                 st.session_state.shorts_disabled = shorts_mode == SHORTS_MODE_DISABLE
                 st.session_state.batching_disabled = bool(disable_batching)
@@ -26855,7 +27870,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 if auto_enable_from_value_change:
                     st.caption("Changing seconds while unchecked will enable manual override when applied.")
 
-                if st.button("Apply manual pace settings", key="mgmt_dev_apply_pace_override", use_container_width=True):
+                if st.button("Apply manual pace settings", key="mgmt_dev_apply_pace_override", width='stretch'):
                     has_changes = (
                         bool(effective_override_enabled) != bool(persisted_override_enabled)
                         or int(normalized_override_seconds) != int(persisted_override_seconds)
@@ -26866,7 +27881,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if has_changes:
                         _queue_management_confirmation("Manual pace settings saved.")
                     else:
-                        _queue_management_confirmation("No manual pace changes to save.", icon="ℹ️")
+                        _queue_management_confirmation("No manual pace changes to save.", icon="??")
                     st.rerun()
 
             with st.expander("Loader scaling", expanded=False):
@@ -26920,7 +27935,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     f"({_pace_loader_multiplier_caption(tuned_loader_multiplier)})."
                 )
 
-                if st.button("Apply loader scaling", key="mgmt_dev_apply_loader_scaling", use_container_width=True):
+                if st.button("Apply loader scaling", key="mgmt_dev_apply_loader_scaling", width='stretch'):
                     has_changes = (
                         int(tuned_loader_active) != int(persisted_loader_active)
                         or int(tuned_loader_baseline) != int(persisted_loader_baseline)
@@ -26931,7 +27946,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if has_changes:
                         _queue_management_confirmation("Loader scaling saved.")
                     else:
-                        _queue_management_confirmation("No loader scaling changes to save.", icon="ℹ️")
+                        _queue_management_confirmation("No loader scaling changes to save.", icon="??")
                     st.rerun()
 
             with st.expander("Conservative buffer", expanded=False):
@@ -27009,11 +28024,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 c_reset, c_apply = st.columns([1, 2])
                 with c_reset:
-                    if st.button("Reset buffers", key="mgmt_dev_reset_pace_buffers", use_container_width=True):
+                    if st.button("Reset buffers", key="mgmt_dev_reset_pace_buffers", width='stretch'):
                         st.session_state[reset_pace_buffers_pending_key] = True
                         st.rerun()
                 with c_apply:
-                    if st.button("Apply conservative buffer", key="mgmt_dev_apply_pace_buffers", use_container_width=True):
+                    if st.button("Apply conservative buffer", key="mgmt_dev_apply_pace_buffers", width='stretch'):
                         has_changes = (
                             int(tuned_base_seconds) != int(persisted_base_seconds)
                             or int(tuned_per_truck_seconds) != int(persisted_per_truck_seconds)
@@ -27026,7 +28041,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         if has_changes:
                             _queue_management_confirmation("Conservative buffer saved.")
                         else:
-                            _queue_management_confirmation("No conservative buffer changes to save.", icon="ℹ️")
+                            _queue_management_confirmation("No conservative buffer changes to save.", icon="??")
                         st.rerun()
 
         with st.expander("3) Export and import", expanded=False):
@@ -27113,7 +28128,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     data=durations_download_bytes,
                     file_name=durations_filename,
                     mime="application/json",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_download_load_durations",
                 )
             with export_col_2:
@@ -27122,7 +28137,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     data=state_history_download_bytes,
                     file_name=f"state_{current_history_key}.json",
                     mime="application/json",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_download_state_history",
                 )
             with export_col_3:
@@ -27131,7 +28146,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     data=audit_download_bytes,
                     file_name="audit_requests.json",
                     mime="application/json",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_download_audit_history",
                 )
             with export_col_4:
@@ -27140,7 +28155,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     data=batch_info_download_bytes,
                     file_name="batch_info.json",
                     mime="application/json",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_download_batch_info",
                 )
 
@@ -27225,7 +28240,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 data=history_backup_bytes,
                 file_name=f"truckapp_history_backup_{date.today().isoformat()}.json",
                 mime="application/json",
-                use_container_width=True,
+                width='stretch',
                 key="mgmt_dev_download_history_backup_package",
             )
 
@@ -27236,7 +28251,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 if st.button(
                     "Open backup package import",
                     key="mgmt_dev_open_backup_import_dialog",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     _open_supervisor_dialog("mgmt_dev_backup_import_dialog_open")
                     st.rerun()
@@ -27244,13 +28259,16 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 if st.button(
                     "Open direct JSON imports",
                     key="mgmt_dev_open_direct_import_dialog",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     _open_supervisor_dialog("mgmt_dev_direct_import_dialog_open")
                     st.rerun()
 
         with st.expander("4) Audit Photos (Attachments)", expanded=False):
-            st.caption("Review and delete audit-attached photos by workday.")
+            st.caption(
+                "Review and delete audit-attached photos by workday. Entries are sorted by truck number and include route + day context."
+            )
+            st.caption("Audit photo meaning: photo is taken today for a truck load from the previous day.")
             available_photo_days = _audit_photo_archive_run_dates()
             if not available_photo_days:
                 st.caption("No audit-attached photos found.")
@@ -27285,9 +28303,109 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         data=day_zip,
                         file_name=f"audit_photos_{selected_photo_day}.zip",
                         mime="application/zip",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"mgmt_dev_download_audit_photos_{selected_photo_day}",
                     )
+
+                st.markdown("##### Photo viewer")
+                st.caption("Select any photo to preview it with truck and load-day details. Preview scales to panel width.")
+                if day_entries:
+                    preview_options = [
+                        str(entry.get("entry_id") or "").strip()
+                        for entry in day_entries
+                        if str(entry.get("entry_id") or "").strip()
+                    ]
+
+                    preview_options = [opt for opt in preview_options if opt]
+                    preview_key = f"mgmt_dev_audit_photo_preview_pick_{selected_photo_day}"
+                    current_preview = str(st.session_state.get(preview_key) or "").strip()
+                    if current_preview not in preview_options and preview_options:
+                        st.session_state[preview_key] = preview_options[0]
+
+                    def _preview_label(entry_id: str) -> str:
+                        target = next((e for e in day_entries if str(e.get("entry_id") or "").strip() == str(entry_id)), None)
+                        if not isinstance(target, dict):
+                            return str(entry_id)
+                        ts_text = str(target.get("ts") or "")[:19].replace("T", " ")
+                        truck_text = str(target.get("truck") or "-")
+                        route_text = str(target.get("route") or target.get("truck") or "-")
+                        loaded_prev_date_text = str(target.get("loaded_previous_date") or "-")
+                        loaded_day_num = _normalize_load_day_num(target.get("loaded_day_num"))
+                        loaded_day_text = f"Day {int(loaded_day_num)}" if loaded_day_num is not None else "Day -"
+                        return (
+                            f"Truck {truck_text} | Route {route_text} | {loaded_day_text} "
+                            f"(Prev Date {loaded_prev_date_text}) | {ts_text}"
+                        )
+
+                    selected_preview_id = st.selectbox(
+                        "Select photo",
+                        options=preview_options,
+                        key=preview_key,
+                        format_func=_preview_label,
+                    )
+
+                    preview_open_key = f"mgmt_dev_audit_photo_preview_open_{selected_photo_day}"
+                    if preview_open_key not in st.session_state:
+                        st.session_state[preview_open_key] = False
+                    is_preview_open = bool(st.session_state.get(preview_open_key))
+
+                    preview_toggle_label = "Open photo" if not is_preview_open else "Close photo"
+                    if st.button(
+                        preview_toggle_label,
+                        key=f"mgmt_dev_audit_photo_preview_toggle_{selected_photo_day}",
+                        width='stretch',
+                    ):
+                        st.session_state[preview_open_key] = not is_preview_open
+                        st.rerun()
+
+                    selected_preview = next(
+                        (entry for entry in day_entries if str(entry.get("entry_id") or "").strip() == str(selected_preview_id)),
+                        None,
+                    )
+                    if not bool(st.session_state.get(preview_open_key)):
+                        st.caption("Photo preview is closed.")
+                    elif isinstance(selected_preview, dict):
+                        rel_path = str(selected_preview.get("relative_path") or "").strip()
+                        abs_path = os.path.join(os.getcwd(), rel_path) if rel_path else ""
+                        if abs_path and os.path.exists(abs_path):
+                            # Resize high-res image to fit viewer: max 400px width, maintain aspect ratio.
+                            try:
+                                img = Image.open(abs_path)
+                                img = ImageOps.exif_transpose(img)
+                                if img.mode == 'RGBA':
+                                    img = img.convert('RGB')
+                                max_width = 400
+                                if img.width > max_width:
+                                    ratio = max_width / img.width
+                                    new_height = int(img.height * ratio)
+                                    img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                                st.image(img, use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"Could not load photo: {str(e)}")
+                        else:
+                            st.warning("Selected photo file is missing from disk.")
+
+                        photo_day_text = str(selected_preview.get("photo_day") or selected_preview.get("run_date") or "-")
+                        photo_day_num = _normalize_load_day_num(selected_preview.get("photo_day_num"))
+                        photo_day_label = f"Day {int(photo_day_num)}" if photo_day_num is not None else "Day -"
+                        loaded_prev_date_text = str(selected_preview.get("loaded_previous_date") or "-")
+                        loaded_day_num = _normalize_load_day_num(selected_preview.get("loaded_day_num"))
+                        loaded_day_label = f"Day {int(loaded_day_num)}" if loaded_day_num is not None else "Day -"
+
+                        st.caption(
+                            (
+                                f"Truck {int(selected_preview.get('truck') or 0)} | "
+                                f"Route {int(selected_preview.get('route') or selected_preview.get('truck') or 0)} | "
+                                f"Photo Day {photo_day_label} ({photo_day_text}) | "
+                                f"Loaded Previous Day {loaded_day_label} ({loaded_prev_date_text})"
+                            )
+                        )
+                        st.caption(str(selected_preview.get("loaded_previous_context") or "Photo reflects truck load from the previous day."))
+                        photo_note = str(selected_preview.get("note") or "").strip()
+                        if photo_note:
+                            st.caption(f"Note: {photo_note}")
+                else:
+                    st.caption("No photos available to preview for this workday.")
 
                 delete_confirm_key = f"mgmt_dev_audit_photo_delete_confirm_{selected_photo_day}"
                 st.checkbox(
@@ -27307,10 +28425,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         continue
                     ts_text = str(entry.get("ts") or "")[:19].replace("T", " ")
                     truck_text = str(entry.get("truck") or "-")
+                    route_text = str(entry.get("route") or entry.get("truck") or "-")
+                    photo_day_text = str(entry.get("photo_day") or entry.get("run_date") or "-")
+                    loaded_prev_day_text = str(entry.get("loaded_previous_date") or "-")
                     source_text = str(entry.get("source") or "upload").strip().title()
                     rel_path = str(entry.get("relative_path") or "").strip()
                     file_name = os.path.basename(rel_path) if rel_path else "photo.jpg"
-                    row_label = f"{ts_text} | Truck {truck_text} | {source_text} | {file_name}"
+                    row_label = (
+                        f"{ts_text} | Truck {truck_text} | Route {route_text} | "
+                        f"Photo Day {photo_day_text} | Loaded Prev Day {loaded_prev_day_text} | "
+                        f"{source_text} | {file_name}"
+                    )
                     if st.checkbox(row_label, value=False, key=f"mgmt_dev_audit_photo_delete_pick_{selected_photo_day}_{entry_id}"):
                         selected_delete_ids.append(entry_id)
 
@@ -27318,7 +28443,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 with delete_c1:
                     if st.button(
                         "Delete selected photos",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"mgmt_dev_audit_photo_delete_selected_{selected_photo_day}",
                     ):
                         if not bool(st.session_state.get(delete_confirm_key)):
@@ -27341,7 +28466,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 with delete_c2:
                     if st.button(
                         "Delete all workday photos",
-                        use_container_width=True,
+                        width='stretch',
                         key=f"mgmt_dev_audit_photo_delete_day_{selected_photo_day}",
                     ):
                         if not bool(st.session_state.get(delete_confirm_key)):
@@ -27360,7 +28485,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.caption("Quick add single shortages or mass-edit shortages for a selected truck.")
             if st.button(
                 "Add Shortages",
-                use_container_width=True,
+                width='stretch',
                 key="mgmt_dev_open_shortages_dialog",
             ):
                 _open_supervisor_dialog("mgmt_dev_shortages_dialog_open")
@@ -27405,7 +28530,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 truck_options = sorted(int(t) for t in set(FLEET))
                 if not truck_options:
                     st.warning("No fleet trucks are configured.")
-                    if st.button("Close", use_container_width=True, key="mgmt_dev_shortages_dialog_close_no_trucks"):
+                    if st.button("Close", width='stretch', key="mgmt_dev_shortages_dialog_close_no_trucks"):
                         st.session_state["mgmt_dev_shortages_dialog_open"] = False
                         st.rerun()
                     return
@@ -27500,7 +28625,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 quick_action_cols = st.columns([1, 1])
                 with quick_action_cols[0]:
-                    if st.button("Quick Add", use_container_width=True, key="mgmt_dev_shortages_quick_add_btn"):
+                    if st.button("Quick Add", width='stretch', key="mgmt_dev_shortages_quick_add_btn"):
                         if not quick_subcategory:
                             st.warning("Pick a sub category.")
                         else:
@@ -27531,7 +28656,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             )
                             st.rerun()
                 with quick_action_cols[1]:
-                    if st.button("Reload current truck", use_container_width=True, key="mgmt_dev_shortages_reload_rows_btn"):
+                    if st.button("Reload current truck", width='stretch', key="mgmt_dev_shortages_reload_rows_btn"):
                         st.session_state[last_truck_key] = None
                         st.rerun()
 
@@ -27540,7 +28665,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 edited_rows = st.data_editor(
                     st.session_state.get(rows_store_key) or [{"item": "None", "qty": 1, "note": ""}],
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     num_rows="dynamic",
                     key="mgmt_dev_shortages_editor",
@@ -27563,7 +28688,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 mass_action_cols = st.columns([1, 1, 1])
                 with mass_action_cols[0]:
-                    if st.button("Apply mass shortages", use_container_width=True, key="mgmt_dev_shortages_apply_mass_btn"):
+                    if st.button("Apply mass shortages", width='stretch', key="mgmt_dev_shortages_apply_mass_btn"):
                         normalized_rows = _normalize_rows(edited_rows)
                         st.session_state.shorts[int(selected_truck)] = normalized_rows
                         save_state()
@@ -27572,7 +28697,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         )
                         st.rerun()
                 with mass_action_cols[1]:
-                    if st.button("Clear truck shortages", use_container_width=True, key="mgmt_dev_shortages_clear_truck_btn"):
+                    if st.button("Clear truck shortages", width='stretch', key="mgmt_dev_shortages_clear_truck_btn"):
                         st.session_state.shorts[int(selected_truck)] = []
                         save_state()
                         st.session_state[last_truck_key] = None
@@ -27581,7 +28706,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         )
                         st.rerun()
                 with mass_action_cols[2]:
-                    if st.button("Close", use_container_width=True, key="mgmt_dev_shortages_dialog_close"):
+                    if st.button("Close", width='stretch', key="mgmt_dev_shortages_dialog_close"):
                         st.session_state["mgmt_dev_shortages_dialog_open"] = False
                         st.rerun()
 
@@ -27629,7 +28754,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 if st.button(
                     "Import history backup package",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_import_history_backup_package_btn",
                 ):
                     if uploaded_history_backup_package is None:
@@ -27829,7 +28954,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                 )
                                 st.rerun()
 
-                if st.button("Close", use_container_width=True, key="mgmt_dev_backup_import_dialog_close"):
+                if st.button("Close", width='stretch', key="mgmt_dev_backup_import_dialog_close"):
                     st.session_state["mgmt_dev_backup_import_dialog_open"] = False
                     st.rerun()
 
@@ -27854,7 +28979,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
                 if st.button(
                     "Import load_durations JSON",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_import_load_durations_btn",
                 ):
                     if uploaded_durations is None:
@@ -27913,7 +29038,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
                 if st.button(
                     "Import audit_requests JSON",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_import_audit_history_btn",
                 ):
                     if uploaded_audit_history is None:
@@ -27968,7 +29093,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
                 if st.button(
                     "Import state history JSON files",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_import_state_history_btn",
                 ):
                     if not uploaded_state_history_files:
@@ -28069,7 +29194,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
                 if st.button(
                     "Import batch_info JSON",
-                    use_container_width=True,
+                    width='stretch',
                     key="mgmt_dev_import_batch_info_btn",
                 ):
                     if uploaded_batch_info is None:
@@ -28150,7 +29275,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             )
                             st.rerun()
 
-                if st.button("Close", use_container_width=True, key="mgmt_dev_direct_import_dialog_close"):
+                if st.button("Close", width='stretch', key="mgmt_dev_direct_import_dialog_close"):
                     st.session_state["mgmt_dev_direct_import_dialog_open"] = False
                     st.rerun()
 
@@ -28170,7 +29295,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         st.caption("Dangerous: use only if you want to wipe the current day and saved state.")
 
         def _reset_action_with_help(button_label: str, button_key: str, help_text: str) -> bool:
-            return bool(st.button(button_label, key=button_key, use_container_width=True, help=help_text))
+            return bool(st.button(button_label, key=button_key, width='stretch', help=help_text))
 
         if _reset_action_with_help(
             "Reset Workday Now",
@@ -28226,6 +29351,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 pass
 
             _prune_next_up_queue_if_unavailable()
+            st.session_state["sup_last_run_day_completed_key"] = ""
             save_state()
             _queue_management_confirmation(
                 f"Soft reset complete. Cleared load durations and reset {len(affected_trucks)} loaded/unloaded trucks."
@@ -28297,6 +29423,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state["communications_last_seen_ts"] = 0.0
             st.session_state["communications_nav_flash_until"] = 0.0
             st.session_state["communications_unread_count"] = 0
+            st.session_state["sup_last_run_day_completed_key"] = ""
 
             # Remove persisted state file.
             try:
@@ -28655,13 +29782,16 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
         """
         <style>
         @media (min-width: 992px) {
+            :root {
+                --communications-notice-rail: 300px;
+            }
             [data-testid="stAppViewContainer"] .main .block-container,
             [data-testid="stAppViewContainer"] .block-container {
                 max-width: none !important;
-                width: calc(100vw - 360px) !important;
-                margin-left: 0 !important;
+                width: calc(100vw - 360px - var(--communications-notice-rail)) !important;
+                margin-left: calc(var(--communications-notice-rail) + 12px) !important;
                 margin-right: auto !important;
-                padding-left: 0.9rem !important;
+                padding-left: 0.55rem !important;
                 padding-right: 0.9rem !important;
             }
         }
@@ -28674,7 +29804,7 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
     if (not is_logged_in) or _current_auth_role() == AUTH_ROLE_GUEST:
         st.warning("Communications is available only to logged-in users.")
         if _auth_enabled() and auth_status is not True:
-            if st.button("Open Login Portal", key="communications_open_login_btn", use_container_width=True):
+            if st.button("Open Login Portal", key="communications_open_login_btn", width='stretch'):
                 st.session_state.auth_login_portal_pending = True
                 st.session_state.auth_request_portal_pending = False
                 st.session_state.auth_login_portal_requested_at = time.time()
@@ -28763,15 +29893,27 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
                 ".comms-head-date{padding:8px 12px; text-align:center; font-size:0.9rem; font-weight:700; opacity:0.86;}"
                 ".comms-feed{margin:0 0 10px 0; padding:8px; border-radius:16px; border:1px solid rgba(148,163,184,0.35);"
                 " background:rgba(15,23,42,0.45); box-shadow:0 12px 30px rgba(0,0,0,0.24); max-height:560px; overflow-y:auto;}"
-                ".comms-group{display:flex; width:100%; margin:0 0 6px 0;}"
+                ".comms-group{display:flex; width:100%; margin:0 0 6px 0; transition:margin 120ms ease;}"
                 ".comms-group:last-child{margin-bottom:0;}"
                 ".comms-group-left{justify-content:flex-start;}"
                 ".comms-group-right{justify-content:flex-end;}"
+                ".comms-group-left.comms-group-offset-1{margin-left:96px;}"
+                ".comms-group-left.comms-group-offset-2{margin-left:14px;}"
+                ".comms-group-right.comms-group-offset-1{margin-right:8px;}"
+                ".comms-group-right.comms-group-offset-2{margin-right:14px;}"
                 ".comms-bubble{max-width:min(80%, 760px); padding:8px 10px; border-radius:11px; border:1px solid rgba(148,163,184,0.35);"
-                " background:rgba(15,23,42,0.48);}"
+                " background:rgba(15,23,42,0.48); position:relative; overflow:visible;}"
                 ".comms-group-right .comms-bubble{border:1px solid rgba(59,130,246,0.42); background:rgba(30,58,138,0.24);}"
-                ".comms-meta{display:flex; align-items:baseline; justify-content:flex-start; gap:10px; margin-bottom:4px; opacity:0.96;}"
-                ".comms-user-name{display:inline-block; font-size:0.86rem; font-weight:900; letter-spacing:0.02em; text-transform:uppercase; line-height:1.1;}"
+                ".comms-bubble-admin{border-color:rgba(59,130,246,0.55); background:rgba(30,58,138,0.27);}"
+                ".comms-bubble-lead{border-color:rgba(167,139,250,0.55); background:rgba(88,28,135,0.24);}"
+                ".comms-bubble-loader{border-color:rgba(34,197,94,0.55); background:rgba(20,83,45,0.24);}"
+                ".comms-bubble-unloader{border-color:rgba(251,146,60,0.55); background:rgba(124,45,18,0.24);}"
+                ".comms-bubble-guest{border-color:rgba(148,163,184,0.4); background:rgba(30,41,59,0.42);}"
+                ".comms-meta{position:absolute; top:50%; transform:translateY(-50%); margin:0; opacity:0.96; pointer-events:none;}"
+                ".comms-meta-side-right{left:calc(100% + 10px);}" 
+                ".comms-meta-side-left{right:calc(100% + 10px);}"
+                ".comms-user-name{display:inline-block; font-size:1.17rem; font-weight:900; letter-spacing:0.04em; text-transform:uppercase;"
+                " line-height:1; padding:6px 12px; border-radius:999px; border:1px solid rgba(148,163,184,0.42); background:rgba(15,23,42,0.72);}"
                 ".comms-user-admin{color:#93c5fd;}"
                 ".comms-user-lead{color:#c4b5fd;}"
                 ".comms-user-loader{color:#86efac;}"
@@ -28818,6 +29960,14 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
                     AUTH_ROLE_UNLOADER: "comms-user-unloader",
                     AUTH_ROLE_GUEST: "comms-user-guest",
                 }.get(sender_role_key, "comms-user-guest")
+                bubble_class = {
+                    AUTH_ROLE_ADMIN: "comms-bubble-admin",
+                    AUTH_ROLE_SUPERVISOR: "comms-bubble-admin",
+                    AUTH_ROLE_LEAD: "comms-bubble-lead",
+                    AUTH_ROLE_LOADER: "comms-bubble-loader",
+                    AUTH_ROLE_UNLOADER: "comms-bubble-unloader",
+                    AUTH_ROLE_GUEST: "comms-bubble-guest",
+                }.get(sender_role_key, "comms-bubble-guest")
                 body = html.escape(str(entry.get("message") or "")).replace("\n", "<br>")
                 message_id = _sanitize_communications_message_id(entry.get("id"), "")
                 can_delete_message = bool(message_id) and _can_delete_communications_message(
@@ -28847,11 +29997,19 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
                 )
 
                 if (not grouped_messages) or grouped_messages[-1]["sender_key"] != sender_key:
+                    # Keep the first speaker flush to the left wall, with responders subtly indented.
+                    offset_bucket = 0 if not grouped_messages else 1
+                    group_class = "comms-group-left"
+                    chip_side_class = "comms-meta-side-right" if offset_bucket == 0 else "comms-meta-side-left"
                     grouped_messages.append(
                         {
                             "sender_key": sender_key,
                             "sender": sender,
                             "sender_class": sender_class,
+                            "bubble_class": bubble_class,
+                            "group_class": group_class,
+                            "chip_side_class": chip_side_class,
+                            "offset_class": f"comms-group-offset-{offset_bucket}",
                             "items": [message_item_html],
                         }
                     )
@@ -28859,12 +30017,15 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
                     grouped_messages[-1]["items"].append(message_item_html)
 
             for group in grouped_messages:
-                group_class = "comms-group-left"
+                group_class = str(group.get("group_class") or "comms-group-left")
+                offset_class = str(group.get("offset_class") or "comms-group-offset-0")
+                bubble_class = str(group.get("bubble_class") or "comms-bubble-guest")
+                chip_side_class = str(group.get("chip_side_class") or "comms-meta-side-right")
                 grouped_rows.append(
                     (
-                        f"<div class='comms-group {group_class}'>"
-                        "  <div class='comms-bubble'>"
-                        f"    <div class='comms-meta'><span class='comms-user-name {group.get('sender_class')}'>{group.get('sender')}</span></div>"
+                        f"<div class='comms-group {group_class} {offset_class}'>"
+                        f"  <div class='comms-bubble {bubble_class}'>"
+                        f"    <div class='comms-meta {chip_side_class}'><span class='comms-user-name {group.get('sender_class')}'>{group.get('sender')}</span></div>"
                         f"    {''.join(group.get('items') or [])}"
                         "  </div>"
                         "</div>"
@@ -28885,7 +30046,7 @@ elif st.session_state.active_screen == "COMMUNICATIONS":
                     max_chars=COMMUNICATIONS_MAX_MESSAGE_LENGTH,
                     label_visibility="collapsed",
                 )
-                send_message = st.form_submit_button("Send", use_container_width=True)
+                send_message = st.form_submit_button("Send", width='stretch')
 
         if send_message:
             sender = str(st.session_state.get("auth_username") or _current_actor_name()).strip() or "Unknown"
@@ -28951,6 +30112,91 @@ elif st.session_state.active_screen == "UNLOAD":
         mobile_now = _is_mobile_client()
         dirty_now = [int(t) for t in (trucks or [])]
 
+        def _enforce_unload_mobile_two_col_grid() -> None:
+            if not mobile_now:
+                return
+            components.html(
+                """
+                <script>
+                (function() {
+                    try {
+                        const root = window.parent.document;
+                        const isMobile = () => {
+                            try {
+                                return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
+                            } catch (e) {
+                                return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
+                            }
+                        };
+                        if (!isMobile()) return;
+
+                        const isColumn = (node) => {
+                            if (!node || node.nodeType !== 1) return false;
+                            const testId = String(node.getAttribute('data-testid') || '').trim();
+                            if (testId === 'column') return true;
+                            return /\bstColumn\b/.test(String(node.className || ''));
+                        };
+                        const isRow = (node) => {
+                            if (!node || node.nodeType !== 1) return false;
+                            const testId = String(node.getAttribute('data-testid') || '').trim();
+                            if (testId === 'stHorizontalBlock') return true;
+                            return /\bstHorizontalBlock\b/.test(String(node.className || ''));
+                        };
+
+                        const apply = () => {
+                            const hosts = Array.from(
+                                root.querySelectorAll('[class*="st-key-dirty_truck_mobile_"], [class*="st-key-dirty_truck_"]')
+                            );
+                            if (!hosts.length) return;
+
+                            const rows = new Set();
+                            hosts.forEach((host) => {
+                                const col = host.closest('[data-testid="column"], .stColumn');
+                                if (!col) return;
+                                const row = col.parentElement;
+                                if (!isRow(row)) return;
+                                rows.add(row);
+                            });
+
+                            rows.forEach((row) => {
+                                const cols = Array.from(row.children || []).filter((node) => isColumn(node));
+                                if (!cols.length) return;
+                                row.style.setProperty('display', 'grid', 'important');
+                                row.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important');
+                                row.style.setProperty('column-gap', '0.62rem', 'important');
+                                row.style.setProperty('row-gap', '0.62rem', 'important');
+                                row.style.setProperty('align-items', 'stretch', 'important');
+                                row.style.setProperty('justify-items', 'stretch', 'important');
+                                cols.forEach((col) => {
+                                    col.style.setProperty('width', '100%', 'important');
+                                    col.style.setProperty('max-width', '100%', 'important');
+                                    col.style.setProperty('min-width', '0', 'important');
+                                });
+                            });
+
+                            const buttons = root.querySelectorAll(
+                                '[class*="st-key-dirty_truck_mobile_"] button, [class*="st-key-dirty_truck_"] button'
+                            );
+                            buttons.forEach((btn) => {
+                                btn.style.setProperty('width', '100%', 'important');
+                                btn.style.setProperty('max-width', '100%', 'important');
+                                btn.style.setProperty('min-width', '0', 'important');
+                            });
+                        };
+
+                        apply();
+                        setTimeout(apply, 70);
+                        setTimeout(apply, 220);
+                        setTimeout(apply, 520);
+                        setTimeout(apply, 900);
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+
         st.markdown(
             """
             <style>
@@ -29013,7 +30259,7 @@ elif st.session_state.active_screen == "UNLOAD":
             st.session_state[sent_key] = sorted(sent_set)
 
             status_color_map = _get_status_badge_colors()
-            cols_per_row = _truck_grid_columns(6)
+            cols_per_row = 2 if mobile_now else _truck_grid_columns(6)
             for start in range(0, len(saved_order), cols_per_row):
                 row_vals = saved_order[start : start + cols_per_row]
                 row_cols = st.columns(cols_per_row)
@@ -29030,7 +30276,7 @@ elif st.session_state.active_screen == "UNLOAD":
                             if st.button(
                                 placeholder_label,
                                 key=f"dirty_truck_mobile_{int(truck_num)}",
-                                use_container_width=True,
+                                width='stretch',
                                 type="primary",
                                 disabled=not can_undo,
                             ):
@@ -29043,7 +30289,7 @@ elif st.session_state.active_screen == "UNLOAD":
                             if st.button(
                                 str(int(truck_num)),
                                 key=f"dirty_truck_mobile_{int(truck_num)}",
-                                use_container_width=True,
+                                width='stretch',
                                 type="primary",
                             ):
                                 _capture_mobile_unload_undo_state(int(truck_num))
@@ -29068,6 +30314,7 @@ elif st.session_state.active_screen == "UNLOAD":
                     cell_gap_rem=0.62,
                     min_button_height_px=64,
                 )
+                _enforce_unload_mobile_two_col_grid()
             return
 
         st.session_state.pop("unload_mobile_sent_order", None)
@@ -29075,27 +30322,9 @@ elif st.session_state.active_screen == "UNLOAD":
         st.session_state.pop("unload_mobile_undo_state", None)
 
         # Render dirty truck bubbles as Streamlit buttons for in-place navigation
-        clicked_truck = render_numeric_truck_buttons(trucks, "dirty_truck", default_cols=6)
-        if mobile_now:
-            status_color_map = _get_status_badge_colors()
-            mobile_color_map: dict[str, dict[str, str]] = {}
-            mobile_labels: list[str] = []
-            for truck_num_raw in (trucks or []):
-                try:
-                    truck_num = int(truck_num_raw)
-                except Exception:
-                    continue
-                mobile_labels.append(str(truck_num))
-                bg, border, fg = _truck_status_colors(int(truck_num), status_color_map)
-                mobile_color_map[str(truck_num)] = {"bg": bg, "border": border, "fg": fg}
-            _apply_primary_button_color_map_for_labels(mobile_color_map)
-            _force_mobile_button_grid(
-                mobile_labels,
-                mobile_cols=2,
-                primary_only=True,
-                cell_gap_rem=0.62,
-                min_button_height_px=64,
-            )
+        default_unload_cols = 2 if mobile_now else 6
+        clicked_truck = render_numeric_truck_buttons(trucks, "dirty_truck", default_cols=default_unload_cols)
+        _enforce_unload_mobile_two_col_grid()
         if clicked_truck is not None:
             t = int(clicked_truck)
             if batching_disabled_now:
@@ -29111,15 +30340,6 @@ elif st.session_state.active_screen == "UNLOAD":
     with unload_main_col:
         render_page_heading("Unload Management")
         render_unload_bubbles(dirty_trucks)
-        _normalize_management_header_gap(
-            "unload-management",
-            [
-                '[class*="st-key-dirty_truck_"] button',
-                '[class*="st-key-dirty_truck_mobile_"] button',
-            ],
-            desired_gap_px=10,
-            desktop_only=True,
-        )
 
         is_mobile_now = is_mobile_unload
         show_desktop_unload_save = False
@@ -29142,7 +30362,7 @@ elif st.session_state.active_screen == "UNLOAD":
                 if st.button(
                     "Save",
                     key="unload_desktop_save_placeholders",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     st.session_state.pop("unload_mobile_sent_order", None)
                     st.session_state.pop("unload_mobile_sent_set", None)
@@ -29187,7 +30407,7 @@ elif st.session_state.active_screen == "UNLOAD":
             data=_get_cached_batch_cards_pdf_bytes(),
             file_name=f"batch_cards_{(st.session_state.run_date.isoformat() if st.session_state.run_date else date.today().isoformat())}.pdf",
             mime="application/pdf",
-            use_container_width=True,
+            width='stretch',
         )
 
         if is_mobile_unload:
@@ -29274,7 +30494,7 @@ elif st.session_state.active_screen == "TRUCK":
                 source_truck=int(t),
                 current_value=str((st.session_state.get("shop_spares") or {}).get(int(t), "") or ""),
             )
-        if st.button("Apply status change", use_container_width=True, key=f"truck_status_apply_{t}"):
+        if st.button("Apply status change", width='stretch', key=f"truck_status_apply_{t}"):
             _apply_truck_status_change(int(t), status_sel, shop_load_on=shop_load_on)
             _mark_and_save()
             st.session_state[status_feedback_key] = _status_update_feedback_message(int(t), status_sel)
@@ -29297,19 +30517,19 @@ elif st.session_state.active_screen == "TRUCK":
         )
         n1, n2, n3 = st.columns([1, 1, 1])
         with n1:
-            if st.button("Save notes", use_container_width=True, key=f"truck_note_save_{t}"):
+            if st.button("Save notes", width='stretch', key=f"truck_note_save_{t}"):
                 st.session_state.sup_notes_global[int(t)] = (note_val_global or "").strip()
                 st.session_state.sup_notes_daily[int(t)] = (note_val_daily or "").strip()
                 _mark_and_save()
                 st.success(f"Notes saved for Truck {t}.")
         with n2:
-            if st.button("Clear daily", use_container_width=True, key=f"truck_note_clear_daily_{t}"):
+            if st.button("Clear daily", width='stretch', key=f"truck_note_clear_daily_{t}"):
                 st.session_state.sup_notes_daily.pop(int(t), None)
                 _mark_and_save()
                 st.success(f"Daily note cleared for Truck {t}.")
                 st.rerun()
         with n3:
-            if st.button("Clear global", use_container_width=True, key=f"truck_note_clear_global_{t}"):
+            if st.button("Clear global", width='stretch', key=f"truck_note_clear_global_{t}"):
                 st.session_state.sup_notes_global.pop(int(t), None)
                 _mark_and_save()
                 st.success(f"General note cleared for Truck {t}.")
@@ -29319,7 +30539,7 @@ elif st.session_state.active_screen == "TRUCK":
         c1, c2 = st.columns([1,1])
         with c1:
             if _screen_allowed_for_current_user("SHORTS"):
-                if st.button("Open short sheet", use_container_width=True, key=f"truck_open_short_sheet_{int(t)}"):
+                if st.button("Open short sheet", width='stretch', key=f"truck_open_short_sheet_{int(t)}"):
                     st.session_state.shorts_truck = t
                     st.session_state.shorts_source_truck = int(t)
                     ensure_shorts_model(t)
@@ -29329,13 +30549,13 @@ elif st.session_state.active_screen == "TRUCK":
             else:
                 st.button(
                     "Open short sheet",
-                    use_container_width=True,
+                    width='stretch',
                     disabled=True,
                     key=f"truck_open_short_sheet_disabled_{int(t)}",
                 )
                 st.caption("Short sheet access is restricted for your role.")
         with c2:
-            if st.button("Open Fleet Management", use_container_width=True):
+            if st.button("Open Fleet Management", width='stretch'):
                 st.session_state.sup_manage_truck = t
                 st.session_state.sup_manage_action = None
                 st.session_state.sup_manage_pref_action = None
@@ -29344,7 +30564,7 @@ elif st.session_state.active_screen == "TRUCK":
                 st.rerun()
 
         back_target = getattr(st.session_state, "_from_page", None) or "STATUS_DIRTY"
-        if st.button("Back to status", use_container_width=True):
+        if st.button("Back to status", width='stretch'):
             st.session_state.active_screen = back_target
             _mark_and_save()
             st.rerun()
@@ -29396,7 +30616,7 @@ elif st.session_state.active_screen == "BATCH":
         def _render_batch_assignment_dialog():
             if t is None:
                 st.warning("No truck selected for batching.")
-                if st.button("Close", use_container_width=True, key="batch_dialog_close_no_truck"):
+                if st.button("Close", width='stretch', key="batch_dialog_close_no_truck"):
                     st.session_state["batch_capacity_warning_inline_payload"] = None
                     _exit_batch_to_unload()
                     st.rerun()
@@ -29565,7 +30785,7 @@ elif st.session_state.active_screen == "BATCH":
             skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
             c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
-                if st.button("Assign to batch", use_container_width=True, key=f"batch_dialog_assign_{truck_num}"):
+                if st.button("Assign to batch", width='stretch', key=f"batch_dialog_assign_{truck_num}"):
                     if not allowed:
                         fullest_batch = max(
                             range(1, BATCH_COUNT + 1),
@@ -29600,14 +30820,14 @@ elif st.session_state.active_screen == "BATCH":
                             st.success(f"Truck {truck_num} assigned to Batch {batch} and marked Unloaded.")
                         st.rerun()
             with c2:
-                if st.button("Cancel", use_container_width=True, key=f"batch_dialog_cancel_{truck_num}"):
+                if st.button("Cancel", width='stretch', key=f"batch_dialog_cancel_{truck_num}"):
                     st.session_state["batch_capacity_warning_inline_payload"] = None
                     _exit_batch_to_unload()
                     st.rerun()
             with c3:
                 if st.button(
                     "Skip batching",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"batch_dialog_skip_{truck_num}",
                     disabled=skip_batching_disabled_now,
                 ):
@@ -29768,7 +30988,7 @@ elif st.session_state.active_screen == "BATCH":
             st.warning("Wearers must be a whole number.")
         st.session_state.unload_inprog_wearers = int(w)
         skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
-        if st.button("Skip batching", use_container_width=True, disabled=skip_batching_disabled_now):
+        if st.button("Skip batching", width='stretch', disabled=skip_batching_disabled_now):
             st.session_state["batch_capacity_warning_inline_payload"] = None
             post_unload_status = _mark_truck_unloaded_after_batch(int(t))
             st.session_state.unload_inprog_truck = None
@@ -29817,7 +31037,7 @@ elif st.session_state.active_screen == "BATCH":
             )
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button("Assign to batch", use_container_width=True):
+                if st.button("Assign to batch", width='stretch'):
                     if w <= 0:
                         st.warning("Enter at least 1 wearer before assigning.")
                     else:
@@ -29851,7 +31071,7 @@ elif st.session_state.active_screen == "BATCH":
                         st.session_state.active_screen = "UNLOAD"
                         st.rerun()
             with c2:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel", width='stretch'):
                     st.session_state["batch_capacity_warning_inline_payload"] = None
                     st.session_state.unload_inprog_truck = None
                     st.session_state.unload_inprog_start_time = None
@@ -30160,23 +31380,57 @@ elif st.session_state.active_screen == "LOAD":
                 width=0,
             )
 
-        dust_button_label = "Edit Dust Clothes" if dust_clothes_set_today else "Set Dust Clothes"
         if is_mobile_load:
             render_page_heading("Load Management")
             _compress_mobile_notice_to_heading_gap("load-management")
-            _compress_load_heading_to_actions_gap()
-        if st.button(dust_button_label, use_container_width=True, key="load_set_dust_clothes_toggle"):
-            st.session_state["load_dust_clothes_dialog_open"] = True
+
+        if st.button("Show Off", width='stretch', key="load_show_off_dialog_toggle"):
+            st.session_state["load_show_off_dialog_open"] = True
+            st.rerun()
+
+        if st.session_state.get("load_show_off_dialog_open"):
+            def _dismiss_load_show_off_dialog():
+                st.session_state["load_show_off_dialog_open"] = False
+
+            @st.dialog("Off Trucks Today", width="small", on_dismiss=_dismiss_load_show_off_dialog)
+            def _render_load_show_off_dialog():
+                if off_today_list:
+                    st.caption(f"{len(off_today_list)} truck(s) scheduled Off today")
+                    st.markdown(
+                        "<div style='display:flex; flex-wrap:wrap; gap:0.42rem;'>"
+                        + "".join(
+                            f"<span style='display:inline-flex; align-items:center; justify-content:center; min-width:52px; padding:0.34rem 0.6rem; border-radius:999px; border:1px solid rgba(148,163,184,0.45); background:rgba(30,41,59,0.78); font-weight:800;'>#{int(t)}</span>"
+                            for t in off_today_list
+                        )
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption("No trucks are scheduled Off today.")
+
+                if st.button("Close", width='stretch', key="load_show_off_dialog_close"):
+                    st.session_state["load_show_off_dialog_open"] = False
+                    st.rerun()
+
+            _render_load_show_off_dialog()
+
+        if st.button("Set Next Up", width='stretch', key="load_set_next_up_toggle"):
+            st.session_state["load_next_up_dialog_open"] = True
             st.rerun()
 
         if st.button(
             "Audit",
-            use_container_width=True,
+            width='stretch',
             key="load_open_audit_fleet_screen",
         ):
             st.session_state["audit_fleet_return_screen"] = "LOAD"
             st.session_state.active_screen = "AUDIT_FLEET"
             _mark_and_save()
+            st.rerun()
+
+        dust_button_label = "Edit Dust Clothes" if dust_clothes_set_today else "Set Dust Clothes"
+        if st.button(dust_button_label, width='stretch', key="load_set_dust_clothes_toggle"):
+            st.session_state["load_dust_clothes_dialog_open"] = True
             st.rerun()
 
         if st.session_state.get("load_dust_clothes_dialog_open"):
@@ -30247,11 +31501,11 @@ elif st.session_state.active_screen == "LOAD":
                         if has_garments:
                             picked_dust_trucks.append(int(truck_num))
 
-                    dust_save = st.form_submit_button("Save Dust Clothes", use_container_width=True)
+                    dust_save = st.form_submit_button("Save Dust Clothes", width='stretch')
 
                 c_close = st.columns([1, 1, 1])[1]
                 with c_close:
-                    close_dialog = st.button("Close", use_container_width=True, key="load_dust_clothes_dialog_close")
+                    close_dialog = st.button("Close", width='stretch', key="load_dust_clothes_dialog_close")
 
                 if dust_save:
                     st.session_state["dust_garment_trucks"] = {int(t) for t in picked_dust_trucks}
@@ -30327,40 +31581,6 @@ elif st.session_state.active_screen == "LOAD":
                 width=0,
             )
 
-        if st.button("Set Next Up", use_container_width=True, key="load_set_next_up_toggle"):
-            st.session_state["load_next_up_dialog_open"] = True
-            st.rerun()
-
-        if st.button("Show Off", use_container_width=True, key="load_show_off_dialog_toggle"):
-            st.session_state["load_show_off_dialog_open"] = True
-            st.rerun()
-
-        if st.session_state.get("load_show_off_dialog_open"):
-            def _dismiss_load_show_off_dialog():
-                st.session_state["load_show_off_dialog_open"] = False
-
-            @st.dialog("Off Trucks Today", width="small", on_dismiss=_dismiss_load_show_off_dialog)
-            def _render_load_show_off_dialog():
-                if off_today_list:
-                    st.caption(f"{len(off_today_list)} truck(s) scheduled Off today")
-                    st.markdown(
-                        "<div style='display:flex; flex-wrap:wrap; gap:0.42rem;'>"
-                        + "".join(
-                            f"<span style='display:inline-flex; align-items:center; justify-content:center; min-width:52px; padding:0.34rem 0.6rem; border-radius:999px; border:1px solid rgba(148,163,184,0.45); background:rgba(30,41,59,0.78); font-weight:800;'>#{int(t)}</span>"
-                            for t in off_today_list
-                        )
-                        + "</div>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.caption("No trucks are scheduled Off today.")
-
-                if st.button("Close", use_container_width=True, key="load_show_off_dialog_close"):
-                    st.session_state["load_show_off_dialog_open"] = False
-                    st.rerun()
-
-            _render_load_show_off_dialog()
-
         if current_next_up_num is not None:
             st.caption(f"Current Next Up: Truck {int(current_next_up_num)}")
 
@@ -30405,7 +31625,7 @@ elif st.session_state.active_screen == "LOAD":
                 with c_set:
                     if st.button(
                         "Save",
-                        use_container_width=True,
+                        width='stretch',
                         key="load_next_up_dialog_save",
                         disabled=(selected_next_up is None),
                     ):
@@ -30416,7 +31636,7 @@ elif st.session_state.active_screen == "LOAD":
                         st.success(f"Next up set to Truck {int(selected_next_up)}.")
                         st.rerun()
                 with c_clear:
-                    if st.button("Clear", use_container_width=True, key="load_next_up_dialog_clear"):
+                    if st.button("Clear", width='stretch', key="load_next_up_dialog_clear"):
                         st.session_state.next_up_truck = None
                         st.session_state.next_up_pending = None
                         st.session_state["load_next_up_dialog_open"] = False
@@ -30424,7 +31644,7 @@ elif st.session_state.active_screen == "LOAD":
                         st.success("Next up cleared.")
                         st.rerun()
                 with c_close:
-                    if st.button("Close", use_container_width=True, key="load_next_up_dialog_close"):
+                    if st.button("Close", width='stretch', key="load_next_up_dialog_close"):
                         st.session_state["load_next_up_dialog_open"] = False
                         st.rerun()
 
@@ -30522,19 +31742,6 @@ elif st.session_state.active_screen == "LOAD":
                     _mark_and_save()
                     st.session_state.active_screen = "IN_PROGRESS"
                     st.rerun()
-
-        if not is_mobile_load:
-            _normalize_management_header_gap(
-                "load-management",
-                [
-                    '[class*="st-key-load_start_"] button',
-                    '[class*="st-key-load_unloaded_trucks_"] button',
-                    '[data-testid="stCaptionContainer"]',
-                    '[data-testid="stAlert"]',
-                ],
-                desired_gap_px=10,
-                desktop_only=True,
-            )
 
         st.divider()
         now_local = _now_local()
@@ -30751,17 +31958,7 @@ elif st.session_state.active_screen == "LOAD":
                     if (!window.parent.__loadPaceToggleBound) {
                         window.parent.__loadPaceToggleBound = true;
                         root.addEventListener('click', function(ev) {
-                            const hit = ev.target.closest('[data-load-pace-toggle-hit="1"]');
-                            if (!hit) return;
-                            const card = hit.closest('[data-load-pace-card="1"]');
-                            if (!card) return;
-                            const willCollapse = !card.classList.contains('collapsed');
-                            card.classList.toggle('collapsed', willCollapse);
-                            try { if (storage) storage.setItem('loadPaceCollapsed', willCollapse ? '1' : '0'); } catch (e) {}
-                        }, true);
-                        root.addEventListener('keydown', function(ev) {
-                            if (ev.key !== 'Enter' && ev.key !== ' ') return;
-                            const hit = ev.target.closest('[data-load-pace-toggle-hit="1"]');
+                            forceOpenSidebar();
                             if (!hit) return;
                             ev.preventDefault();
                             const card = hit.closest('[data-load-pace-card="1"]');
@@ -30826,7 +32023,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
     render_page_heading("Auditing")
 
-    # Collapse spacer elements that Streamlit injects before the heading on desktop —
+    # Collapse spacer elements that Streamlit injects before the heading on desktop �
     # the mobile compress functions in render_page_heading skip desktop.
     components.html(
         """
@@ -30849,7 +32046,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
                     // Hide all spacer-like siblings that precede the heading.
                     // Use innerText (not textContent) so <style> and <script> wrappers
-                    // — which have no *visible* text — are treated as empty spacers.
+                    // � which have no *visible* text � are treated as empty spacers.
                     const hasContent = (node) =>
                         !!(node.querySelector('button, input, textarea, select, [data-testid="stButton"], [data-testid="stSelectbox"]')) ||
                         (node.innerText || '').replace(/\\s+/g,'').length > 0;
@@ -30990,7 +32187,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                     )
 
                     with row_cols[col_idx]:
-                        if st.button(btn_label, key=btn_key, use_container_width=True, type="primary"):
+                        if st.button(btn_label, key=btn_key, width='stretch', type="primary"):
                             if is_show_all_btn:
                                 st.session_state[audit_show_all_dialog_key] = True
                             else:
@@ -31017,7 +32214,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                         st.session_state[audit_show_all_dialog_key] = False
                         st.rerun()
 
-                    if st.button("Close", use_container_width=True, key="audit_fleet_show_all_close"):
+                    if st.button("Close", width='stretch', key="audit_fleet_show_all_close"):
                         st.session_state[audit_show_all_dialog_key] = False
                         st.rerun()
 
@@ -31041,7 +32238,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                     ),
                     unsafe_allow_html=True,
                 )
-                if st.button("Change Truck", use_container_width=True, key="audit_fleet_change_truck"):
+                if st.button("Change Truck", width='stretch', key="audit_fleet_change_truck"):
                     st.session_state.audit_fleet_selected_truck = None
                     st.rerun()
                 _render_audit_capture_panel(
@@ -31053,7 +32250,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                 )
         else:
             with audit_left_col:
-                if st.button("Change Truck", use_container_width=True, key="audit_fleet_change_truck"):
+                if st.button("Change Truck", width='stretch', key="audit_fleet_change_truck"):
                     st.session_state.audit_fleet_selected_truck = None
                     st.rerun()
 
@@ -31258,7 +32455,7 @@ elif st.session_state.active_screen == "SHORTS":
                 st.warning(f"Confirm delete: {pending_item} - Qty {pending_qty_text}")
                 c_del_1, c_del_2 = st.columns([1, 1])
                 with c_del_1:
-                    if st.button("Confirm delete", key=f"shorts_delete_confirm_{int(shorts_data_truck)}_{pending_row_idx}", use_container_width=True):
+                    if st.button("Confirm delete", key=f"shorts_delete_confirm_{int(shorts_data_truck)}_{pending_row_idx}", width='stretch'):
                         remaining = [r for idx, r in enumerate(rows) if idx != pending_row_idx]
                         remaining = [r for r in remaining if _short_row_has_item(r)]
                         st.session_state.shorts[int(shorts_data_truck)] = remaining if remaining else [{"item": "None", "qty": None, "note": ""}]
@@ -31266,7 +32463,7 @@ elif st.session_state.active_screen == "SHORTS":
                         save_state()
                         st.rerun()
                 with c_del_2:
-                    if st.button("Cancel", key=f"shorts_delete_cancel_{int(shorts_data_truck)}", use_container_width=True):
+                    if st.button("Cancel", key=f"shorts_delete_cancel_{int(shorts_data_truck)}", width='stretch'):
                         st.session_state[pending_delete_key] = None
                         save_state()
                         st.rerun()
@@ -31322,7 +32519,7 @@ elif st.session_state.active_screen == "SHORTS":
                         unsafe_allow_html=True,
                     )
 
-            if st.button("Save & Done", use_container_width=True):
+            if st.button("Save & Done", width='stretch'):
                 rows_to_save = st.session_state.shorts.get(int(shorts_data_truck), [{"item": "None", "qty": None, "note": ""}])
                 if save_shorts_stop_timer(int(source_truck), initials, rows_to_save):
                     _navigate_after_shorts_save(int(source_truck))
@@ -31334,7 +32531,7 @@ elif st.session_state.active_screen == "SHORTS":
                 edited = st.data_editor(
                     current_short_rows,
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width='stretch',
                     column_config={
                         "item": st.column_config.SelectboxColumn("Item", options=excel_item_options, required=False),
                         "qty": st.column_config.NumberColumn("Qty", min_value=0, step=1, required=False),
@@ -31357,10 +32554,18 @@ elif st.session_state.active_screen == "SHORTS":
                         unsafe_allow_html=True,
                     )
 
-            if st.button("Save & Done", use_container_width=True):
+            if st.button("Save & Done", width='stretch'):
                 rows_to_save = edited if edited is not None else st.session_state.shorts.get(int(shorts_data_truck), [{"item": "None", "qty": None, "note": ""}])
                 if save_shorts_stop_timer(int(source_truck), initials, rows_to_save):
                     _navigate_after_shorts_save(int(source_truck))
+
+_render_pending_auth_portals(authenticator)
+
+_emit_startup_timed_step(6, "Startup load complete")
+_emit_startup_total_once()
+_emit_startup_version_banner_once()
+_emit_startup_urls_banner_once()
+_inject_client_startup_timing_probe()
 
 
 

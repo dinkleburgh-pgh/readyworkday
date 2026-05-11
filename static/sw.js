@@ -1,11 +1,24 @@
-const CACHE_NAME = "truckapp-pwa-v1";
-const OFFLINE_URL = "/static/offline.html";
+const CACHE_NAME = "truckapp-pwa-v2";
+const STATIC_ROOT = new URL(".", self.location.href).pathname.replace(/\/$/, "");
+const OFFLINE_URL = `${STATIC_ROOT}/offline.html`;
+const APP_SHELL_URLS = [
+  OFFLINE_URL,
+  `${STATIC_ROOT}/manifest.webmanifest`,
+  `${STATIC_ROOT}/icons/truckapp-icon-180.png`,
+  `${STATIC_ROOT}/icons/truckapp-icon-192.png`,
+  `${STATIC_ROOT}/icons/truckapp-icon-512.png`,
+  `${STATIC_ROOT}/icons/truckapp-icon.svg`,
+];
+
+if (STATIC_ROOT === "/static") {
+  APP_SHELL_URLS.unshift("/");
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(["/", OFFLINE_URL, "/static/icons/truckapp-icon.svg"]))
+      .then((cache) => cache.addAll(APP_SHELL_URLS))
       .catch(() => Promise.resolve())
   );
   self.skipWaiting();
@@ -39,6 +52,9 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
+        if (!response || response.status !== 200 || response.type !== "basic") {
+          return response;
+        }
         const responseCopy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseCopy));
         return response;

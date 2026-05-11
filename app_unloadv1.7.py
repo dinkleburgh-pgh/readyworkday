@@ -313,6 +313,12 @@ st.markdown(
         max-width: min(92vw, 430px) !important;
         z-index: 1800 !important;
     }
+    @supports (padding: max(0px)) {
+        [data-testid="stToastContainer"] {
+            top: calc(0.85rem + env(safe-area-inset-top)) !important;
+            right: calc(0.85rem + env(safe-area-inset-right)) !important;
+        }
+    }
     [data-testid="stToast"] {
         border-radius: 12px !important;
         border: 1px solid rgba(125, 211, 252, 0.45) !important;
@@ -333,6 +339,12 @@ st.markdown(
             right: 0.55rem !important;
             width: min(96vw, 420px) !important;
             max-width: min(96vw, 420px) !important;
+        }
+        @supports (padding: max(0px)) {
+            [data-testid="stToastContainer"] {
+                top: calc(0.55rem + env(safe-area-inset-top)) !important;
+                right: calc(0.55rem + env(safe-area-inset-right)) !important;
+            }
         }
     }
     </style>
@@ -381,25 +393,35 @@ def _inject_pwa_bootstrap() -> None:
 
             ensureMeta("viewport", "width=device-width, initial-scale=1, viewport-fit=cover");
             ensureMeta("theme-color", "#0f172a");
+            ensureMeta("color-scheme", "dark");
+            ensureMeta("format-detection", "telephone=no");
             ensureMeta("apple-mobile-web-app-capable", "yes");
-            ensureMeta("apple-mobile-web-app-status-bar-style", "default");
+            ensureMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
             ensureMeta("apple-mobile-web-app-title", "TruckApp");
             ensureMeta("mobile-web-app-capable", "yes");
 
-            const staticCandidates = ["/static", "./static", "/app/static"];
-            const fileExists = async (url) => {
+            const staticCandidates = ["/app/static", "/static", "./static"];
+            const assetMatchesType = async (url, expectedTypes) => {
                 try {
-                    const resp = await fetch(url, { method: "HEAD", cache: "no-store" });
-                    return resp.ok;
+                    const resp = await fetch(url, { method: "GET", cache: "no-store" });
+                    if (!resp.ok) {
+                        return false;
+                    }
+                    const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
+                    return expectedTypes.some((hint) => contentType.includes(String(hint).toLowerCase()));
                 } catch (_) {
                     return false;
                 }
             };
 
             let staticRoot = null;
+            let staticWorkerAvailable = false;
             for (const candidate of staticCandidates) {
-                if (await fileExists(`${candidate}/manifest.webmanifest`)) {
+                const manifestOk = await assetMatchesType(`${candidate}/manifest.webmanifest`, ["manifest", "json"]);
+                const swOk = await assetMatchesType(`${candidate}/sw.js`, ["javascript", "ecmascript"]);
+                if (manifestOk) {
                     staticRoot = candidate;
+                    staticWorkerAvailable = swOk;
                     break;
                 }
             }
@@ -409,12 +431,17 @@ def _inject_pwa_bootstrap() -> None:
             }
 
             ensureLink("manifest", `${staticRoot}/manifest.webmanifest`);
-            const appleIcon = ensureLink("apple-touch-icon", `${staticRoot}/icons/truckapp-icon.svg`);
-            appleIcon.setAttribute("sizes", "any");
+            const favicon = ensureLink("icon", `${staticRoot}/icons/truckapp-icon-192.png`);
+            favicon.setAttribute("sizes", "192x192");
+            favicon.setAttribute("type", "image/png");
+            const appleIcon = ensureLink("apple-touch-icon", `${staticRoot}/icons/truckapp-icon-180.png`);
+            appleIcon.setAttribute("sizes", "180x180");
+            appleIcon.setAttribute("type", "image/png");
 
-            if ("serviceWorker" in parentWin.navigator) {
+            if (staticWorkerAvailable && "serviceWorker" in parentWin.navigator) {
                 try {
-                    await parentWin.navigator.serviceWorker.register(`${staticRoot}/sw.js`);
+                    const swScope = new URL(`${staticRoot.replace(/\\/$/, "")}/`, parentWin.location.origin).pathname;
+                    await parentWin.navigator.serviceWorker.register(`${staticRoot}/sw.js`, { scope: swScope });
                 } catch (_) {
                     // Non-fatal: app still functions as normal web app without SW.
                 }
@@ -8852,6 +8879,24 @@ except Exception as e:
 st.markdown(
     """
     <style>
+        :root {
+            color-scheme: dark;
+        }
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+            background: #0b1020;
+        }
+        body {
+            background: #0b1020;
+            -webkit-tap-highlight-color: transparent;
+        }
+        button,
+        input,
+        textarea,
+        select {
+            touch-action: manipulation;
+        }
         header[data-testid="stHeader"],
         [data-testid="stHeader"] {
             background: transparent !important;
@@ -8971,6 +9016,11 @@ st.markdown(
             pointer-events: none;
             z-index: 1700;
         }
+        @supports (padding: max(0px)) {
+            .shop-notice {
+                top: calc(8px + env(safe-area-inset-top)) !important;
+            }
+        }
         @media (min-width: 981px) {
             .shop-notice-wrap.shop-notice-wrap-communications-quarter .shop-notice {
                 left: 12px;
@@ -9041,6 +9091,27 @@ st.markdown(
             display: none;
         }
         @media (max-width: 980px) {
+            input,
+            textarea,
+            select {
+                font-size: 16px !important;
+            }
+            @supports (padding: max(0px)) {
+                .main .block-container,
+                [data-testid="stMainBlockContainer"],
+                section.main > div.block-container,
+                [data-testid="stAppViewContainer"] .main .block-container {
+                    padding-left: max(0.55rem, env(safe-area-inset-left)) !important;
+                    padding-right: max(0.55rem, env(safe-area-inset-right)) !important;
+                    padding-bottom: max(0.95rem, env(safe-area-inset-bottom)) !important;
+                }
+                [data-testid="stSidebar"] {
+                    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+                }
+                .shop-notice {
+                    top: calc(6px + env(safe-area-inset-top)) !important;
+                }
+            }
             .shop-notice {
                 top: 6px;
                 width: min(760px, calc(100vw - 10px));
@@ -11924,6 +11995,9 @@ def render_numeric_truck_buttons(
     button_corner_badges: dict[int, str] | None = None,
     button_corner_badge_tooltips: dict[int, str] | None = None,
     preserve_order: bool = False,
+    mobile_cols: int | None = None,
+    mobile_cell_gap_rem: float = 0.62,
+    mobile_min_button_height_px: int = 64,
 ) -> int | str | None:
     if preserve_order:
         ordered = list(dict.fromkeys(int(t) for t in (trucks or [])))
@@ -12843,7 +12917,18 @@ def render_numeric_truck_buttons(
 
     button_entries: list[tuple[str, int | str, bool]] = [(str(int(t)), int(t), True) for t in ordered]
 
-    cols_per_row = _truck_grid_columns(default_cols)
+    resolved_mobile_cols = None
+    if mobile_cols is not None:
+        try:
+            resolved_mobile_cols = max(1, int(mobile_cols))
+        except Exception:
+            resolved_mobile_cols = None
+
+    cols_per_row = (
+        resolved_mobile_cols
+        if (_is_mobile_client() and resolved_mobile_cols is not None)
+        else _truck_grid_columns(default_cols)
+    )
     if len(trailing_buttons) > 1 and cols_per_row > 1:
         remainder = len(button_entries) % cols_per_row
         if remainder == cols_per_row - 1:
@@ -12868,10 +12953,10 @@ def render_numeric_truck_buttons(
     if active_screen_key != "AUDIT_FLEET":
         _force_mobile_button_grid(
             [label for (label, _, _) in button_entries if str(label).strip()],
-            mobile_cols=2,
+            mobile_cols=(resolved_mobile_cols or 2),
             primary_only=True,
-            cell_gap_rem=0.62,
-            min_button_height_px=64,
+            cell_gap_rem=mobile_cell_gap_rem,
+            min_button_height_px=mobile_min_button_height_px,
         )
     if active_screen_key != "AUDIT_FLEET":
         expected_labels_json = json.dumps([label for (label, _, _) in button_entries if str(label).strip()])
@@ -20235,6 +20320,9 @@ def render_truck_bubbles(
         button_badges=bubble_badges if bubble_badges else None,
         button_corner_badges=garment_corner_badges if garment_corner_badges else None,
         preserve_order=preserve_order,
+        mobile_cols=(3 if from_page_key == "STATUS_UNLOADED" else None),
+        mobile_cell_gap_rem=(0.38 if from_page_key == "STATUS_UNLOADED" else 0.62),
+        mobile_min_button_height_px=(56 if from_page_key == "STATUS_UNLOADED" else 64),
     )
     if clicked_truck is not None:
         t = int(clicked_truck)

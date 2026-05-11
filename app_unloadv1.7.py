@@ -26821,6 +26821,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 run_day_swap_feedback_key = "sup_run_day_swap_feedback"
                 run_day_swap_route_key = "sup_run_day_swap_dialog_truck"
                 run_day_swap_load_key = "sup_run_day_swap_dialog_load_on"
+                run_day_swap_synced_route_key = "sup_run_day_swap_dialog_synced_route"
 
                 pending_swap_feedback = st.session_state.pop(run_day_swap_feedback_key, None)
                 if isinstance(pending_swap_feedback, dict):
@@ -26858,6 +26859,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 # Load On dropdown: exclude trucks unavailable as cover, but keep the
                 # selected route itself so "same truck = reset" still works
                 current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
+                synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
                 already_covering = set(_active_cover_truck_usage(exclude_route=current_route_pick).keys())
                 load_on_excluded = off_trucks_now | shop_trucks_now | loaded_trucks_now | already_covering
                 load_on_dropdown_options = [
@@ -26867,9 +26869,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 ]
 
                 if load_on_dropdown_options:
+                    preferred_load_pick = None
+                    if current_route_pick is not None:
+                        preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
+                        if preferred_load_pick is None:
+                            preferred_load_pick = int(current_route_pick)
                     current_load_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
-                    if current_load_pick not in load_on_dropdown_options:
-                        st.session_state[run_day_swap_load_key] = int(load_on_dropdown_options[0])
+                    if current_route_pick is not None and synced_route_pick != current_route_pick:
+                        fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
+                        st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
+                        st.session_state[run_day_swap_synced_route_key] = int(current_route_pick)
+                    elif current_load_pick not in load_on_dropdown_options:
+                        fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
+                        st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
 
                 if truck_dropdown_options:
                     st.selectbox(
@@ -26900,6 +26912,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.caption("No eligible trucks available for Load On.")
 
                 if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
+                    route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
+                    load_on_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
+                    if route_pick is not None and load_on_pick is not None:
+                        ok_swap, swap_message = _apply_manual_route_change(str(route_pick), str(load_on_pick))
+                        if not ok_swap:
+                            st.session_state[run_day_swap_feedback_key] = {
+                                "ok": False,
+                                "message": str(swap_message),
+                            }
+                            st.rerun()
+                        _mark_and_save()
+                        if swap_message:
+                            _queue_management_confirmation(str(swap_message))
                     _open_supervisor_dialog("sup_run_day_specials_dialog_open")
                     st.rerun()
 
@@ -27093,18 +27118,25 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 )
 
                 daily_notes_key = "sup_run_day_daily_notes"
-                current_notes = st.session_state.get(daily_notes_key, "")
-                
-                notes_input = st.text_area(
+                daily_notes_seed_key = "sup_run_day_daily_notes_seeded_for"
+                current_run_day_key = str(_current_run_date_key() or "")
+                if st.session_state.get(daily_notes_seed_key) != current_run_day_key:
+                    st.session_state[daily_notes_key] = str(st.session_state.get("daily_notes") or "")
+                    st.session_state[daily_notes_seed_key] = current_run_day_key
+
+                st.text_area(
                     "Daily Notes",
-                    value=current_notes,
                     key=daily_notes_key,
                     height=100,
                     placeholder="Enter any notes about today's run day...",
                 )
 
                 if st.button("Save and Finish", width='stretch', key="sup_run_day_daily_notes_finish"):
-                    st.session_state["sup_last_run_day_completed_key"] = str(_current_run_date_key() or "")
+                    saved_daily_notes = str(st.session_state.get(daily_notes_key) or "").strip()
+                    st.session_state["daily_notes"] = saved_daily_notes
+                    st.session_state[daily_notes_key] = saved_daily_notes
+                    st.session_state[daily_notes_seed_key] = current_run_day_key
+                    st.session_state["sup_last_run_day_completed_key"] = current_run_day_key
                     st.session_state["sup_run_day_daily_notes_dialog_open"] = False
                     st.session_state["sup_run_day_flow_active"] = False
                     _queue_management_confirmation("Run day setup complete.")

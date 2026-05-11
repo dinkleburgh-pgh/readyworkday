@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.3"
 _APP_DATE = "20260511"  
-_APP_BUILD = 17
+_APP_BUILD = 18
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -32786,37 +32786,78 @@ elif st.session_state.active_screen == "LOAD":
             <script>
             (function(){
                 try {
-                    const root = window.parent.document;
+                    const rootWindow = window.parent || window;
+                    const root = rootWindow.document;
+                    if (!root) return;
+
+                    const cards = root.querySelectorAll('[data-load-pace-card="1"]');
+                    if (!cards.length) return;
+                    const card = cards[cards.length - 1];
+                    const header = card.querySelector('[data-load-pace-toggle-hit="1"]') || card.querySelector('[data-load-pace-header="1"]');
+                    if (!header) return;
+
+                    const storageKey = 'loadPaceCollapsed';
+                    const isMobileViewport = () => {
+                        try {
+                            const viewportWidth = Math.max(
+                                0,
+                                rootWindow.innerWidth || 0,
+                                root.documentElement ? root.documentElement.clientWidth || 0 : 0,
+                            );
+                            return viewportWidth <= 980;
+                        } catch (e) {
+                            return false;
+                        }
+                    };
 
                     const storage = (() => {
-                        try { return window.parent.localStorage; } catch (e) { return null; }
+                        try { return rootWindow.localStorage; } catch (e) { return null; }
                     })();
 
                     const getCollapsed = () => {
-                        try { return storage && storage.getItem('loadPaceCollapsed') === '1'; } catch (e) { return false; }
+                        const defaultCollapsed = isMobileViewport();
+                        try {
+                            if (!storage) return defaultCollapsed;
+                            const raw = storage.getItem(storageKey);
+                            if (raw === null) return defaultCollapsed;
+                            return raw === '1';
+                        } catch (e) {
+                            return defaultCollapsed;
+                        }
+                    };
+
+                    const setCollapsed = (collapsed) => {
+                        try {
+                            if (storage) storage.setItem(storageKey, collapsed ? '1' : '0');
+                        } catch (e) {}
                     };
 
                     const applyCollapsed = () => {
-                        const cards = root.querySelectorAll('[data-load-pace-card="1"]');
-                        if (!cards.length) return;
-                        const card = cards[cards.length - 1];
                         card.classList.toggle('collapsed', getCollapsed());
                     };
 
                     applyCollapsed();
 
-                    if (!window.parent.__loadPaceToggleBound) {
-                        window.parent.__loadPaceToggleBound = true;
-                        root.addEventListener('click', function(ev) {
-                            forceOpenSidebar();
-                            if (!hit) return;
-                            ev.preventDefault();
-                            const card = hit.closest('[data-load-pace-card="1"]');
-                            if (!card) return;
+                    if (!header.dataset.boundLoadPaceToggle) {
+                        const toggle = () => {
                             const willCollapse = !card.classList.contains('collapsed');
                             card.classList.toggle('collapsed', willCollapse);
-                            try { if (storage) storage.setItem('loadPaceCollapsed', willCollapse ? '1' : '0'); } catch (e) {}
-                        }, true);
+                            setCollapsed(willCollapse);
+                        };
+
+                        header.addEventListener('click', function(ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            toggle();
+                        });
+                        header.addEventListener('keydown', function(ev) {
+                            if (ev.key === 'Enter' || ev.key === ' ') {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                toggle();
+                            }
+                        });
+                        header.dataset.boundLoadPaceToggle = '1';
                     }
                 } catch (e) {}
             })();

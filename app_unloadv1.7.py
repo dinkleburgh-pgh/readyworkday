@@ -22330,9 +22330,14 @@ tz_key = _normalized_tz_key()
 with st.sidebar:
     components.html(
         (
-            "<div style='margin:6px 0 0 0; padding:0; text-align:center;'>"
-            "  <div id='sidebar-clock' style='font-size:30px; font-weight:900; color:#93c5fd;'></div>"
-            "</div>"
+            "<!doctype html>"
+            "<html><head><style>"
+            "html, body { margin:0; padding:0; background:transparent !important; overflow:hidden; }"
+            "body { display:flex; align-items:center; justify-content:center; min-height:38px; }"
+            "#sidebar-clock-wrap { margin:6px 0 0 0; padding:0; text-align:center; background:transparent; }"
+            "#sidebar-clock { font-size:30px; font-weight:900; color:#93c5fd; line-height:1; white-space:nowrap; }"
+            "</style></head><body>"
+            "<div id='sidebar-clock-wrap'><div id='sidebar-clock'></div></div>"
             "<script>"
             "(function(){"
             f"  const tz = '{tz_key}';"
@@ -22353,8 +22358,10 @@ with st.sidebar:
             "  setInterval(tick, 1000);"
             "})();"
             "</script>"
+            "</body></html>"
         ),
         height=38,
+        scrolling=False,
     )
 
 
@@ -26926,6 +26933,12 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 run_day_swap_route_key = "sup_run_day_swap_dialog_truck"
                 run_day_swap_load_key = "sup_run_day_swap_dialog_load_on"
                 run_day_swap_synced_route_key = "sup_run_day_swap_dialog_synced_route"
+                run_day_swap_reset_pending_key = "sup_run_day_swap_dialog_reset_pending"
+
+                if st.session_state.pop(run_day_swap_reset_pending_key, False):
+                    st.session_state.pop(run_day_swap_route_key, None)
+                    st.session_state.pop(run_day_swap_load_key, None)
+                    st.session_state.pop(run_day_swap_synced_route_key, None)
 
                 def _set_run_day_swap_feedback(ok_value: bool, message_value: str):
                     st.session_state[run_day_swap_feedback_key] = {
@@ -26934,9 +26947,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     }
 
                 def _clear_run_day_swap_selection():
-                    st.session_state[run_day_swap_route_key] = None
-                    st.session_state.pop(run_day_swap_load_key, None)
-                    st.session_state.pop(run_day_swap_synced_route_key, None)
+                    st.session_state[run_day_swap_reset_pending_key] = True
 
                 def _apply_run_day_swap_selection(route_pick: int | None, load_on_pick: int | None) -> tuple[bool, str]:
                     if route_pick is None:

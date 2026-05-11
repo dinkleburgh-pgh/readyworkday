@@ -27,6 +27,10 @@ services:
       TRUCKAPP_AUDIT_HISTORY_FILE: /app/data/audit_requests.json
 
     volumes:
-      - ${TRUCKAPP_DATA_DIR:-/mnt/coxmain/apps/truckapp-data}:/app/data
+      - truckapp-data:/app/data
 
     restart: unless-stopped
+
+volumes:
+  truckapp-data:
+    name: truckapp-data

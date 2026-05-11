@@ -136,7 +136,6 @@ Use a **Git-based Stack** in Portainer.
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.7.py`
-	- `TRUCKAPP_DATA_DIR=/path/on/docker-host/truckapp-data`
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
@@ -144,7 +143,8 @@ Notes:
 - After future pushes to `main`, you can just tell Portainer to pull/redeploy the stack image instead of editing compose version/build values.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
-- Runtime state/auth files now persist under `/app/data` inside the container; point `TRUCKAPP_DATA_DIR` at a durable host path so setup/auth is preserved across recreate/redeploy.
+- The Portainer compose now persists runtime state in the Docker-managed named volume `truckapp-data`, so it deploys cleanly even when host root paths like `/srv/...` are read-only.
+- If you prefer a host bind mount instead, replace `truckapp-data:/app/data` in `docker-compose.portainer.yml` with an existing writable host path such as `/mnt/coxmain/apps/truckapp-data:/app/data` before deploying.
 
 ### Stop
 

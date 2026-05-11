@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.3"
 _APP_DATE = "20260511"  
-_APP_BUILD = 18
+_APP_BUILD = 19
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -25776,25 +25776,50 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     unsafe_allow_html=True,
                 )
             timer_html_template = """
-                    <div style='position:relative; width:100%; margin:0 0 4px 0;'>
-                        <style>
-                            @keyframes inprogElapsedFlash {
-                                0%, 100% { opacity: 1; }
-                                50% { opacity: 0.22; }
-                            }
-                            #truck-elapsed.timer-flash {
-                                animation: inprogElapsedFlash 0.8s linear infinite;
-                            }
-                        </style>
-                        <div id='inprog-timer-box' style='width:600px; max-width:88vw; margin:0 auto; border-radius:20px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 14px 34px rgba(0,0,0,0.28);'>
-                            <div id='inprog-timer-bar' style="display:flex; align-items:center; justify-content:center; padding:13px 16px; font-weight:900; font-size:21px; letter-spacing:0.18em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;">
-                                <span style="margin:0 auto; font-weight:900;">ELAPSED TIME</span>
-                            </div>
-                            <div id='inprog-timer-body' style='padding:14px 20px; font-size:92px; line-height:1.04; text-align:center; font-weight:800; color:__GREEN__;'>
-                                <span id='truck-elapsed'>__ELAPSED_TEXT__</span>
-                            </div>
+            <!doctype html>
+            <html>
+            <head>
+                <style>
+                    html, body {
+                        margin: 0;
+                        padding: 0;
+                        width: 100%;
+                        min-height: 100%;
+                        background: #0b1020 !important;
+                        overflow: hidden;
+                    }
+                    body {
+                        display: flex;
+                        justify-content: center;
+                        align-items: flex-start;
+                    }
+                    #inprog-timer-frame-root {
+                        width: 100%;
+                        margin: 0;
+                        padding: 0 0 4px 0;
+                        background: #0b1020;
+                        box-sizing: border-box;
+                    }
+                    @keyframes inprogElapsedFlash {
+                        0%, 100% { opacity: 1; }
+                        50% { opacity: 0.22; }
+                    }
+                    #truck-elapsed.timer-flash {
+                        animation: inprogElapsedFlash 0.8s linear infinite;
+                    }
+                </style>
+            </head>
+            <body>
+                <div id='inprog-timer-frame-root'>
+                    <div id='inprog-timer-box' style='width:600px; max-width:88vw; margin:0 auto; border-radius:20px; overflow:hidden; border:2px solid rgba(34,197,94,0.45); background:rgba(15,23,42,0.65); box-shadow:0 14px 34px rgba(0,0,0,0.28);'>
+                        <div id='inprog-timer-bar' style="display:flex; align-items:center; justify-content:center; padding:13px 16px; font-weight:900; font-size:21px; letter-spacing:0.18em; text-transform:uppercase; background:linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26)); cursor:default; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color:#fff;">
+                            <span style="margin:0 auto; font-weight:900;">ELAPSED TIME</span>
+                        </div>
+                        <div id='inprog-timer-body' style='padding:14px 20px; font-size:92px; line-height:1.04; text-align:center; font-weight:800; color:__GREEN__;'>
+                            <span id='truck-elapsed'>__ELAPSED_TEXT__</span>
                         </div>
                     </div>
+                </div>
             <script>
             (function(){
                 try {
@@ -25965,6 +25990,8 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 } catch(e){console.error(e);}
             })();
             </script>
+            </body>
+            </html>
             """
             timer_html = (
                 timer_html_template

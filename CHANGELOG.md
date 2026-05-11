@@ -2,9 +2,17 @@
 
 ## Unreleased
 
-1. Added initial Progressive Web App support for mobile/tablet installability, including manifest, service worker/offline fallback, and mobile web app meta tag bootstrap in the main app shell.
-2. Removed manual load-day switching controls from Management and standardized automatic load-day rollover to 6:00 AM (start of 1st shift).
-3. Updated shift handoff/snooze state handling to be user-scoped so one signed-in user's shift actions no longer affect other users.
+## v1.7.3 - 2026-05-11
+
+1. Updated app metadata release to **v1.7.3** with release date **20260511** and build 12.
+2. Updated deployment image references in compose files to **v1.7.3**.
+3. Updated README release references and `requirements.txt` baseline label to **v1.7.3**.
+4. Rewrote sidebar bouncer toggle button (v3): fixed jitter caused by watching CSS `style` mutations, added 80ms debounced sync, reduced DOM writes, bumped poll interval to 1500ms, and widened button to 26px.
+5. Improved Run Day dialogs (Steps 1-4): renamed Step 1 to "Select Dust Garments" with purple centered header; standardized button order (Save/Continue -> Skip -> Back -> Close) and colors (green/amber/blue/red) across all steps; removed Skip from Step 4.
+6. Fixed truck-number checkbox labels in Step 1 so numbers no longer wrap on mobile (added `white-space:nowrap`).
+7. Added initial Progressive Web App support for mobile/tablet installability, including manifest, service worker/offline fallback, and mobile web app meta tag bootstrap in the main app shell.
+8. Removed manual load-day switching controls from Management and standardized automatic load-day rollover to 6:00 AM.
+9. Updated shift handoff/snooze state handling to be user-scoped so one signed-in user's shift actions no longer affect other users.
 
 ## v1.7.2 - 2026-05-10
 

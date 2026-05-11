@@ -2,16 +2,16 @@
 
 ReadyWorkday is a Streamlit app for managing daily truck operations: unload workflow, load tracking, shortages, fleet status, and supervisor actions.
 
-Current release: **v1.7.2**
+Current release: **v1.7.3**
 
-## Recent updates (v1.7.2)
+## Recent updates (v1.7.3)
 
-- Updated app release metadata to **v1.7.2** (`20260510`) in the active entry app.
-- Added mobile sidebar gesture controls: swipe-left to close and left-edge swipe-right to open.
-- Improved mobile sidebar behavior so swipe-open stays open and does not immediately auto-collapse.
-- Updated mobile dock cards so open state is opaque while collapsed state is transparent.
+- Rewrote sidebar bouncer toggle button (v3) to fix jitter, over-firing, and position drift caused by watching CSS style mutations on every animation frame.
+- Improved Run Day dialogs: renamed Step 1 header to "Select Dust Garments" in purple, standardized button order (Save/Continue → Skip → Back → Close) across all 4 steps, removed Skip from Step 4, and applied consistent green/amber/blue/red color scheme matching the rest of the app.
+- Fixed Step 1 truck-number labels so numbers no longer wrap inside checkbox cells on mobile.
+- Updated app metadata to **v1.7.3** (`20260511`) and bumped build to 12.
 
-## Prior updates (v1.5.0)
+## Prior updates (v1.7.2)
 
 - Added user-management success confirmation dialogs for **Create user** and **Save user changes**.
 - User picker labels now show role before enabled state (for example: `username (Loader • Enabled)`).

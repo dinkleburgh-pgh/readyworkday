@@ -35,9 +35,9 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.7.2"
-_APP_DATE = "20260510"  
-_APP_BUILD = 11
+_APP_VERSION = "1.7.3"
+_APP_DATE = "20260511"  
+_APP_BUILD = 13
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -635,6 +635,7 @@ BUTTON_COLOR_STYLING_ENABLED = True
 TRUCK_BUTTON_DECORATIONS_ENABLED = True
 SIDEBAR_DECORATIONS_ENABLED = True
 MOBILE_GRID_ENHANCEMENTS_ENABLED = True
+MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED = True
 DROPDOWN_LOCK_GUARD_ENABLED = False
 FORCE_POPSTATE_RELOAD_ENABLED = False
 BLANK_PAGE_WATCHDOG_ENABLED = True
@@ -1656,6 +1657,58 @@ def _render_mobile_audit_photo_uploader(
     camera_key = f"audit_mobile_camera_capture_{target_truck_num}"
     upload_key = f"audit_mobile_file_upload_{target_truck_num}"
     save_btn_key = f"audit_mobile_photo_save_btn_{target_truck_num}"
+    # Camera permission uses a self-contained HTML button so getUserMedia fires
+    # directly from the click gesture. A Python st.button → st.rerun() approach
+    # fails because browsers require getUserMedia to be called within the original
+    # user gesture window (~1 s), which has expired by the time Python reruns.
+    components.html(
+        """
+        <style>
+        #cam-perm-btn {
+            width:100%;padding:11px 16px;font-size:0.95rem;font-weight:600;
+            background:#1e40af;color:#fff;border:none;border-radius:8px;
+            cursor:pointer;font-family:sans-serif;box-sizing:border-box;
+        }
+        #cam-perm-btn:active { background:#1e3a8a; }
+        #cam-perm-status {
+            margin-top:8px;font-size:0.82rem;font-family:sans-serif;
+            min-height:1.1em;color:#6b7280;
+        }
+        </style>
+        <button id="cam-perm-btn" type="button">Request Camera Permission</button>
+        <div id="cam-perm-status">Tap to allow camera access for audit photos.</div>
+        <script>
+        document.getElementById('cam-perm-btn').addEventListener('click', async function() {
+            var status = document.getElementById('cam-perm-status');
+            status.style.color = '#6b7280';
+            status.textContent = 'Requesting\u2026';
+            // Try in-iframe navigator first, then parent frame.
+            var md = null;
+            try { md = navigator.mediaDevices || null; } catch(e) {}
+            if (!md || !md.getUserMedia) {
+                try { md = window.parent.navigator.mediaDevices || null; } catch(e) {}
+            }
+            if (!md || !md.getUserMedia) {
+                status.style.color = '#dc2626';
+                status.textContent = 'Camera API unavailable \u2014 enable camera in browser site settings manually.';
+                return;
+            }
+            try {
+                var stream = await md.getUserMedia({ video: true, audio: false });
+                try { stream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
+                status.style.color = '#16a34a';
+                status.textContent = '\u2713 Camera permission granted \u2014 you can now use Take audit photo.';
+            } catch(err) {
+                var msg = (err && (err.message || err.name))
+                    ? String(err.message || err.name) : 'Permission denied.';
+                status.style.color = '#dc2626';
+                status.textContent = 'Not granted: ' + msg + ' \u2014 enable camera in browser site settings.';
+            }
+        });
+        </script>
+        """,
+        height=90,
+    )
 
     camera_capture = st.camera_input("Take audit photo", key=camera_key)
     upload_files = st.file_uploader(
@@ -8854,30 +8907,12 @@ st.markdown(
                 padding-top: 0.08rem !important;
             }
 
-            /* Keep mobile main layout stable when sidebar opens/closes. */
+            /* Keep mobile main layout stable. */
             [data-testid="stAppViewContainer"] .main,
             section.main {
                 margin-left: 0 !important;
                 width: 100% !important;
                 max-width: 100% !important;
-            }
-            section[data-testid="stSidebar"] {
-                position: fixed !important;
-                top: 0 !important;
-                left: 0 !important;
-                bottom: 0 !important;
-                width: min(84vw, 320px) !important;
-                max-width: 320px !important;
-                transform: translateX(-102%);
-                transition: transform 0.2s ease !important;
-                z-index: 1600 !important;
-            }
-            section[data-testid="stSidebar"][aria-expanded="true"] {
-                transform: translateX(0) !important;
-                box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.35), 10px 0 28px rgba(0, 0, 0, 0.35);
-            }
-            section[data-testid="stSidebar"][aria-expanded="false"] {
-                transform: translateX(-102%) !important;
             }
         }
         @media (min-width: 981px) and (max-width: 1366px) and (pointer: coarse) {
@@ -8886,24 +8921,6 @@ st.markdown(
                 margin-left: 0 !important;
                 width: 100% !important;
                 max-width: 100% !important;
-            }
-            section[data-testid="stSidebar"] {
-                position: fixed !important;
-                top: 0 !important;
-                left: 0 !important;
-                bottom: 0 !important;
-                width: min(70vw, 360px) !important;
-                max-width: 360px !important;
-                transform: translateX(-102%);
-                transition: transform 0.2s ease !important;
-                z-index: 1600 !important;
-            }
-            section[data-testid="stSidebar"][aria-expanded="true"] {
-                transform: translateX(0) !important;
-                box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.32), 10px 0 28px rgba(0, 0, 0, 0.35);
-            }
-            section[data-testid="stSidebar"][aria-expanded="false"] {
-                transform: translateX(-102%) !important;
             }
         }
         /* Rotated tablet (landscape): keep content centered and fit viewport width. */
@@ -11135,6 +11152,59 @@ def _enable_mobile_numeric_keypad() -> None:
 
 _enable_mobile_numeric_keypad()
 
+
+def _suppress_mobile_dropdown_keyboard() -> None:
+    """Prevent the virtual keyboard from appearing when tapping selectbox/dropdown inputs on mobile."""
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const rootWin = window.parent || window;
+                const rootDoc = rootWin.document;
+                if (!rootDoc) return;
+                const isMobile = () => {
+                    try { return rootWin.matchMedia('(max-width: 980px)').matches || rootWin.innerWidth <= 980; }
+                    catch (e) { return (rootWin.innerWidth || window.innerWidth || 1200) <= 980; }
+                };
+                if (!isMobile()) return;
+
+                const SELECTOR = [
+                    '[data-baseweb="select"] input',
+                    '[data-baseweb="combobox"] input',
+                    '[data-testid="stSelectbox"] input',
+                    '[data-testid="stMultiSelect"] input',
+                ].join(', ');
+
+                const applyNoKeyboard = () => {
+                    if (!isMobile()) return;
+                    rootDoc.querySelectorAll(SELECTOR).forEach((input) => {
+                        input.setAttribute('inputmode', 'none');
+                        input.setAttribute('autocomplete', 'off');
+                        input.setAttribute('autocorrect', 'off');
+                        input.setAttribute('spellcheck', 'false');
+                    });
+                };
+
+                applyNoKeyboard();
+                [80, 260, 640, 1400, 2500].forEach((d) => setTimeout(applyNoKeyboard, d));
+                if (!rootWin.__dropdownNoKeyboardObserverBound) {
+                    const observer = new MutationObserver(applyNoKeyboard);
+                    observer.observe(rootDoc.body || rootDoc.documentElement, { childList: true, subtree: true });
+                    rootWin.__dropdownNoKeyboardObserverBound = true;
+                }
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+_suppress_mobile_dropdown_keyboard()
+
+
 def _truck_grid_columns(default_cols: int = 8) -> int:
     base_cols = max(1, int(default_cols))
     if _is_mobile_client():
@@ -11167,8 +11237,10 @@ def _force_mobile_button_grid(
         min_button_height = 0
 
     button_selector = 'button[kind="primary"]' if primary_only else 'button'
+    requested_cols = max(1, int(cols))
     labels_json = json.dumps(labels)
     selector_json = json.dumps(button_selector)
+    cols_json = json.dumps(requested_cols)
     gap_css = f"{gap_rem:.3f}rem"
     cell_width = f"calc({100.0 / float(cols):.6f}% - {gap_css})"
     cell_width_json = json.dumps(cell_width)
@@ -11183,6 +11255,7 @@ def _force_mobile_button_grid(
                 const root = window.parent.document;
                 const expected = new Set({labels_json});
                 const selector = {selector_json};
+                const requestedCols = {cols_json};
                 const cellWidth = {cell_width_json};
                 const gapCss = {gap_css_json};
                 const minButtonHeightCss = {min_button_height_css_json};
@@ -11192,7 +11265,7 @@ def _force_mobile_button_grid(
                     const label = normalize(value);
                     if (!label) return '';
                     if (expected.has(label)) return label;
-                    const numeric = label.match(/^(\\d+)/);
+                    const numeric = label.match(/(\\d+)/);
                     if (numeric && expected.has(numeric[1])) return numeric[1];
                     return label;
                 }};
@@ -11293,7 +11366,7 @@ def _force_mobile_button_grid(
                         const slots = activeSlots.length ? activeSlots : rowSlots;
 
                         if (mobile) {{
-                            const gridCols = Math.max(1, Math.min(cols, slots.length || cols));
+                            const gridCols = Math.max(1, Math.min(requestedCols, slots.length || requestedCols));
                             container.style.setProperty('display', 'grid', 'important');
                             container.style.setProperty('grid-template-columns', `repeat(${{gridCols}}, minmax(0, 1fr))`, 'important');
                             container.style.setProperty('align-items', 'stretch', 'important');
@@ -11496,8 +11569,8 @@ def _apply_mobile_touch_target_styles(
         f"""
         <style>
             @media (max-width: 980px) {{
-                .stButton > button,
-                .stDownloadButton > button {{
+                [data-testid="stMain"] .stButton > button,
+                [data-testid="stMain"] .stDownloadButton > button {{
                     min-height: {button_min_height}px !important;
                     border-radius: 14px !important;
                     padding: 0.44rem 0.68rem !important;
@@ -11505,20 +11578,20 @@ def _apply_mobile_touch_target_styles(
                     line-height: 1.1 !important;
                     touch-action: manipulation !important;
                 }}
-                div[data-testid="stButton"],
-                div[data-testid="stDownloadButton"] {{
+                [data-testid="stMain"] div[data-testid="stButton"],
+                [data-testid="stMain"] div[data-testid="stDownloadButton"] {{
                     margin-bottom: {spacing_rem:.3f}rem !important;
                 }}
-                [data-testid="stTextInput"] input,
-                [data-testid="stNumberInput"] input,
-                [data-testid="stTextArea"] textarea {{
+                [data-testid="stMain"] [data-testid="stTextInput"] input,
+                [data-testid="stMain"] [data-testid="stNumberInput"] input,
+                [data-testid="stMain"] [data-testid="stTextArea"] textarea {{
                     min-height: {input_min_height}px !important;
                     font-size: {input_font}px !important;
                 }}
-                [data-testid="stSelectbox"] div[role="combobox"],
-                [data-testid="stMultiSelect"] div[role="combobox"],
-                [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-                [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{
+                [data-testid="stMain"] [data-testid="stSelectbox"] div[role="combobox"],
+                [data-testid="stMain"] [data-testid="stMultiSelect"] div[role="combobox"],
+                [data-testid="stMain"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+                [data-testid="stMain"] [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{
                     min-height: {input_min_height}px !important;
                     font-size: {button_font}px !important;
                 }}
@@ -16448,14 +16521,8 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
             trigger_label = f"UnloadWatchSpecialTrigger {int(truck_num)}"
             trigger_key = f"unload_watch_special_trigger_{collapse_scope}_{int(truck_num)}"
             if st.button(trigger_label, key=trigger_key, width='stretch'):
-                if bool(st.session_state.get("batching_disabled")):
-                    _complete_unload_with_batching_disabled(int(truck_num), redirect_screen="UNLOAD")
-                    _set_query_params(page="UNLOAD", pick=None, truck=None, start=None)
-                else:
-                    st.session_state["unload_truck_select"] = int(truck_num)
-                    st.session_state.active_screen = "BATCH"
-                    _set_query_params(page="BATCH", pick=str(int(truck_num)))
-                    _mark_and_save()
+                _start_batch_flow_for_dirty_truck(int(truck_num), set_unload_url_when_disabled=True)
+                _mark_and_save()
                 st.rerun()
 
     _render_unload_special_trigger_buttons()
@@ -16534,24 +16601,20 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
                         const openUnload = () => {{
                             try {{
                                 const triggerLabel = `UnloadWatchSpecialTrigger ${{truckNum}}`;
-                                const allButtons = Array.from(root.querySelectorAll('button'));
-                                const triggerButton = allButtons.find((btn) => normalize(btn.innerText || btn.textContent || '') === triggerLabel);
-                                if (triggerButton) {{
-                                    triggerButton.click();
+                                const byAria = root.querySelector(`button[aria-label="${{triggerLabel}}"]`);
+                                if (byAria) {{
+                                    byAria.click();
                                     return;
                                 }}
 
-                                const parentWin = window.parent;
-                                const url = new URL(parentWin.location.href);
-                                url.searchParams.set('page', 'BATCH');
-                                url.searchParams.set('pick', String(truckNum));
-                                const targetHref = url.toString();
-                                try {{
-                                    parentWin.history.pushState({{}}, '', targetHref);
-                                }} catch (e) {{
-                                    try {{ parentWin.history.replaceState({{}}, '', targetHref); }} catch (e2) {{}}
+                                const allButtons = Array.from(root.querySelectorAll('button'));
+                                const triggerButton = allButtons.find((btn) => {{
+                                    const label = normalize(btn.innerText || btn.textContent || '');
+                                    return label === triggerLabel || label.startsWith(triggerLabel + ' ');
+                                }});
+                                if (triggerButton) {{
+                                    triggerButton.click();
                                 }}
-                                try {{ parentWin.dispatchEvent(new Event('popstate')); }} catch (e) {{}}
                             }} catch (e) {{}}
                         }};
 
@@ -21367,6 +21430,23 @@ qp = _get_query_params()
 _consume_watchdog_diag_query_params(qp)
 _consume_startup_render_timing_query_params(qp)
 qp = _get_query_params()
+
+raw_auth_open_login = qp.get("auth_open_login", None)
+auth_open_login = str(raw_auth_open_login[0] if isinstance(raw_auth_open_login, list) else raw_auth_open_login or "").strip().lower()
+if auth_open_login in {"1", "true", "yes", "y", "open"}:
+    st.session_state.auth_request_portal_pending = False
+    st.session_state.auth_login_portal_pending = True
+    st.session_state.auth_login_portal_requested_at = time.time()
+    _set_query_params(auth_open_login=None)
+
+raw_auth_open_request = qp.get("auth_open_request", None)
+auth_open_request = str(raw_auth_open_request[0] if isinstance(raw_auth_open_request, list) else raw_auth_open_request or "").strip().lower()
+if auth_open_request in {"1", "true", "yes", "y", "open"}:
+    st.session_state.auth_login_portal_pending = False
+    st.session_state.auth_login_portal_requested_at = 0.0
+    st.session_state.auth_request_portal_pending = True
+    _set_query_params(auth_open_request=None)
+
 raw_page = qp.get("page", None)
 requested = raw_page[0] if isinstance(raw_page, list) else raw_page
 requested = _normalize_screen_page(requested)
@@ -21745,31 +21825,8 @@ components.html(
                 root.__truckNavPopstateBound = true;
                 root.addEventListener('popstate', function(){
                     try {
-                        console.log('Popstate event triggered:', root.location.href);
                         root.__truckNavPopstateInFlight = true;
-                        // Extract URL parameters and send them to the backend
-                        const params = new URLSearchParams(root.location.search);
-                        const stateUpdate = {};
-                        for (const [key, value] of params.entries()) {
-                            stateUpdate[key] = value;
-                        }
-                        fetch('/_stcore/update_session_state', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(stateUpdate)
-                        }).then(response => {
-                            if (!response.ok) {
-                                console.error('Failed to update session state:', response.statusText);
-                            } else {
-                                // Trigger a Streamlit rerun
-                                fetch('/_stcore/trigger_rerun', { method: 'POST' });
-                            }
-                        }).catch(error => {
-                            console.error('Error updating session state:', error);
-                        });
-                    } catch(e) {
-                        console.error('Popstate handling error:', e);
-                    }
+                    } catch(e) {}
                 });
             }
 
@@ -21837,11 +21894,14 @@ if role_access_notice:
 st.session_state.pop("role_access_notice_persistent", None)
 st.session_state.pop("role_access_notice_persistent_until", None)
 
+# Render auth dialogs early so page-level st.stop() branches cannot suppress them.
+_render_pending_auth_portals(authenticator)
+
 # ==========================================================
 # SIDEBAR
 # ==========================================================
 st.sidebar.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
-if _is_mobile_client() or _is_tablet_client():
+if MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and (_is_mobile_client() or _is_tablet_client()):
         components.html(
                 """
                 <script>
@@ -21850,6 +21910,19 @@ if _is_mobile_client() or _is_tablet_client():
                         const root = window.parent || window;
                         if (!root || !root.document) return;
                         const doc = root.document;
+
+                        // One-time reload to flush any stale nav-fallback click listeners
+                        // bound by a previous JS version (they used history.pushState which
+                        // races with Streamlit's WebSocket rerun and breaks button nav).
+                        if (root.__truckMobileSidebarNavFallbackBoundV4 && root.sessionStorage) {
+                            var _cleanupKey = 'truck_mobile_nav_v4_cleanup_done';
+                            if (!root.sessionStorage.getItem(_cleanupKey)) {
+                                root.sessionStorage.setItem(_cleanupKey, '1');
+                                root.location.reload();
+                                return;
+                            }
+                        }
+
                         const getSidebar = () => doc.querySelector('section[data-testid="stSidebar"]');
                         if (!getSidebar()) return;
                         let suppressOutsideCloseUntil = 0;
@@ -21900,23 +21973,9 @@ if _is_mobile_client() or _is_tablet_client():
                             sidebar.style.setProperty('transform', 'translateX(0%)', 'important');
                         };
 
-                        const bindBtn = (btn) => {
-                            if (!btn || btn.dataset.mobileAutoCollapseBound === '1') return;
-                            btn.dataset.mobileAutoCollapseBound = '1';
-                            btn.addEventListener('click', () => {
-                                setTimeout(() => {
-                                    collapseSidebar();
-                                }, 80);
-                            }, { passive: true });
-                        };
-
-                        getSidebar().querySelectorAll('.stButton > button').forEach(bindBtn);
-                        const observer = new MutationObserver(() => {
-                            const sidebar = getSidebar();
-                            if (!sidebar) return;
-                            sidebar.querySelectorAll('.stButton > button').forEach(bindBtn);
-                        });
-                        observer.observe(getSidebar(), { childList: true, subtree: true });
+                        // Remove leftover swipe hint from prior code versions.
+                        const staleHint = doc.getElementById('truck-swipe-login-hint');
+                        if (staleHint && staleHint.parentNode) { staleHint.parentNode.removeChild(staleHint); }
 
                         if (!root.__truckOutsideTapSidebarCloseBound) {
                             root.__truckOutsideTapSidebarCloseBound = true;
@@ -21941,8 +22000,7 @@ if _is_mobile_client() or _is_tablet_client():
                                 } catch (e) {}
                             };
 
-                            doc.addEventListener('click', onOutsideTap, true);
-                            doc.addEventListener('touchend', onOutsideTap, true);
+                            doc.addEventListener('click', onOutsideTap, false);
                         }
 
                         if (!root.__truckSidebarSwipeCloseBound) {
@@ -22047,6 +22105,52 @@ if _is_mobile_client() or _is_tablet_client():
                             doc.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
                             doc.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
                             doc.addEventListener('touchcancel', resetSwipe, { passive: true, capture: true });
+                        }
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+        )
+elif _is_mobile_client() or _is_tablet_client():
+        components.html(
+                """
+                <script>
+                (function(){
+                    try {
+                        const root = window.parent || window;
+                        const doc = root && root.document ? root.document : null;
+                        if (!doc) return;
+
+                        const hint = doc.getElementById('truck-swipe-login-hint');
+                        if (hint && hint.parentNode) {
+                            hint.parentNode.removeChild(hint);
+                        }
+
+                        const staleEnhancementsBound = Boolean(
+                            root.__truckOutsideTapSidebarCloseBound ||
+                            root.__truckSidebarSwipeCloseBound ||
+                            root.__truckSwipeSidebarHintTimer ||
+                            root.__truckSwipeSidebarHintObserver
+                        );
+
+                        if (root.__truckSwipeSidebarHintObserver && root.__truckSwipeSidebarHintObserver.disconnect) {
+                            try { root.__truckSwipeSidebarHintObserver.disconnect(); } catch (e) {}
+                            root.__truckSwipeSidebarHintObserver = null;
+                        }
+                        if (root.__truckSwipeSidebarHintTimer) {
+                            try { root.clearInterval(root.__truckSwipeSidebarHintTimer); } catch (e) {}
+                            root.__truckSwipeSidebarHintTimer = null;
+                        }
+
+                        if (staleEnhancementsBound && root.sessionStorage) {
+                            const reloadKey = 'truck_mobile_sidebar_cleanup_reload_done';
+                            const alreadyReloaded = root.sessionStorage.getItem(reloadKey) === '1';
+                            if (!alreadyReloaded) {
+                                root.sessionStorage.setItem(reloadKey, '1');
+                                root.location.reload();
+                                return;
+                            }
                         }
                     } catch (e) {}
                 })();
@@ -22165,27 +22269,42 @@ with st.sidebar:
         height=38,
     )
 
+
+def _sidebar_navigate(target_page: str):
+    next_nav = int(st.session_state.get("nav_seq") or 0) + 1
+    st.session_state.nav_seq = next_nav
+    st.session_state.last_screen_for_history = target_page
+    st.session_state.last_requested_page = None
+    st.session_state.active_screen = target_page
+    _mark_and_save()
+    _set_query_params(
+        page=_page_param_for_screen(target_page),
+        nav=str(next_nav),
+        truck=None,
+        pick=None,
+        start=None,
+        fleet_mode=None,
+        fleet_truck=None,
+        fleet_action=None,
+        **{"from": None},
+    )
+    st.rerun()
+
 # Unload at top, Load middle
-if _screen_allowed_for_current_user("UNLOAD") and st.sidebar.button("Unload", width='stretch'):
-    st.session_state.active_screen = "UNLOAD"
-    _mark_and_save()
-    st.rerun()
+if _screen_allowed_for_current_user("UNLOAD") and st.sidebar.button("Unload", key="sidebar_nav_unload_btn", width='stretch'):
+    _sidebar_navigate("UNLOAD")
 
-if _screen_allowed_for_current_user("LOAD") and st.sidebar.button("Load", width='stretch'):
-    st.session_state.active_screen = "LOAD"
-    _mark_and_save()
-    st.rerun()
+if _screen_allowed_for_current_user("LOAD") and st.sidebar.button("Load", key="sidebar_nav_load_btn", width='stretch'):
+    _sidebar_navigate("LOAD")
 
-if _screen_allowed_for_current_user("FLEET") and st.sidebar.button("Fleet", width='stretch'):
+if _screen_allowed_for_current_user("FLEET") and st.sidebar.button("Fleet", key="sidebar_nav_fleet_btn", width='stretch'):
     st.session_state.sup_manage_truck = None
     st.session_state.sup_manage_new_mode = False
     st.session_state.sup_manage_action = None
     st.session_state.sup_manage_pref_action = None
     st.session_state.sup_manage_swap_first_truck = None
     st.session_state.sup_manage_swap_pending_second = None
-    st.session_state.active_screen = "FLEET"
-    _mark_and_save()
-    st.rerun()
+    _sidebar_navigate("FLEET")
 
 _sync_communications_nav_flash_state()
 try:
@@ -22197,13 +22316,11 @@ communications_nav_flash_active = (
     and str(st.session_state.get("active_screen") or "").upper() != "COMMUNICATIONS"
 )
 
-if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Communications", width='stretch'):
-    st.session_state.active_screen = "COMMUNICATIONS"
+if _screen_allowed_for_current_user("COMMUNICATIONS") and st.sidebar.button("Communications", key="sidebar_nav_communications_btn", width='stretch'):
     st.session_state.communications_last_seen_ts = _latest_communications_message_ts()
     st.session_state.communications_nav_flash_until = 0.0
     st.session_state.communications_unread_count = 0
-    _mark_and_save()
-    st.rerun()
+    _sidebar_navigate("COMMUNICATIONS")
 
 if _current_auth_role() == AUTH_ROLE_GUEST and _auth_enabled():
     st.markdown(
@@ -22253,9 +22370,7 @@ if break_start:
     break_remaining = (st.session_state.break_duration or 0) - (time.time() - break_start)
     if break_remaining > 0 and _screen_allowed_for_current_user("BREAK"):
         if st.sidebar.button("On Break", width='stretch'):
-            st.session_state.active_screen = "BREAK"
-            _mark_and_save()
-            st.rerun()
+            _sidebar_navigate("BREAK")
 
 # ---- REVERTED STATUS BAR LOOK (single card) ----
 st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
@@ -22450,16 +22565,12 @@ if st.session_state.setup_done:
     if _screen_allowed_for_current_user("SUPERVISOR"):
         st.sidebar.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
         if _screen_allowed_for_current_user("TRENDS") and st.sidebar.button("Trends", width='stretch', key="sidebar_trends_bottom"):
-            st.session_state.active_screen = "TRENDS"
-            _mark_and_save()
-            st.rerun()
+            _sidebar_navigate("TRENDS")
 
         if _screen_allowed_for_current_user("AUDIT_FLEET") and st.sidebar.button("Audit", width='stretch', key="sidebar_audits_bottom"):
             st.session_state.audit_fleet_return_screen = str(st.session_state.get("active_screen") or "LOAD")
             st.session_state.audit_fleet_selected_truck = None
-            st.session_state.active_screen = "AUDIT_FLEET"
-            _mark_and_save()
-            st.rerun()
+            _sidebar_navigate("AUDIT_FLEET")
 
         if st.sidebar.button("Management", width='stretch', key="sidebar_management_bottom"):
             st.session_state.sup_manage_truck = None
@@ -22470,9 +22581,7 @@ if st.session_state.setup_done:
             st.session_state.sup_manage_pref_action = None
             st.session_state.sup_manage_swap_first_truck = None
             st.session_state.sup_manage_swap_pending_second = None
-            st.session_state.active_screen = "SUPERVISOR"
-            _mark_and_save()
-            st.rerun()
+            _sidebar_navigate("SUPERVISOR")
 
     signed_in_user = html.escape(str(_current_actor_name() or "Guest").strip() or "Guest")
     signed_in_role_key = _current_auth_role()
@@ -22551,7 +22660,266 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-if _is_mobile_client():
+# Sidebar bouncer toggle button — injected once into the parent document,
+# persists across Streamlit reruns via a parent-window guard flag.
+components.html(
+    """
+    <script>
+    (function() {
+        try {
+            var root = window.parent || window;
+            var doc  = root && root.document ? root.document : null;
+            if (!doc || !doc.body) return;
+
+            // ── Guard: only inject once per browser session ─────────────────
+            if (root.__truckMenuBouncerV3) return;
+            root.__truckMenuBouncerV3 = true;
+
+            var BTN_ID   = 'truck-menu-bouncer-v3';
+            var STYLE_ID = 'truck-menu-bouncer-style-v3';
+
+            // Remove stale buttons from prior code versions
+            ['truck-menu-bouncer', 'truck-menu-bouncer-v1', 'truck-menu-bouncer-v2'].forEach(function(id) {
+                var el = doc.getElementById(id);
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+                var sid = doc.getElementById(id.replace('bouncer', 'bouncer-style'));
+                if (sid && sid.parentNode) sid.parentNode.removeChild(sid);
+            });
+
+            // ── CSS ──────────────────────────────────────────────────────────
+            if (!doc.getElementById(STYLE_ID)) {
+                var s = doc.createElement('style');
+                s.id = STYLE_ID;
+                s.textContent = [
+                    '#' + BTN_ID + '{',
+                    '  position:fixed; top:50%; left:0px;',
+                    '  transform:translateY(-50%);',
+                    '  z-index:99998;',
+                    '  width:26px; height:88px;',
+                    '  display:flex; align-items:center; justify-content:center;',
+                    '  cursor:pointer;',
+                    '  background:rgba(37,99,235,0.88);',
+                    '  border-radius:0 10px 10px 0;',
+                    '  box-shadow:2px 2px 16px rgba(0,0,0,0.42);',
+                    '  border:1.5px solid rgba(147,197,253,0.50);',
+                    '  border-left:none;',
+                    '  color:#fff; font-size:1.0rem; line-height:1;',
+                    '  user-select:none; -webkit-user-select:none;',
+                    '  touch-action:manipulation;',
+                    '  -webkit-tap-highlight-color:transparent;',
+                    '  transition:left 220ms ease, background 120ms ease;',
+                    '  will-change:left,transform;',
+                    '}',
+                    '#' + BTN_ID + ':active{',
+                    '  background:rgba(29,78,216,0.99) !important;',
+                    '  filter:brightness(0.88);',
+                    '}',
+                    '@keyframes truckBouncerNudgeV3{',
+                    '  0%  {transform:translateY(-50%) translateX(0px);}',
+                    '  15% {transform:translateY(-50%) translateX(9px);}',
+                    '  30% {transform:translateY(-50%) translateX(2px);}',
+                    '  50% {transform:translateY(-50%) translateX(7px);}',
+                    '  65% {transform:translateY(-50%) translateX(1px);}',
+                    '  80% {transform:translateY(-50%) translateX(4px);}',
+                    '  100%{transform:translateY(-50%) translateX(0px);}',
+                    '}',
+                    '#' + BTN_ID + '.bouncing{',
+                    '  animation:truckBouncerNudgeV3 1.15s ease-in-out 3;',
+                    '}',
+                ].join('\\n');
+                (doc.head || doc.body).appendChild(s);
+            }
+
+            // ── Button element ───────────────────────────────────────────────
+            var btn = doc.createElement('div');
+            btn.id  = BTN_ID;
+            btn.setAttribute('role',       'button');
+            btn.setAttribute('aria-label', 'Toggle navigation menu');
+            btn.setAttribute('tabindex',   '0');
+            doc.body.appendChild(btn);
+
+            // ── Sidebar helpers ──────────────────────────────────────────────
+            var getSidebar = function() {
+                return doc.querySelector('section[data-testid="stSidebar"]');
+            };
+            var isSidebarExpanded = function() {
+                var sb = getSidebar();
+                if (!sb) return false;
+                var v = String(sb.getAttribute('aria-expanded') || '').toLowerCase();
+                if (v === 'true')  return true;
+                if (v === 'false') return false;
+                // Fallback: measure position (desktop always-visible sidebar)
+                var rect = sb.getBoundingClientRect();
+                return rect.left > -80;
+            };
+            var collapseSidebar = function() {
+                var b = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+                if (b) { b.click(); return; }
+                var sb = getSidebar();
+                if (sb) {
+                    sb.setAttribute('aria-expanded', 'false');
+                    sb.style.setProperty('transform', 'translateX(-110%)', 'important');
+                }
+            };
+            var openSidebar = function() {
+                var tries = [
+                    '[data-testid="stSidebarCollapsedControl"] button',
+                    '[data-testid="stSidebarCollapseButton"] button',
+                    '[data-testid="collapsedControl"] button',
+                    '[aria-label="Open sidebar"]',
+                    '[title="Open sidebar"]',
+                ];
+                for (var i = 0; i < tries.length; i++) {
+                    var b = doc.querySelector(tries[i]);
+                    if (b) { b.click(); return; }
+                }
+                var sb = getSidebar();
+                if (sb) {
+                    sb.setAttribute('aria-expanded', 'true');
+                    sb.style.setProperty('transform', 'translateX(0)', 'important');
+                }
+            };
+
+            // ── Animation ────────────────────────────────────────────────────
+            var animTimer = null;
+            var triggerBounce = function() {
+                if (animTimer) clearTimeout(animTimer);
+                btn.classList.remove('bouncing');
+                void btn.offsetWidth; // force reflow to restart CSS animation
+                btn.classList.add('bouncing');
+                animTimer = setTimeout(function() { btn.classList.remove('bouncing'); }, 3800);
+            };
+
+            // ── Debounced syncState: batches rapid calls (e.g. during animation) ──
+            var syncTimer   = null;
+            var lastLeft    = null;
+            var lastIcon    = null;
+            var prevExpanded = null;
+
+            var _doSync = function() {
+                if (!btn.isConnected) doc.body.appendChild(btn);
+                var expanded = isSidebarExpanded();
+                var sb = getSidebar();
+                var newLeft, newIcon, newTitle;
+                if (expanded && sb) {
+                    var rect = sb.getBoundingClientRect();
+                    // Only use rect.right when the sidebar has settled (right > 10)
+                    newLeft  = rect.right > 10 ? Math.round(rect.right) : 0;
+                    newIcon  = '\u25C4'; // ◄
+                    newTitle = 'Close menu';
+                } else {
+                    newLeft  = 0;
+                    newIcon  = '\u2630'; // ☰
+                    newTitle = 'Open menu';
+                }
+                // Only touch the DOM if something actually changed
+                var leftPx = newLeft + 'px';
+                if (lastLeft !== leftPx) {
+                    btn.style.left = leftPx;
+                    lastLeft = leftPx;
+                }
+                if (lastIcon !== newIcon) {
+                    btn.textContent = newIcon;
+                    btn.setAttribute('title', newTitle);
+                    lastIcon = newIcon;
+                }
+                // Bounce logic
+                if (!expanded) {
+                    btn.classList.remove('bouncing');
+                    if (prevExpanded === true) {
+                        triggerBounce();
+                    } else if (prevExpanded === null) {
+                        setTimeout(triggerBounce, 2200);
+                    }
+                } else {
+                    if (animTimer) { clearTimeout(animTimer); animTimer = null; }
+                    btn.classList.remove('bouncing');
+                }
+                prevExpanded = expanded;
+            };
+
+            var syncState = function() {
+                if (syncTimer) return; // already queued — let it coalesce
+                syncTimer = setTimeout(function() {
+                    syncTimer = null;
+                    _doSync();
+                }, 80);
+            };
+
+            // ── Toggle handler ────────────────────────────────────────────────
+            var lastToggleTs = 0;
+            var onToggle = function(e) {
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                var now = Date.now();
+                if (now - lastToggleTs < 500) return;
+                lastToggleTs = now;
+                if (isSidebarExpanded()) { collapseSidebar(); } else { openSidebar(); }
+                // Schedule re-checks after the sidebar animation settles
+                setTimeout(syncState, 200);
+                setTimeout(syncState, 500);
+                setTimeout(syncState, 1000);
+            };
+
+            btn.addEventListener('click', onToggle, true);
+            btn.addEventListener('touchend', function(e) {
+                e.preventDefault(); // suppress ghost click
+                onToggle(e);
+            }, { capture: true });
+            btn.addEventListener('touchstart', function(e) {
+                e.stopPropagation();
+            }, { passive: true, capture: true });
+            btn.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(e); }
+            });
+
+            // ── MutationObserver: watch aria-expanded and class only.
+            //    Intentionally NOT watching 'style' — that fires on every
+            //    animation frame and causes the button to jitter. ─────────────
+            var activeObs = null;
+            var watchedSb = null;
+            var attachObs = function(sb) {
+                if (activeObs) activeObs.disconnect();
+                watchedSb = sb;
+                activeObs = new MutationObserver(syncState);
+                activeObs.observe(sb, {
+                    attributes:      true,
+                    attributeFilter: ['aria-expanded', 'class'],
+                });
+            };
+            var sb0 = getSidebar();
+            if (sb0) {
+                attachObs(sb0);
+            } else {
+                var waitObs = new MutationObserver(function() {
+                    var s = getSidebar();
+                    if (s) { waitObs.disconnect(); attachObs(s); syncState(); }
+                });
+                waitObs.observe(doc.body, { childList: true, subtree: true });
+            }
+
+            // ── Interval poll: re-attach if Streamlit replaced sidebar DOM,
+            //    and catch any positional drift not covered by the observer ────
+            setInterval(function() {
+                var s = getSidebar();
+                if (s && s !== watchedSb) { attachObs(s); }
+                _doSync(); // direct call (not debounced) so position stays current
+            }, 1500);
+
+            // ── Initial sync ─────────────────────────────────────────────────
+            _doSync();
+            setTimeout(_doSync, 300);
+            setTimeout(_doSync, 800);
+            setTimeout(_doSync, 2000);
+
+        } catch (e) {}
+    })();
+    </script>
+    """,
+    height=0,
+)
+
+if False and MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and _is_mobile_client():
     components.html(
         """
         <script>
@@ -22574,6 +22942,7 @@ if _is_mobile_client():
                     'box-shadow:3px 0 14px rgba(0,0,0,0.35);cursor:pointer;' +
                     'font-family:sans-serif;text-align:center;user-select:none;width:22px;' +
                     'pointer-events:auto;' +
+                    'transition:transform 0.18s ease;' +
                     'animation:truckSwipeHintPulse 1.9s ease-in-out infinite;'
                 );
             }
@@ -22592,22 +22961,40 @@ if _is_mobile_client():
             var isSidebarOpen = function() {
                 var sb = doc.querySelector('section[data-testid="stSidebar"]');
                 if (!sb) return false;
-                var ariaOpen = String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
                 try {
+                    var ariaVal = String(sb.getAttribute('aria-expanded') || '').toLowerCase();
+                    var ariaOpen = ariaVal === 'true';
                     var rect = sb.getBoundingClientRect();
                     var vw = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
-                    var visibleByRect = rect && rect.width > 24 && rect.right > 10 && rect.left < Math.max(40, vw - 10);
-                    if (visibleByRect) return true;
-                    if (!ariaOpen) return false;
-                    // If aria says open but geometry says mostly off-screen, treat as closed.
-                    return !!(rect && rect.right > 18);
+                    var style = root.getComputedStyle ? root.getComputedStyle(sb) : null;
+                    var transform = style ? String(style.transform || '') : '';
+                    var offscreenByTransform = false;
+                    if (transform && transform !== 'none') {
+                        var m = transform.match(/matrix\\(([^)]+)\\)/);
+                        if (m && m[1]) {
+                            var parts = m[1].split(',');
+                            var tx = Number(parts[4] || 0);
+                            if (isFinite(tx) && tx < -Math.max(36, (rect && rect.width ? rect.width * 0.55 : 180))) {
+                                offscreenByTransform = true;
+                            }
+                        }
+                    }
+                    var visibleByRect = rect && rect.width > 24 && rect.right > 26 && rect.left < Math.max(48, vw - 16);
+                    if (offscreenByTransform) return false;
+                    if (ariaOpen) return !!visibleByRect;
+                    return !!visibleByRect && rect.left > -8;
                 } catch (e) {
-                    return ariaOpen;
+                    return String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
                 }
             };
 
             var updateVisibility = function() {
-                hint.style.display = isSidebarOpen() ? 'none' : 'flex';
+                var open = isSidebarOpen();
+                hint.style.display = open ? 'none' : 'flex';
+                hint.style.left = '0px';
+                hint.style.borderRadius = '0 10px 10px 0';
+                hint.style.background = 'rgba(59,130,246,0.88)';
+                hint.innerHTML = '<div style="font-size:1.3rem;line-height:1;">&#8594;</div><div style="font-size:0.55rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin-top:8px;writing-mode:vertical-lr;">Menu</div>';
             };
 
             var forceOpenSidebar = function() {
@@ -22634,14 +23021,97 @@ if _is_mobile_client():
                 } catch (e) {}
             };
 
+            var forceCloseSidebar = function() {
+                var selectors = [
+                    '[data-testid="stSidebarCollapseButton"] button',
+                    '[aria-label="Close sidebar"]',
+                    '[title="Close sidebar"]'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var btn = doc.querySelector(selectors[i]);
+                    if (btn) {
+                        try { btn.click(); } catch (e) {}
+                        return;
+                    }
+                }
+                var sb = doc.querySelector('section[data-testid="stSidebar"]');
+                if (!sb) return;
+                try {
+                    sb.setAttribute('aria-expanded', 'false');
+                    sb.style.setProperty('transform', 'translateX(-102%)', 'important');
+                } catch (e) {}
+            };
+
             hint.onclick = function() {
                 forceOpenSidebar();
+                updateVisibility();
+                setTimeout(updateVisibility, 70);
+                setTimeout(updateVisibility, 220);
             };
 
             updateVisibility();
-            if (!root.__truckSwipeSidebarHintTimer) {
-                root.__truckSwipeSidebarHintTimer = setInterval(updateVisibility, 600);
+
+            var sbNode = doc.querySelector('section[data-testid="stSidebar"]');
+            if (sbNode && !root.__truckSwipeSidebarHintObserver) {
+                try {
+                    var obs = new MutationObserver(function(){ updateVisibility(); });
+                    obs.observe(sbNode, { attributes: true, attributeFilter: ['style', 'class', 'aria-expanded'] });
+                    root.__truckSwipeSidebarHintObserver = obs;
+                } catch (e) {}
             }
+
+            if (!root.__truckSwipeSidebarHintResizeBound) {
+                root.addEventListener('resize', updateVisibility);
+                root.__truckSwipeSidebarHintResizeBound = true;
+            }
+
+            if (!root.__truckSwipeSidebarHintTimer) {
+                root.__truckSwipeSidebarHintTimer = setInterval(updateVisibility, 220);
+            }
+        } catch(e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+elif _is_mobile_client():
+    components.html(
+        """
+        <script>
+        (function(){
+        try {
+            var root = window.parent || window;
+            var doc = root.document;
+            if (!doc) return;
+
+            // --- Remove leftover bounce button elements ---
+            var staleBtn = doc.getElementById('truck-mobile-sidebar-opener');
+            if (staleBtn && staleBtn.parentNode) { staleBtn.parentNode.removeChild(staleBtn); }
+            var staleStyle = doc.getElementById('truck-mobile-opener-style');
+            if (staleStyle && staleStyle.parentNode) { staleStyle.parentNode.removeChild(staleStyle); }
+
+            // --- Clean up stale opener observers/timers ---
+            if (root.__truckMobileSidebarOpenerObs) {
+                try { root.__truckMobileSidebarOpenerObs.disconnect(); } catch(e) {}
+                root.__truckMobileSidebarOpenerObs = null;
+            }
+            if (root.__truckMobileSidebarOpenerTimer) {
+                try { root.clearInterval(root.__truckMobileSidebarOpenerTimer); } catch(e) {}
+                root.__truckMobileSidebarOpenerTimer = null;
+            }
+
+            // --- Clean up old swipe hint elements ---
+            var hint = doc.getElementById('truck-swipe-login-hint');
+            if (hint && hint.parentNode) { hint.parentNode.removeChild(hint); }
+            if (root.__truckSwipeSidebarHintObserver && root.__truckSwipeSidebarHintObserver.disconnect) {
+                try { root.__truckSwipeSidebarHintObserver.disconnect(); } catch(e) {}
+            }
+            root.__truckSwipeSidebarHintObserver = null;
+            if (root.__truckSwipeSidebarHintTimer) {
+                try { root.clearInterval(root.__truckSwipeSidebarHintTimer); } catch(e) {}
+            }
+            root.__truckSwipeSidebarHintTimer = null;
+
         } catch(e) {}
         })();
         </script>
@@ -24450,6 +24920,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
 # --------------------------
 elif st.session_state.active_screen == "IN_PROGRESS":
     _inject_inprogress_visibility_guard()
+    _fix_page_top_gap()
     st.markdown("<style>h1{display:none;}</style>", unsafe_allow_html=True)
     st.markdown(
         """
@@ -24469,6 +24940,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 [data-testid="stMainBlockContainer"] {
                     max-width: 100% !important;
                     width: 100% !important;
+                    padding-top: 0 !important;
                     padding-left: 0.25rem !important;
                     padding-right: 0.5rem !important;
                 }
@@ -26091,11 +26563,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state["sup_run_day_flow_active"] = False
 
         if st.session_state.get("sup_dust_clothes_dialog_open"):
-            @st.dialog("Set Dust Clothes", on_dismiss=_dismiss_sup_dust_clothes_dialog)
+            @st.dialog("Select Dust Garments", on_dismiss=_dismiss_sup_dust_clothes_dialog)
             def _render_sup_dust_clothes_dialog():
                 run_day_flow_active = bool(st.session_state.get("sup_run_day_flow_active"))
                 if run_day_flow_active:
                     st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 1 of 4</h2>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<h2 style='text-align:center;color:#a855f7;margin:0 0 0.5rem 0;font-size:1.4rem;font-weight:900;'>Select Dust Garments</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Select dust trucks with garments (80-95, except 91).</p>", unsafe_allow_html=True)
                 st.markdown(
                     """
@@ -26115,20 +26589,44 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     div[role="dialog"] div[class*="st-key-sup_dust_clothes_"] p {
                         font-size: 1.02rem !important;
                         font-weight: 700 !important;
+                        white-space: nowrap !important;
+                        overflow: hidden !important;
+                        text-overflow: ellipsis !important;
                     }
                     @media (max-width: 760px) {
-                        div[role="dialog"] div[class*="st-key-sup_dust_clothes_dialog_form"] div[data-testid="stHorizontalBlock"] {
-                            display: flex !important;
-                            flex-wrap: wrap !important;
-                            column-gap: 0.45rem !important;
-                            row-gap: 0.45rem !important;
+                        div[role="dialog"] div[class*="st-key-sup_dust_clothes_grid"] div[data-testid="stHorizontalBlock"] {
+                            display: grid !important;
+                            grid-template-columns: repeat(3, 1fr) !important;
+                            gap: 0.45rem !important;
                         }
-                        div[role="dialog"] div[class*="st-key-sup_dust_clothes_dialog_form"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-                            flex: 0 0 calc(50% - 0.225rem) !important;
-                            width: calc(50% - 0.225rem) !important;
-                            max-width: calc(50% - 0.225rem) !important;
+                        div[role="dialog"] div[class*="st-key-sup_dust_clothes_grid"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                             min-width: 0 !important;
                         }
+                    }
+                    div[class*="st-key-sup_dust_clothes_dialog_form"] [data-testid="stFormSubmitButton"] button {
+                        background: #166534 !important;
+                        border: 1px solid #15803d !important;
+                        color: #ecfdf5 !important;
+                        font-size: 1.15rem !important;
+                        font-weight: 900 !important;
+                        min-height: 52px !important;
+                        letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_dust_clothes_skip"] button {
+                        background: #78350f !important;
+                        border: 1px solid #b45309 !important;
+                        color: #fef3c7 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_dust_clothes_dialog_close"] button {
+                        background: #991b1b !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
                     }
                     </style>
                     """,
@@ -26144,8 +26642,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         selected_dust_trucks.add(truck_num)
 
                 with st.form("sup_dust_clothes_dialog_form", clear_on_submit=False):
-                    dust_col_count = 2 if _is_mobile_client() else 3
-                    dust_columns = st.columns(dust_col_count)
+                    dust_col_count = 3
+                    with st.container(key="sup_dust_clothes_grid"):
+                        dust_columns = st.columns(dust_col_count)
                     picked_dust_trucks: list[int] = []
                     for idx, truck_num in enumerate(DUST_GARMENT_TRUCK_OPTIONS):
                         with dust_columns[idx % dust_col_count]:
@@ -26176,23 +26675,15 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.rerun()
 
                 if run_day_flow_active:
-                    close_col, skip_col = st.columns([1, 1])
-                    with close_col:
-                        if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
-                            st.session_state["sup_dust_clothes_dialog_open"] = False
-                            st.session_state["sup_run_day_flow_active"] = False
-                            st.rerun()
-                    with skip_col:
-                        if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
-                            st.session_state["sup_dust_clothes_dialog_open"] = False
-                            st.session_state["sup_run_day_flow_active"] = False
-                            _open_supervisor_dialog("sup_run_day_spares_dialog_open")
-                            st.rerun()
-                else:
-                    if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
+                    if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
                         st.session_state["sup_dust_clothes_dialog_open"] = False
                         st.session_state["sup_run_day_flow_active"] = False
+                        _open_supervisor_dialog("sup_run_day_spares_dialog_open")
                         st.rerun()
+                if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
+                    st.session_state["sup_dust_clothes_dialog_open"] = False
+                    st.session_state["sup_run_day_flow_active"] = False
+                    st.rerun()
 
             _render_sup_dust_clothes_dialog()
 
@@ -26286,6 +26777,46 @@ elif st.session_state.active_screen == "SUPERVISOR":
             def _render_sup_run_day_spares_dialog():
                 st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 2 of 4</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Set any spares or route swaps for this run day.</p>", unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <style>
+                    [class*="st-key-sup_run_day_spares_finish"] button {
+                        background: #166534 !important;
+                        border: 1px solid #15803d !important;
+                        color: #ecfdf5 !important;
+                        font-size: 1.15rem !important;
+                        font-weight: 900 !important;
+                        min-height: 52px !important;
+                        letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_run_day_spares_back"] button {
+                        background: #1e3a5f !important;
+                        border: 1px solid #2563eb !important;
+                        color: #dbeafe !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_run_day_spares_skip"] button {
+                        background: #78350f !important;
+                        border: 1px solid #b45309 !important;
+                        color: #fef3c7 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_run_day_spares_close"] button {
+                        background: #991b1b !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
                 run_day_swap_feedback_key = "sup_run_day_swap_feedback"
                 run_day_swap_route_key = "sup_run_day_swap_dialog_truck"
@@ -26372,16 +26903,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _open_supervisor_dialog("sup_run_day_specials_dialog_open")
                     st.rerun()
 
-                back_col, skip_col = st.columns([1, 1])
-                with back_col:
-                    if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
-                        st.session_state["sup_run_day_flow_active"] = True
-                        _open_supervisor_dialog("sup_dust_clothes_dialog_open")
-                        st.rerun()
-                with skip_col:
-                    if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
-                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
-                        st.rerun()
+                if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
+                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                    st.rerun()
+
+                if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
+                    st.session_state["sup_run_day_flow_active"] = True
+                    _open_supervisor_dialog("sup_dust_clothes_dialog_open")
+                    st.rerun()
+
+                if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
+                    st.session_state["sup_run_day_spares_dialog_open"] = False
+                    st.session_state["sup_run_day_flow_active"] = False
+                    st.rerun()
 
             _render_sup_run_day_spares_dialog()
 
@@ -26413,16 +26947,47 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         font-weight: 700 !important;
                     }
                     @media (max-width: 760px) {
-                        div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stHorizontalBlock"] {
-                            display: flex !important;
-                            flex-wrap: wrap !important;
-                            column-gap: 0.45rem !important;
-                            row-gap: 0.45rem !important;
+                        div[role="dialog"] div[class*="st-key-sup_run_day_absent_grid"] div[data-testid="stHorizontalBlock"] {
+                            display: grid !important;
+                            grid-template-columns: repeat(3, 1fr) !important;
+                            gap: 0.45rem !important;
                         }
-                        div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-                            flex: 0 0 calc(50% - 0.225rem) !important;
+                        div[role="dialog"] div[class*="st-key-sup_run_day_absent_grid"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                             min-width: 0 !important;
                         }
+                    }
+                    [class*="st-key-sup_run_day_specials_finish"] button {
+                        background: #166534 !important;
+                        border: 1px solid #15803d !important;
+                        color: #ecfdf5 !important;
+                        font-size: 1.15rem !important;
+                        font-weight: 900 !important;
+                        min-height: 52px !important;
+                        letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_run_day_specials_back"] button {
+                        background: #1e3a5f !important;
+                        border: 1px solid #2563eb !important;
+                        color: #dbeafe !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_run_day_specials_skip"] button {
+                        background: #78350f !important;
+                        border: 1px solid #b45309 !important;
+                        color: #fef3c7 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_run_day_specials_close"] button {
+                        background: #991b1b !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
                     }
                     </style>
                     """,
@@ -26442,20 +27007,21 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 absent_picks: list[int] = []
 
                 if all_special_trucks:
-                    col_count = 2 if _is_mobile_client() else 3
-                    grid_cols = st.columns(col_count)
-                    for idx, truck_num in enumerate(all_special_trucks):
-                        with grid_cols[idx % col_count]:
-                            is_selected = st.checkbox(
-                                f"#{truck_num}",
-                                value=bool(truck_num in previously_absent),
-                                key=f"sup_run_day_absent_{truck_num}",
-                            )
-                        if is_selected:
-                            if truck_num in returning_trucks:
-                                dirty_picks.append(truck_num)
-                            if truck_num in off_trucks_now:
-                                absent_picks.append(truck_num)
+                    col_count = 3
+                    with st.container(key="sup_run_day_absent_grid"):
+                        grid_cols = st.columns(col_count)
+                        for idx, truck_num in enumerate(all_special_trucks):
+                            with grid_cols[idx % col_count]:
+                                is_selected = st.checkbox(
+                                    f"#{truck_num}",
+                                    value=bool(truck_num in previously_absent),
+                                    key=f"sup_run_day_absent_{truck_num}",
+                                )
+                            if is_selected:
+                                if truck_num in returning_trucks:
+                                    dirty_picks.append(truck_num)
+                                if truck_num in off_trucks_now:
+                                    absent_picks.append(truck_num)
                 else:
                     st.caption("No off-schedule trucks for today.")
 
@@ -26468,16 +27034,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
                     st.rerun()
 
-                back_col, skip_col = st.columns([1, 1])
-                with back_col:
-                    if st.button("Back", width='stretch', key="sup_run_day_specials_back"):
-                        st.session_state["sup_run_day_flow_active"] = True
-                        _open_supervisor_dialog("sup_run_day_spares_dialog_open")
-                        st.rerun()
-                with skip_col:
-                    if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
-                        _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
-                        st.rerun()
+                if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
+                    _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
+                    st.rerun()
+
+                if st.button("Back", width='stretch', key="sup_run_day_specials_back"):
+                    st.session_state["sup_run_day_flow_active"] = True
+                    _open_supervisor_dialog("sup_run_day_spares_dialog_open")
+                    st.rerun()
+
+                if st.button("Close", width='stretch', key="sup_run_day_specials_close"):
+                    st.session_state["sup_run_day_specials_dialog_open"] = False
+                    st.session_state["sup_run_day_flow_active"] = False
+                    st.rerun()
 
             _render_sup_run_day_specials_dialog()
 
@@ -26490,6 +27059,38 @@ elif st.session_state.active_screen == "SUPERVISOR":
             def _render_sup_run_day_daily_notes_dialog():
                 st.markdown("<h2 style='text-align:center;margin:0 0 0.25rem 0;'>Run Day &mdash; Step 4 of 4</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align:center;color:rgba(250,250,250,0.5);font-size:0.875rem;margin:0 0 0.5rem 0;'>Add any notes about today's run day.</p>", unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <style>
+                    [class*="st-key-sup_run_day_daily_notes_finish"] button {
+                        background: #166534 !important;
+                        border: 1px solid #15803d !important;
+                        color: #ecfdf5 !important;
+                        font-size: 1.15rem !important;
+                        font-weight: 900 !important;
+                        min-height: 52px !important;
+                        letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_run_day_daily_notes_back"] button {
+                        background: #1e3a5f !important;
+                        border: 1px solid #2563eb !important;
+                        color: #dbeafe !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_run_day_daily_notes_close"] button {
+                        background: #991b1b !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
                 daily_notes_key = "sup_run_day_daily_notes"
                 current_notes = st.session_state.get(daily_notes_key, "")
@@ -26510,19 +27111,15 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _mark_and_save()
                     st.rerun()
 
-                back_col, skip_col = st.columns([1, 1])
-                with back_col:
-                    if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
-                        st.session_state["sup_run_day_flow_active"] = True
-                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
-                        st.rerun()
-                with skip_col:
-                    if st.button("Skip", width='stretch', key="sup_run_day_daily_notes_skip"):
-                        st.session_state["sup_last_run_day_completed_key"] = str(_current_run_date_key() or "")
-                        st.session_state["sup_run_day_daily_notes_dialog_open"] = False
-                        st.session_state["sup_run_day_flow_active"] = False
-                        _queue_management_confirmation("Run day setup complete.")
-                        st.rerun()
+                if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
+                    st.session_state["sup_run_day_flow_active"] = True
+                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                    st.rerun()
+
+                if st.button("Close", width='stretch', key="sup_run_day_daily_notes_close"):
+                    st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+                    st.session_state["sup_run_day_flow_active"] = False
+                    st.rerun()
 
             _render_sup_run_day_daily_notes_dialog()
 
@@ -30112,230 +30709,251 @@ elif st.session_state.active_screen == "UNLOAD":
         mobile_now = _is_mobile_client()
         dirty_now = [int(t) for t in (trucks or [])]
 
-        def _enforce_unload_mobile_two_col_grid() -> None:
-            if not mobile_now:
-                return
-            components.html(
+        if mobile_now:
+            status_color_map = _get_status_badge_colors()
+            mobile_rows: list[dict[str, object]] = []
+
+            if batching_disabled_now:
+                order_key = "unload_mobile_sent_order"
+                sent_key = "unload_mobile_sent_set"
+
+                saved_order = []
+                for raw in (st.session_state.get(order_key) or []):
+                    try:
+                        saved_order.append(int(raw))
+                    except Exception:
+                        continue
+
+                if not saved_order:
+                    saved_order = list(dirty_now)
+                else:
+                    for truck_num in dirty_now:
+                        if truck_num not in saved_order:
+                            saved_order.append(truck_num)
+                st.session_state[order_key] = saved_order
+
+                sent_set = _normalize_spare_tracking_set(st.session_state.get(sent_key) or set())
+                st.session_state[sent_key] = sorted(sent_set)
+
+                for truck_num in saved_order:
+                    t = int(truck_num)
+                    already_sent = (t in sent_set) or (t not in dirty_now)
+                    can_undo = _can_undo_mobile_unload_state(t)
+                    trigger_label = f"UnloadMobileMatrixTrigger {t}"
+                    disabled_trigger = bool(already_sent and (not can_undo))
+                    if st.button(
+                        trigger_label,
+                        key=f"unload_mobile_matrix_trigger_{t}",
+                        width='stretch',
+                        disabled=disabled_trigger,
+                    ):
+                        if already_sent:
+                            if can_undo:
+                                sent_set.discard(t)
+                                st.session_state[sent_key] = sorted(sent_set)
+                                _undo_mobile_unload_state(t)
+                        else:
+                            _capture_mobile_unload_undo_state(t)
+                            sent_set.add(t)
+                            st.session_state[sent_key] = sorted(sent_set)
+                            _complete_unload_with_batching_disabled(t)
+                        st.rerun()
+
+                    bg, border, fg = _truck_status_colors(t, status_color_map)
+                    display_label = f"{t} - Undo" if (already_sent and can_undo) else str(t)
+                    mobile_rows.append(
+                        {
+                            "truck": t,
+                            "trigger": trigger_label,
+                            "label": display_label,
+                            "bg": bg,
+                            "border": border,
+                            "fg": fg,
+                            "disabled": bool(disabled_trigger),
+                        }
+                    )
+            else:
+                st.session_state.pop("unload_mobile_sent_order", None)
+                st.session_state.pop("unload_mobile_sent_set", None)
+                st.session_state.pop("unload_mobile_undo_state", None)
+
+                for truck_num in sorted({int(t) for t in dirty_now}):
+                    t = int(truck_num)
+                    trigger_label = f"UnloadMobileMatrixTrigger {t}"
+                    if st.button(
+                        trigger_label,
+                        key=f"unload_mobile_matrix_trigger_{t}",
+                        width='stretch',
+                    ):
+                        _start_batch_flow_for_dirty_truck(t, set_unload_url_when_disabled=True)
+                        _mark_and_save()
+                        st.rerun()
+
+                    bg, border, fg = _truck_status_colors(t, status_color_map)
+                    mobile_rows.append(
+                        {
+                            "truck": t,
+                            "trigger": trigger_label,
+                            "label": str(t),
+                            "bg": bg,
+                            "border": border,
+                            "fg": fg,
+                            "disabled": False,
+                        }
+                    )
+
+            st.markdown(
                 """
-                <script>
-                (function() {
-                    try {
-                        const root = window.parent.document;
-                        const isMobile = () => {
-                            try {
-                                return window.parent.matchMedia('(max-width: 980px)').matches || window.parent.innerWidth <= 980;
-                            } catch (e) {
-                                return (window.parent.innerWidth || window.innerWidth || 1200) <= 980;
-                            }
-                        };
-                        if (!isMobile()) return;
-
-                        const isColumn = (node) => {
-                            if (!node || node.nodeType !== 1) return false;
-                            const testId = String(node.getAttribute('data-testid') || '').trim();
-                            if (testId === 'column') return true;
-                            return /\bstColumn\b/.test(String(node.className || ''));
-                        };
-                        const isRow = (node) => {
-                            if (!node || node.nodeType !== 1) return false;
-                            const testId = String(node.getAttribute('data-testid') || '').trim();
-                            if (testId === 'stHorizontalBlock') return true;
-                            return /\bstHorizontalBlock\b/.test(String(node.className || ''));
-                        };
-
-                        const apply = () => {
-                            const hosts = Array.from(
-                                root.querySelectorAll('[class*="st-key-dirty_truck_mobile_"], [class*="st-key-dirty_truck_"]')
-                            );
-                            if (!hosts.length) return;
-
-                            const rows = new Set();
-                            hosts.forEach((host) => {
-                                const col = host.closest('[data-testid="column"], .stColumn');
-                                if (!col) return;
-                                const row = col.parentElement;
-                                if (!isRow(row)) return;
-                                rows.add(row);
-                            });
-
-                            rows.forEach((row) => {
-                                const cols = Array.from(row.children || []).filter((node) => isColumn(node));
-                                if (!cols.length) return;
-                                row.style.setProperty('display', 'grid', 'important');
-                                row.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important');
-                                row.style.setProperty('column-gap', '0.62rem', 'important');
-                                row.style.setProperty('row-gap', '0.62rem', 'important');
-                                row.style.setProperty('align-items', 'stretch', 'important');
-                                row.style.setProperty('justify-items', 'stretch', 'important');
-                                cols.forEach((col) => {
-                                    col.style.setProperty('width', '100%', 'important');
-                                    col.style.setProperty('max-width', '100%', 'important');
-                                    col.style.setProperty('min-width', '0', 'important');
-                                });
-                            });
-
-                            const buttons = root.querySelectorAll(
-                                '[class*="st-key-dirty_truck_mobile_"] button, [class*="st-key-dirty_truck_"] button'
-                            );
-                            buttons.forEach((btn) => {
-                                btn.style.setProperty('width', '100%', 'important');
-                                btn.style.setProperty('max-width', '100%', 'important');
-                                btn.style.setProperty('min-width', '0', 'important');
-                            });
-                        };
-
-                        apply();
-                        setTimeout(apply, 70);
-                        setTimeout(apply, 220);
-                        setTimeout(apply, 520);
-                        setTimeout(apply, 900);
-                    } catch (e) {}
-                })();
-                </script>
+                <style>
+                div[class*="st-key-unload_mobile_matrix_trigger_"],
+                div[class*="st-key-unload_mobile_matrix_trigger_"] * {
+                    display: none !important;
+                    height: 0 !important;
+                    min-height: 0 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border: 0 !important;
+                }
+                .unload-mobile-matrix {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 0.62rem;
+                    width: 100%;
+                    margin-top: 0 !important;
+                }
+                .unload-mobile-matrix-btn {
+                    border-radius: 12px;
+                    min-height: 64px;
+                    font-weight: 900;
+                    font-size: 1.5rem;
+                    line-height: 1.02;
+                    color: #ffffff !important;
+                    -webkit-text-fill-color: #ffffff !important;
+                    -webkit-text-stroke-width: 0.6px;
+                    -webkit-text-stroke-color: rgba(0, 0, 0, 0.95);
+                    paint-order: stroke fill;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    letter-spacing: 0.01em;
+                    text-align: center;
+                    padding: 0.34rem 0.4rem;
+                    width: 100%;
+                    box-sizing: border-box;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+                    text-shadow: 0 0 0.35px rgba(0, 0, 0, 0.9);
+                    transition: filter 120ms ease, transform 80ms ease;
+                }
+                .unload-mobile-matrix-btn:active {
+                    transform: translateY(1px);
+                }
+                .unload-mobile-matrix-btn[data-unload-mobile-disabled="1"] {
+                    opacity: 0.56;
+                    filter: saturate(0.8);
+                }
+                </style>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_html=True,
             )
 
-        st.markdown(
-            """
-            <style>
-            [class*="st-key-dirty_truck_"] {
-                width: 100% !important;
-            }
-            [class*="st-key-dirty_truck_"] [data-testid="stButton"] {
-                width: 100% !important;
-                display: block !important;
-                min-width: 0 !important;
-            }
-            [class*="st-key-dirty_truck_"] button,
-            [class*="st-key-dirty_truck_"] button[kind="primary"] {
-                display: block !important;
-                width: 100% !important;
-                min-width: 100% !important;
-                max-width: 100% !important;
-            }
+            if mobile_rows:
+                grid_cards: list[str] = []
+                for row in mobile_rows:
+                    card_style = (
+                        f"background:{row['bg']}; border:1px solid {row['border']}; color:{row['fg']};"
+                        "text-shadow:0 0 0.45px rgba(0,0,0,0.75);"
+                    )
+                    grid_cards.append(
+                        (
+                            f"<button type='button' class='unload-mobile-matrix-btn' data-unload-mobile-trigger='{html.escape(str(row['trigger']))}' "
+                            f"data-unload-mobile-disabled='{'1' if bool(row.get('disabled')) else '0'}' "
+                            f"style='{card_style}'>"
+                            f"{html.escape(str(row['label']))}"
+                            "</button>"
+                        )
+                    )
 
-            [class*="st-key-dirty_truck_mobile_"] {
-                width: 100% !important;
-            }
-            [class*="st-key-dirty_truck_mobile_"] [data-testid="stButton"] {
-                width: 100% !important;
-                display: block !important;
-                min-width: 0 !important;
-            }
-            [class*="st-key-dirty_truck_mobile_"] button,
-            [class*="st-key-dirty_truck_mobile_"] button[kind="primary"] {
-                display: block !important;
-                width: 100% !important;
-                min-width: 100% !important;
-                max-width: 100% !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if batching_disabled_now:
-            order_key = "unload_mobile_sent_order"
-            sent_key = "unload_mobile_sent_set"
-
-            saved_order = []
-            for raw in (st.session_state.get(order_key) or []):
-                try:
-                    saved_order.append(int(raw))
-                except Exception:
-                    continue
-
-            if not saved_order:
-                saved_order = list(dirty_now)
-            else:
-                for truck_num in dirty_now:
-                    if truck_num not in saved_order:
-                        saved_order.append(truck_num)
-            st.session_state[order_key] = saved_order
-
-            sent_set = _normalize_spare_tracking_set(st.session_state.get(sent_key) or set())
-            st.session_state[sent_key] = sorted(sent_set)
-
-            status_color_map = _get_status_badge_colors()
-            cols_per_row = 2 if mobile_now else _truck_grid_columns(6)
-            for start in range(0, len(saved_order), cols_per_row):
-                row_vals = saved_order[start : start + cols_per_row]
-                row_cols = st.columns(cols_per_row)
-                for idx, truck_num in enumerate(row_vals):
-                    with row_cols[idx]:
-                        already_sent = (int(truck_num) in sent_set) or (int(truck_num) not in dirty_now)
-                        can_undo = _can_undo_mobile_unload_state(int(truck_num))
-                        if already_sent:
-                            placeholder_label = (
-                                f"{int(truck_num)} - Tap to undo"
-                                if mobile_now and can_undo
-                                else str(int(truck_num))
-                            )
-                            if st.button(
-                                placeholder_label,
-                                key=f"dirty_truck_mobile_{int(truck_num)}",
-                                width='stretch',
-                                type="primary",
-                                disabled=not can_undo,
-                            ):
-                                if can_undo:
-                                    sent_set.discard(int(truck_num))
-                                    st.session_state[sent_key] = sorted(sent_set)
-                                    _undo_mobile_unload_state(int(truck_num))
-                                st.rerun()
-                        else:
-                            if st.button(
-                                str(int(truck_num)),
-                                key=f"dirty_truck_mobile_{int(truck_num)}",
-                                width='stretch',
-                                type="primary",
-                            ):
-                                _capture_mobile_unload_undo_state(int(truck_num))
-                                sent_set.add(int(truck_num))
-                                st.session_state[sent_key] = sorted(sent_set)
-                                _complete_unload_with_batching_disabled(int(truck_num))
-                                st.rerun()
-
-            visible_labels = [str(int(truck_num)) for truck_num in saved_order]
-            visible_color_map: dict[str, dict[str, str]] = {}
-            for label in visible_labels:
-                truck_num = int(label)
-                bg, border, fg = _truck_status_colors(int(truck_num), status_color_map)
-                visible_color_map[str(truck_num)] = {"bg": bg, "border": border, "fg": fg}
-
-            _apply_primary_button_color_map_for_labels(visible_color_map)
-            if mobile_now:
-                _force_mobile_button_grid(
-                    visible_labels,
-                    mobile_cols=2,
-                    primary_only=True,
-                    cell_gap_rem=0.62,
-                    min_button_height_px=64,
+                matrix_html = (
+                    "<div data-unload-mobile-matrix='1' class='unload-mobile-matrix'>"
+                    + "".join(grid_cards)
+                    + "</div>"
                 )
-                _enforce_unload_mobile_two_col_grid()
+                st.markdown(matrix_html, unsafe_allow_html=True)
+
+                components.html(
+                    """
+                    <script>
+                    (function(){
+                        try {
+                            const root = window.parent.document;
+                            const normalize = (value) => String(value || '').replace(/\u2063/g, '').trim();
+
+                            const hideTriggers = () => {
+                                const buttons = Array.from(root.querySelectorAll('button'));
+                                buttons.forEach((btn) => {
+                                    const label = normalize(btn.innerText || btn.textContent || '');
+                                    if (!label.startsWith('UnloadMobileMatrixTrigger ')) return;
+                                    const host = btn.closest('[data-testid="stButton"]') || btn.parentElement;
+                                    if (host) host.style.setProperty('display', 'none', 'important');
+                                });
+                            };
+
+                            const bindMatrix = () => {
+                                const cards = Array.from(root.querySelectorAll('[data-unload-mobile-trigger]'));
+                                cards.forEach((card) => {
+                                    if (card.dataset.boundUnloadMobileMatrix === '1') return;
+                                    const triggerLabel = normalize(card.getAttribute('data-unload-mobile-trigger') || '');
+                                    const isDisabled = String(card.getAttribute('data-unload-mobile-disabled') || '') === '1';
+                                    const activate = () => {
+                                        if (!triggerLabel || isDisabled) return;
+                                        const buttons = Array.from(root.querySelectorAll('button'));
+                                        const trigger = buttons.find((btn) => normalize(btn.innerText || btn.textContent || '') === triggerLabel);
+                                        if (trigger) trigger.click();
+                                    };
+                                    card.addEventListener('click', (event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        activate();
+                                    });
+                                    card.addEventListener('keydown', (event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            activate();
+                                        }
+                                    });
+                                    card.dataset.boundUnloadMobileMatrix = '1';
+                                });
+                            };
+
+                            hideTriggers();
+                            bindMatrix();
+                            setTimeout(() => { hideTriggers(); bindMatrix(); }, 80);
+                            setTimeout(() => { hideTriggers(); bindMatrix(); }, 260);
+                            setTimeout(() => { hideTriggers(); bindMatrix(); }, 520);
+                        } catch (e) {}
+                    })();
+                    </script>
+                    """,
+                    height=0,
+                    width=0,
+                )
+            else:
+                st.caption("No Dirty trucks available.")
+
             return
 
         st.session_state.pop("unload_mobile_sent_order", None)
         st.session_state.pop("unload_mobile_sent_set", None)
         st.session_state.pop("unload_mobile_undo_state", None)
 
-        # Render dirty truck bubbles as Streamlit buttons for in-place navigation
-        default_unload_cols = 2 if mobile_now else 6
-        clicked_truck = render_numeric_truck_buttons(trucks, "dirty_truck", default_cols=default_unload_cols)
-        _enforce_unload_mobile_two_col_grid()
+        # Desktop/tablet path
+        clicked_truck = render_numeric_truck_buttons(trucks, "dirty_truck", default_cols=6)
         if clicked_truck is not None:
             t = int(clicked_truck)
-            if batching_disabled_now:
-                _complete_unload_with_batching_disabled(int(t))
-                st.rerun()
-            else:
-                st.session_state["unload_truck_select"] = int(t)
-                st.session_state.active_screen = "BATCH"
-                _set_query_params(page="BATCH", pick=str(int(t)))
-                _mark_and_save()
-                st.rerun()
+            _start_batch_flow_for_dirty_truck(t, set_unload_url_when_disabled=True)
+            _mark_and_save()
+            st.rerun()
 
     with unload_main_col:
         render_page_heading("Unload Management")
@@ -32118,84 +32736,120 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
     with audit_main_col:
         if selected_audit_truck_num is None and all_fleet_audit_trucks:
-            audit_cols_per_row = 1 if is_mobile_audit else 6
+            audit_cols_per_row = 2 if is_mobile_audit else 6
             audit_button_css: list[str] = [
                 "<style>",
                 ".audit-fleet-truck-grid-note{opacity:0.82;font-size:0.85rem;margin:0.25rem 0 0.5rem 0;}",
             ]
             audit_grid_entries: list[int | str] = list(fleet_audit_trucks) + ["SHOW_ALL"]
+            audit_button_labels: list[str] = []
 
-            for start_idx in range(0, len(audit_grid_entries), audit_cols_per_row):
-                row_trucks = audit_grid_entries[start_idx : start_idx + audit_cols_per_row]
-                row_cols = st.columns(audit_cols_per_row)
-                for col_idx, truck_num in enumerate(row_trucks):
-                    is_show_all_btn = str(truck_num) == "SHOW_ALL"
-                    if is_show_all_btn:
-                        btn_key = "audit_fleet_pick_show_all"
-                        btn_label = "Show All"
-                        bg, border, fg = ("#1f2937", "#64748b", "#e2e8f0")
-                    else:
-                        tnum = int(truck_num)
-                        btn_key = f"audit_fleet_pick_{tnum}"
-                        btn_label = str(tnum)
-                        bg, border, fg = _truck_status_colors(tnum)
+            for truck_num in audit_grid_entries:
+                is_show_all_btn = str(truck_num) == "SHOW_ALL"
+                if is_show_all_btn:
+                    btn_key = "audit_fleet_pick_show_all"
+                    btn_label = "Show All"
+                    bg, border, fg = ("#1f2937", "#64748b", "#e2e8f0")
+                else:
+                    tnum = int(truck_num)
+                    btn_key = f"audit_fleet_pick_{tnum}"
+                    btn_label = str(tnum)
+                    bg, border, fg = _truck_status_colors(tnum)
+                audit_button_labels.append(btn_label)
 
-                    audit_button_css.append(
-                        (
-                            f".st-key-{btn_key} [data-testid='stButton'],"
-                            f".st-key-{btn_key} .stButton{{"
-                            "width:100% !important;"
-                            "display:block !important;"
-                            "}"
-                        )
+                audit_button_css.append(
+                    (
+                        f".st-key-{btn_key} [data-testid='stButton'],"
+                        f".st-key-{btn_key} .stButton{{"
+                        "width:100% !important;"
+                        "display:block !important;"
+                        "}"
                     )
-                    audit_button_css.append(
-                        (
-                            f".st-key-{btn_key} button{{"
-                            f"background:{bg} !important;"
-                            f"border:1px solid {border} !important;"
-                            f"color:{fg} !important;"
-                            "font-weight:900 !important;"
-                            "font-size:clamp(1.12rem, 1.45vw, 1.55rem) !important;"
-                            "line-height:1 !important;"
-                            "min-height:clamp(58px, 4.6vw, 70px) !important;"
-                            "width:100% !important;"
-                            "max-width:100% !important;"
-                            "min-width:0 !important;"
-                            "height:clamp(58px, 4.6vw, 70px) !important;"
-                            "border-radius:12px !important;"
-                            "display:flex !important;"
-                            "align-items:center !important;"
-                            "justify-content:center !important;"
-                            "text-align:center !important;"
-                            "padding:0 !important;"
-                            "}"
-                        )
+                )
+                audit_button_css.append(
+                    (
+                        f".st-key-{btn_key} button{{"
+                        f"background:{bg} !important;"
+                        f"border:1px solid {border} !important;"
+                        f"color:{fg} !important;"
+                        "font-weight:900 !important;"
+                        "font-size:clamp(1.12rem, 1.45vw, 1.55rem) !important;"
+                        "line-height:1 !important;"
+                        "min-height:clamp(58px, 4.6vw, 70px) !important;"
+                        "width:100% !important;"
+                        "max-width:100% !important;"
+                        "min-width:0 !important;"
+                        "height:clamp(58px, 4.6vw, 70px) !important;"
+                        "border-radius:12px !important;"
+                        "display:flex !important;"
+                        "align-items:center !important;"
+                        "justify-content:center !important;"
+                        "text-align:center !important;"
+                        "padding:0 !important;"
+                        "}"
                     )
-                    audit_button_css.append(
-                        (
-                            f".st-key-{btn_key} button p,.st-key-{btn_key} button span{{"
-                            f"color:{fg} !important;"
-                            "font-weight:900 !important;"
-                            f"font-size:{'clamp(0.92rem, 1vw, 1.05rem)' if is_show_all_btn else 'clamp(1.12rem, 1.45vw, 1.55rem)'} !important;"
-                            "line-height:1 !important;"
-                            "margin:0 !important;"
-                            "padding:0 !important;"
-                            "text-align:center !important;"
-                            "}"
-                        )
+                )
+                audit_button_css.append(
+                    (
+                        f".st-key-{btn_key} button p,.st-key-{btn_key} button span{{"
+                        f"color:{fg} !important;"
+                        "font-weight:900 !important;"
+                        f"font-size:{'clamp(0.92rem, 1vw, 1.05rem)' if is_show_all_btn else 'clamp(1.12rem, 1.45vw, 1.55rem)'} !important;"
+                        "line-height:1 !important;"
+                        "margin:0 !important;"
+                        "padding:0 !important;"
+                        "text-align:center !important;"
+                        "}"
                     )
-
-                    with row_cols[col_idx]:
-                        if st.button(btn_label, key=btn_key, width='stretch', type="primary"):
-                            if is_show_all_btn:
-                                st.session_state[audit_show_all_dialog_key] = True
-                            else:
-                                st.session_state.audit_fleet_selected_truck = int(tnum)
-                            st.rerun()
+                )
 
             audit_button_css.append("</style>")
+            if is_mobile_audit:
+                audit_button_css.append(
+                    "<style>"
+                    "@media (max-width: 980px){"
+                    ".st-key-audit_truck_button_grid div[data-testid='stHorizontalBlock']{"
+                    "display:grid !important;"
+                    "grid-template-columns:repeat(2,1fr) !important;"
+                    "gap:0.62rem !important;"
+                    "}"
+                    ".st-key-audit_truck_button_grid div[data-testid='stHorizontalBlock']>div[data-testid='column']{"
+                    "min-width:0 !important;"
+                    "}"
+                    "}"
+                    "</style>"
+                )
             st.markdown("".join(audit_button_css), unsafe_allow_html=True)
+
+            with st.container(key="audit_truck_button_grid"):
+                for start_idx in range(0, len(audit_grid_entries), audit_cols_per_row):
+                    row_trucks = audit_grid_entries[start_idx : start_idx + audit_cols_per_row]
+                    row_cols = st.columns(audit_cols_per_row)
+                    for col_idx, truck_num in enumerate(row_trucks):
+                        is_show_all_btn = str(truck_num) == "SHOW_ALL"
+                        if is_show_all_btn:
+                            btn_key = "audit_fleet_pick_show_all"
+                            btn_label = "Show All"
+                        else:
+                            tnum = int(truck_num)
+                            btn_key = f"audit_fleet_pick_{tnum}"
+                            btn_label = str(tnum)
+                        with row_cols[col_idx]:
+                            if st.button(btn_label, key=btn_key, width='stretch', type="primary"):
+                                if is_show_all_btn:
+                                    st.session_state[audit_show_all_dialog_key] = True
+                                else:
+                                    st.session_state.audit_fleet_selected_truck = int(tnum)
+                                st.rerun()
+
+            if is_mobile_audit:
+                _force_mobile_button_grid(
+                    audit_button_labels,
+                    mobile_cols=2,
+                    primary_only=True,
+                    cell_gap_rem=0.62,
+                    min_button_height_px=64,
+                )
 
             if st.session_state.get(audit_show_all_dialog_key):
                 def _dismiss_audit_show_all_dialog():
@@ -32558,8 +33212,6 @@ elif st.session_state.active_screen == "SHORTS":
                 rows_to_save = edited if edited is not None else st.session_state.shorts.get(int(shorts_data_truck), [{"item": "None", "qty": None, "note": ""}])
                 if save_shorts_stop_timer(int(source_truck), initials, rows_to_save):
                     _navigate_after_shorts_save(int(source_truck))
-
-_render_pending_auth_portals(authenticator)
 
 _emit_startup_timed_step(6, "Startup load complete")
 _emit_startup_total_once()

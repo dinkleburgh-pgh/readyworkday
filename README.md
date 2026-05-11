@@ -132,7 +132,7 @@ Use a **Git-based Stack** in Portainer.
 
 ### Option B: No-build Portainer stack (recommended if you get `mkdir /.docker: permission denied`)
 
-1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:v1.7.2` exists (published from GitHub Actions).
+1. Ensure image `ghcr.io/dinkleburgh-pgh/readyworkday:latest` exists (published from GitHub Actions on pushes to `main`).
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.7.py`
@@ -140,7 +140,8 @@ Use a **Git-based Stack** in Portainer.
 4. Deploy and open `http://<docker-host>:8501`.
 
 Notes:
-- The Portainer compose file is pinned to image tag `v1.7.2` to avoid stale `latest` pulls.
+- The Portainer compose file now tracks `ghcr.io/dinkleburgh-pgh/readyworkday:latest`.
+- After future pushes to `main`, you can just tell Portainer to pull/redeploy the stack image instead of editing compose version/build values.
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 - Runtime state/auth files now persist under `/app/data` inside the container; point `TRUCKAPP_DATA_DIR` at a durable host path so setup/auth is preserved across recreate/redeploy.

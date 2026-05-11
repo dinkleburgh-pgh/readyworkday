@@ -5,8 +5,6 @@ set -eu
 APP_PATH=""
 
 : "${APP_FILE:=app_unloadv1.7.py}"
-: "${APP_VERSION:=1.7.2}"
-: "${APP_BUILD:=2}"
 if [ -f "${APP_FILE}" ]; then
   APP_PATH="${APP_FILE}"
 fi
@@ -29,6 +27,22 @@ if [ -z "$APP_PATH" ]; then
   echo "Top-level files in /app:" >&2
   ls -la /app >&2 || true
   exit 1
+fi
+
+APP_VERSION="${APP_VERSION:-}"
+APP_BUILD="${APP_BUILD:-}"
+
+if [ -z "$APP_VERSION" ]; then
+  APP_VERSION="$(grep -m1 -E '^[[:space:]]*_APP_VERSION[[:space:]]*=' "$APP_PATH" | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+fi
+if [ -z "$APP_BUILD" ]; then
+  APP_BUILD="$(grep -m1 -E '^[[:space:]]*_APP_BUILD[[:space:]]*=' "$APP_PATH" | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/' || true)"
+fi
+if [ -z "$APP_VERSION" ]; then
+  APP_VERSION="unknown"
+fi
+if [ -z "$APP_BUILD" ]; then
+  APP_BUILD="unknown"
 fi
 
 echo "Launching Streamlit app: $APP_PATH"

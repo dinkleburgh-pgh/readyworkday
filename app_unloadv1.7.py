@@ -26868,6 +26868,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 st.markdown(
                     """
                     <style>
+                    [class*="st-key-sup_run_day_spares_add"] button {
+                        background: #1d4ed8 !important;
+                        border: 1px solid #2563eb !important;
+                        color: #eff6ff !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
                     [class*="st-key-sup_run_day_spares_finish"] button {
                         background: #166534 !important;
                         border: 1px solid #15803d !important;
@@ -26876,6 +26884,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         font-weight: 900 !important;
                         min-height: 52px !important;
                         letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_run_day_swap_remove_"] button {
+                        background: #7f1d1d !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        font-size: 0.96rem !important;
+                        font-weight: 800 !important;
+                        min-height: 42px !important;
                     }
                     [class*="st-key-sup_run_day_spares_back"] button {
                         background: #1e3a5f !important;
@@ -26911,6 +26927,27 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 run_day_swap_load_key = "sup_run_day_swap_dialog_load_on"
                 run_day_swap_synced_route_key = "sup_run_day_swap_dialog_synced_route"
 
+                def _set_run_day_swap_feedback(ok_value: bool, message_value: str):
+                    st.session_state[run_day_swap_feedback_key] = {
+                        "ok": bool(ok_value),
+                        "message": str(message_value or "").strip(),
+                    }
+
+                def _clear_run_day_swap_selection():
+                    st.session_state[run_day_swap_route_key] = None
+                    st.session_state.pop(run_day_swap_load_key, None)
+                    st.session_state.pop(run_day_swap_synced_route_key, None)
+
+                def _apply_run_day_swap_selection(route_pick: int | None, load_on_pick: int | None) -> tuple[bool, str]:
+                    if route_pick is None:
+                        return False, "Select a Truck route first."
+                    if load_on_pick is None:
+                        return False, "Select a Load On truck first."
+                    ok_swap, swap_message = _apply_manual_route_change(str(route_pick), str(load_on_pick))
+                    if ok_swap:
+                        _mark_and_save()
+                    return bool(ok_swap), str(swap_message or "").strip()
+
                 pending_swap_feedback = st.session_state.pop(run_day_swap_feedback_key, None)
                 if isinstance(pending_swap_feedback, dict):
                     feedback_msg = str(pending_swap_feedback.get("message") or "").strip()
@@ -26926,7 +26963,6 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 loaded_trucks_now = {int(t) for t in (st.session_state.get("loaded_set") or set())}
                 active_swaps = _active_route_swap_assignments()
 
-                # Route dropdown: exclude OOS trucks (can't swap their route)
                 truck_dropdown_options = [
                     int(t)
                     for t in fleet_dropdown_options
@@ -26939,13 +26975,52 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     except Exception:
                         return None
 
+                current_truck_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
                 if truck_dropdown_options:
-                    current_truck_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
                     if current_truck_pick not in truck_dropdown_options:
-                        st.session_state[run_day_swap_route_key] = int(truck_dropdown_options[0])
+                        st.session_state[run_day_swap_route_key] = None
+                else:
+                    st.session_state[run_day_swap_route_key] = None
 
-                # Load On dropdown: exclude trucks unavailable as cover, but keep the
-                # selected route itself so "same truck = reset" still works
+                current_swap_items = sorted((int(route_num), int(truck_num)) for route_num, truck_num in active_swaps.items())
+                st.markdown(
+                    "<p style='margin:0 0 0.45rem 0;color:rgba(250,250,250,0.58);font-size:0.875rem;'>"
+                    "Add or update as many route swaps as needed before moving to the next step."
+                    "</p>",
+                    unsafe_allow_html=True,
+                )
+                if current_swap_items:
+                    st.markdown(
+                        "<div style='margin:0 0 0.35rem 0;font-size:0.94rem;font-weight:800;color:#e2e8f0;'>Current Route Swaps</div>",
+                        unsafe_allow_html=True,
+                    )
+                    for route_num, truck_num in current_swap_items:
+                        swap_info_col, swap_remove_col = st.columns([3.3, 1.1], gap="small")
+                        with swap_info_col:
+                            st.markdown(
+                                (
+                                    "<div style='padding:0.68rem 0.8rem; border-radius:10px; "
+                                    "border:1px solid rgba(59,130,246,0.34); background:rgba(30,41,59,0.72); "
+                                    "color:#dbeafe; font-size:1.02rem; font-weight:800;'>"
+                                    f"Route {int(route_num)} -> Truck {int(truck_num)}"
+                                    "</div>"
+                                ),
+                                unsafe_allow_html=True,
+                            )
+                        with swap_remove_col:
+                            if st.button(
+                                "Remove",
+                                width='stretch',
+                                key=f"sup_run_day_swap_remove_{int(route_num)}",
+                            ):
+                                ok_swap, swap_message = _apply_run_day_swap_selection(int(route_num), int(route_num))
+                                _set_run_day_swap_feedback(ok_swap, swap_message or f"Route {int(route_num)} reset.")
+                                if ok_swap:
+                                    _clear_run_day_swap_selection()
+                                st.rerun()
+                else:
+                    st.caption("No route swaps set yet.")
+
                 current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
                 synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
                 already_covering = set(_active_cover_truck_usage(exclude_route=current_route_pick).keys())
@@ -26956,7 +27031,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if int(t) not in load_on_excluded or int(t) == (current_route_pick or -1)
                 ]
 
-                if load_on_dropdown_options:
+                if current_route_pick is not None and load_on_dropdown_options:
                     preferred_load_pick = None
                     if current_route_pick is not None:
                         preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
@@ -26970,23 +27045,34 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     elif current_load_pick not in load_on_dropdown_options:
                         fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
                         st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
+                else:
+                    st.session_state.pop(run_day_swap_load_key, None)
+                    st.session_state.pop(run_day_swap_synced_route_key, None)
 
+                selected_route_pick = None
                 if truck_dropdown_options:
-                    st.selectbox(
+                    selected_route_pick = st.selectbox(
                         "Truck",
-                        options=truck_dropdown_options,
+                        options=[None, *truck_dropdown_options],
                         key=run_day_swap_route_key,
                         format_func=lambda truck_num: (
-                            f"Truck {int(truck_num)} \u2192 Truck {int(active_swaps[int(truck_num)])} (update swap)"
-                            if int(truck_num) in active_swaps
-                            else f"Truck {int(truck_num)}"
+                            "Select route truck..."
+                            if truck_num is None
+                            else (
+                                f"Truck {int(truck_num)} \u2192 Truck {int(active_swaps[int(truck_num)])} (update swap)"
+                                if int(truck_num) in active_swaps
+                                else f"Truck {int(truck_num)}"
+                            )
                         ),
                     )
                 else:
                     st.caption("No eligible routes available.")
 
-                if load_on_dropdown_options:
-                    st.selectbox(
+                current_route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+
+                selected_load_pick = None
+                if current_route_pick is not None and load_on_dropdown_options:
+                    selected_load_pick = st.selectbox(
                         "Load On",
                         options=load_on_dropdown_options,
                         key=run_day_swap_load_key,
@@ -26996,36 +27082,50 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             else f"Truck {int(truck_num)}"
                         ),
                     )
+                elif current_route_pick is None:
+                    st.caption("Select a route truck to add or update a route swap.")
                 else:
                     st.caption("No eligible trucks available for Load On.")
 
-                if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
-                    route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
-                    load_on_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
-                    if route_pick is not None and load_on_pick is not None:
-                        ok_swap, swap_message = _apply_manual_route_change(str(route_pick), str(load_on_pick))
-                        if not ok_swap:
-                            st.session_state[run_day_swap_feedback_key] = {
-                                "ok": False,
-                                "message": str(swap_message),
-                            }
-                            st.rerun()
-                        _mark_and_save()
-                        if swap_message:
-                            _queue_management_confirmation(str(swap_message))
-                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
-                    st.rerun()
+                add_swap_col, continue_swap_col = st.columns(2, gap="small")
+                with add_swap_col:
+                    if st.button("Add / Update Swap", width='stretch', key="sup_run_day_spares_add"):
+                        route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+                        load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
+                        ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
+                        _set_run_day_swap_feedback(ok_swap, swap_message)
+                        if ok_swap:
+                            _clear_run_day_swap_selection()
+                        st.rerun()
+
+                with continue_swap_col:
+                    if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
+                        route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+                        load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
+                        if route_pick is not None:
+                            ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
+                            if not ok_swap:
+                                _set_run_day_swap_feedback(False, swap_message)
+                                st.rerun()
+                            if swap_message:
+                                _queue_management_confirmation(str(swap_message))
+                        _clear_run_day_swap_selection()
+                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                        st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
+                    _clear_run_day_swap_selection()
                     _open_supervisor_dialog("sup_run_day_specials_dialog_open")
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
+                    _clear_run_day_swap_selection()
                     st.session_state["sup_run_day_flow_active"] = True
                     _open_supervisor_dialog("sup_dust_clothes_dialog_open")
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
+                    _clear_run_day_swap_selection()
                     st.session_state["sup_run_day_spares_dialog_open"] = False
                     st.session_state["sup_run_day_flow_active"] = False
                     st.rerun()

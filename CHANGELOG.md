@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.7.4 - 2026-05-12
+
+1. Updated app metadata release to **v1.7.4** with release date **20260512**.
+2. Fixed random sign-outs on page refresh: added explicit `cookie_controller.get_cookie()` call (streamlit-authenticator 0.4.x) and increased silent cookie retry attempts from 2 to 5.
+3. Refactored `_current_load_day_remaining_breakdown()` to classify remaining trucks by the new truck-type system (`_get_truck_type()`) instead of the day's dust-garment selection.
+4. Added Dust / Uniform / Spare remaining-trucks counter to the LOAD page main column, updating dynamically as trucks are loaded.
+5. Added editable truck type (Uniform/Dust/Spare) to Management → Manage Fleet with per-truck Save/Reset, persisted in `truck_fleet.json`.
+6. Fixed mobile LOAD page: moved Audit button to last position to reduce accidental taps; added 80 px spacer so the fixed pace bar no longer covers truck buttons.
+
 ## v1.7.3 - 2026-05-11
 
 1. Updated app metadata release to **v1.7.3** with release date **20260511** and build 14.

@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.4"
 _APP_DATE = "20260512"  
-_APP_BUILD = 24
+_APP_BUILD = 25
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -11553,6 +11553,8 @@ def _force_mobile_button_grid(
                     node.style.removeProperty('flex');
                     node.style.removeProperty('width');
                     node.style.removeProperty('max-width');
+                    node.style.removeProperty('grid-column');
+                    node.style.removeProperty('grid-row');
                 }};
                 const resetButton = (node) => {{
                     if (!node) return;
@@ -11611,6 +11613,34 @@ def _force_mobile_button_grid(
                         if (rowSlots.length < 2 || rowSlots.length > 24) return;
                         if (!groupMap.has(container)) groupMap.set(container, {{ buttons: [], slots: rowSlots }});
                         groupMap.get(container).buttons.push(btn);
+                    }});
+
+                    // Fallback: identify row containers directly so every numeric row is captured
+                    // even when button wrappers differ from expected Streamlit nesting.
+                    const rowContainers = Array.from(
+                        root.querySelectorAll('[data-testid="stHorizontalBlock"], .stHorizontalBlock')
+                    );
+                    rowContainers.forEach((container) => {{
+                        if (!container || groupMap.has(container)) return;
+                        const rowSlots = Array.from(container.children || []).filter((node) => isColumnSlot(node));
+                        if (rowSlots.length < 2 || rowSlots.length > 24) return;
+
+                        const rowButtons = [];
+                        let hasExpected = false;
+                        rowSlots.forEach((slot) => {{
+                            const slotButtons = Array.from(slot.querySelectorAll(selector));
+                            slotButtons.forEach((btn) => {{
+                                if (btn.closest('[data-testid="stSidebar"]')) return;
+                                const label = canonicalLabel(btn.innerText || btn.textContent || '');
+                                if (!label || !expected.has(label)) return;
+                                hasExpected = true;
+                                rowButtons.push(btn);
+                            }});
+                        }});
+
+                        if (hasExpected) {{
+                            groupMap.set(container, {{ buttons: rowButtons, slots: rowSlots }});
+                        }}
                     }});
 
                     groupMap.forEach((groupData, container) => {{

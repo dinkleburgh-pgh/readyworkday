@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.4"
 _APP_DATE = "20260512"  
-_APP_BUILD = 23
+_APP_BUILD = 24
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -1119,6 +1119,7 @@ _CHAT_CENSOR_PATTERN = (
 )
 
 AUTH_ROLE_ADMIN = "fleet"
+AUTH_ROLE_ATL = "atl"
 AUTH_ROLE_SUPERVISOR = "supervisor"
 AUTH_ROLE_LEAD = "lead"
 AUTH_ROLE_LOADER = "loader"
@@ -1126,6 +1127,7 @@ AUTH_ROLE_UNLOADER = "unloader"
 AUTH_ROLE_GUEST = "guest"
 AUTH_ROLE_OPTIONS = [
     AUTH_ROLE_ADMIN,
+    AUTH_ROLE_ATL,
     AUTH_ROLE_SUPERVISOR,
     AUTH_ROLE_LEAD,
     AUTH_ROLE_LOADER,
@@ -1134,6 +1136,7 @@ AUTH_ROLE_OPTIONS = [
 
 AUTH_ROLE_LABELS = {
     AUTH_ROLE_ADMIN: "Fleet",
+    AUTH_ROLE_ATL: "ATL",
     AUTH_ROLE_SUPERVISOR: "Supervisor",
     AUTH_ROLE_LEAD: "Lead",
     AUTH_ROLE_LOADER: "Load",
@@ -1143,6 +1146,7 @@ AUTH_ROLE_LABELS = {
 
 ROLE_SCREEN_ACCESS = {
     AUTH_ROLE_ADMIN: set(APP_VALID_PAGES),
+    AUTH_ROLE_ATL: set(APP_VALID_PAGES),
     AUTH_ROLE_SUPERVISOR: set(APP_VALID_PAGES),
     AUTH_ROLE_LEAD: set(APP_VALID_PAGES),
     AUTH_ROLE_LOADER: {
@@ -1163,6 +1167,9 @@ ROLE_SCREEN_ACCESS = {
 ROLE_WORKFLOW_SHORT_SHEET_ACCESS = "short_sheet_access"
 ROLE_WORKFLOW_DEFAULTS = {
     AUTH_ROLE_ADMIN: {
+        ROLE_WORKFLOW_SHORT_SHEET_ACCESS: True,
+    },
+    AUTH_ROLE_ATL: {
         ROLE_WORKFLOW_SHORT_SHEET_ACCESS: True,
     },
     AUTH_ROLE_SUPERVISOR: {
@@ -4640,6 +4647,7 @@ def _normalize_auth_role(role_value) -> str:
     legacy_role_map = {
         "admin": AUTH_ROLE_ADMIN,
         "fleet": AUTH_ROLE_ADMIN,
+        "atl": AUTH_ROLE_ATL,
         "supervisor": AUTH_ROLE_SUPERVISOR,
         "lead": AUTH_ROLE_LEAD,
         "management": AUTH_ROLE_ADMIN,
@@ -4661,7 +4669,7 @@ def _auth_role_label(role_value) -> str:
 
 def _is_fleet_equivalent_role(role_value) -> bool:
     role = _normalize_auth_role(role_value)
-    return role in {AUTH_ROLE_ADMIN, AUTH_ROLE_SUPERVISOR, AUTH_ROLE_LEAD}
+    return role in {AUTH_ROLE_ADMIN, AUTH_ROLE_ATL, AUTH_ROLE_SUPERVISOR, AUTH_ROLE_LEAD}
 
 
 def _allowed_screens_for_role(role_value) -> set[str]:
@@ -4767,7 +4775,7 @@ def _default_screen_for_role(role_value) -> str:
         return "IN_PROGRESS"
     if role == AUTH_ROLE_LOADER:
         return "LOAD"
-    if role in {AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN, AUTH_ROLE_LEAD}:
+    if role in {AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN, AUTH_ROLE_ATL, AUTH_ROLE_LEAD}:
         return "UNLOAD"
     return "IN_PROGRESS"
 
@@ -7187,7 +7195,14 @@ def _show_account_request_portal():
     def _request_dialog():
         st.caption("Submit an account request. Fleet or Lead users must approve it before you can sign in.")
 
-        request_role_options = [AUTH_ROLE_LOADER, AUTH_ROLE_UNLOADER, AUTH_ROLE_LEAD, AUTH_ROLE_SUPERVISOR, AUTH_ROLE_ADMIN]
+        request_role_options = [
+            AUTH_ROLE_LOADER,
+            AUTH_ROLE_UNLOADER,
+            AUTH_ROLE_LEAD,
+            AUTH_ROLE_SUPERVISOR,
+            AUTH_ROLE_ATL,
+            AUTH_ROLE_ADMIN,
+        ]
         request_role_labels = [AUTH_ROLE_LABELS[r] for r in request_role_options]
         request_role_by_label = {AUTH_ROLE_LABELS[r]: r for r in request_role_options}
 
@@ -24308,37 +24323,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
         elif st.session_state.active_screen == "STATUS_SHOP":
             pass
         elif st.session_state.active_screen == "STATUS_LOADED":
-            if _is_mobile_client():
-                remaining_breakdown = _current_load_day_remaining_breakdown()
-                loaded_summary_cards = [
-                    ("Dusts Left", remaining_breakdown["dusts_left"], "rgba(190,24,93,0.34)", "rgba(244,114,182,0.58)", "#fbcfe8"),
-                    ("Uniforms Left", remaining_breakdown["uniforms_left"], "rgba(30,64,175,0.30)", "rgba(96,165,250,0.52)", "#dbeafe"),
-                    ("Spares Left", remaining_breakdown["spares_left"], "rgba(21,128,61,0.28)", "rgba(74,222,128,0.48)", "#dcfce7"),
-                    ("Total Left", remaining_breakdown["total_left"], "rgba(15,23,42,0.62)", "rgba(148,163,184,0.42)", "#f8fafc"),
-                ]
-                summary_markup = "".join(
-                    (
-                        "<div class='status-loaded-mobile-summary-card' "
-                        f"style='background:{background}; border-color:{border};'>"
-                        f"<div class='status-loaded-mobile-summary-label'>{html.escape(label)}</div>"
-                        f"<div class='status-loaded-mobile-summary-value' style='color:{value_color};'>{int(value)}</div>"
-                        "</div>"
-                    )
-                    for label, value, background, border, value_color in loaded_summary_cards
-                )
-                st.markdown(
-                    (
-                        "<style>"
-                        ".status-loaded-mobile-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.65rem;margin:0 0 0.8rem 0;}"
-                        ".status-loaded-mobile-summary-card{min-height:88px;padding:0.8rem 0.7rem;border:1px solid;border-radius:14px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 10px 24px rgba(0,0,0,0.18);text-align:center;}"
-                        ".status-loaded-mobile-summary-label{font-size:0.74rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;opacity:0.82;line-height:1.2;}"
-                        ".status-loaded-mobile-summary-value{font-size:1.9rem;font-weight:900;line-height:1.0;margin-top:0.35rem;}"
-                        "</style>"
-                        f"<div class='status-loaded-mobile-summary-grid'>{summary_markup}</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-
             sort_options = ["Numarical", "Load Order"]
             stored_sort_mode = str(st.session_state.get("status_loaded_sort_mode") or "Numarical")
             if stored_sort_mode not in sort_options:

@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 29
+_APP_BUILD = 31
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -26974,6 +26974,10 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         border-radius: 10px !important;
                         display: flex !important;
                         align-items: center !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_dust_clothes_"] div[data-testid="stCheckbox"] > label:has(input[type="checkbox"]:checked) {
+                        border-color: rgba(34, 197, 94, 0.95) !important;
+                        background: rgba(22, 101, 52, 0.35) !important;
                     }
                     div[role="dialog"] div[class*="st-key-sup_dust_clothes_"] div[data-testid="stCheckbox"] input[type="checkbox"] {
                         transform: scale(1.25) !important;

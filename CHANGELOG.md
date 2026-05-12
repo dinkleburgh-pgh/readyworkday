@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 30 - 2026-05-12
+
+1. Bumped build to **30**.
+2. Added green highlight (checked state) to Step 1/4 Run Day dust garment checkboxes, matching the Step 3/4 bubble style.
+3. Fixed `DUST_GARMENT_TRUCK_OPTIONS` fallback to exclude truck 90 (not in fleet) in addition to 91.
+4. Updated changelog skill to default to build-only bumps; version changes now require explicit user request.
+
 ## v1.7.5 - 2026-05-12
 
 1. Updated app metadata release to **v1.7.5** with release date **20260512**.

@@ -1,0 +1,46 @@
+{
+  "users": {
+    "nate": {
+      "name": "nate",
+      "password": "$2b$12$hZ91Dg5FjhbVnouH/4/n.e.EwLCCXK1trhLpjm/sRcr2uc6mvfYqy",
+      "role": "lead",
+      "enabled": true
+    },
+    "kyle": {
+      "name": "Kyle",
+      "password": "$2b$12$azjkSJqENRi8Rlaul9mFv.uLjNuMjD4ZLenw9I0lrlQ.s5CKJ3fK.",
+      "role": "fleet",
+      "enabled": true
+    },
+    "ready": {
+      "name": "Ready",
+      "password": "$2b$12$ihb6CjewaEe0nuf/2DAFPOAud6El9lBpsZF0Kj2Z2io9KQOST6Yzy",
+      "role": "fleet",
+      "enabled": true
+    },
+    "triston": {
+      "name": "Triston",
+      "password": "$2b$12$HMS7lwNviTQxDuHXeSriT.TaXbmH9FtdA4tab3qNLq5O8w.9h9mf6",
+      "role": "supervisor",
+      "enabled": true
+    },
+    "patrick": {
+      "name": "Patrick",
+      "password": "$2b$12$jlXk9eMmJg3ZFT0H0Fw3tOFvYLFmJwvEZ/IEZ3wi60bkLVKCSePSq",
+      "role": "atl",
+      "enabled": true
+    },
+    "krystal": {
+      "name": "Krystal",
+      "password": "$2b$12$k.n8W9QLTZYxXL8LeAHFD.lIfmu4rchuGuczu5HGpZFxySs5uZMae",
+      "role": "fleet",
+      "enabled": true
+    },
+    "ryan": {
+      "name": "Ryan",
+      "password": "$2b$12$n4ao/7UiYv633dK8BahlZ.natS9erC8SpV3Cyq92YFAbRw1PJk66a",
+      "role": "fleet",
+      "enabled": true
+    }
+  }
+}

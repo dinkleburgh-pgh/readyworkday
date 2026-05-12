@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 31
+_APP_BUILD = 32
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -190,6 +190,7 @@ def _emit_startup_version_banner_once():
 
 
 _emit_startup_timed_step(1, "Bootstrapping app runtime")
+_emit_startup_version_banner_once()
 
 # Setup logging
 logging.basicConfig(
@@ -34113,7 +34114,6 @@ elif st.session_state.active_screen == "SHORTS":
 
 _emit_startup_timed_step(6, "Startup load complete")
 _emit_startup_total_once()
-_emit_startup_version_banner_once()
 _emit_startup_urls_banner_once()
 _inject_client_startup_timing_probe()
 

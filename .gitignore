@@ -38,12 +38,14 @@ env/
 .truck_state.json
 load_durations.json
 truckapp.log
-auth_users.json
-auth_user_requests.json
 communications_chat.json
 chat_censor_words.json
-state_history/env
-state_history/state_*.json
+state_history/
+data/state_history/
+data/.truck_state.json
+data/load_durations.json
+data/communications_chat.json
+data/audit_requests.json
 
 # --- Secrets ---
 .env

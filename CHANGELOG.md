@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+1. Hardened refresh auth persistence across desktop/mobile by adding bounded silent cookie rehydrate retries, a short post-login cookie-commit delay before rerun, and lowercase username normalization for authenticator token consistency.
+
 ## v1.7.4 - 2026-05-12
 
 1. Updated app metadata release to **v1.7.4** with release date **20260512**.

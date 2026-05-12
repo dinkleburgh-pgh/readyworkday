@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.4"
 _APP_DATE = "20260512"  
-_APP_BUILD = 26
+_APP_BUILD = 27
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -667,6 +667,9 @@ DROPDOWN_LOCK_GUARD_ENABLED = False
 FORCE_POPSTATE_RELOAD_ENABLED = False
 BLANK_PAGE_WATCHDOG_ENABLED = True
 BLANK_PAGE_WATCHDOG_MAX_RELOADS = 5
+AUTH_SILENT_COOKIE_MAX_ATTEMPTS = 4
+AUTH_SILENT_RETRY_INTERVAL_SECONDS = 1.25
+AUTH_RESTORE_GRACE_SECONDS = 10 * 60
 PACE_ESTIMATE_BASE_BUFFER_SECONDS = 3 * 60
 PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS = 25
 PACE_ESTIMATE_PERCENT_BUFFER = 0.08
@@ -5584,7 +5587,8 @@ def _normalize_auth_users(raw_users) -> dict[str, dict]:
 
     normalized: dict[str, dict] = {}
     for username_raw, user_raw in users_block.items():
-        username = str(username_raw or "").strip()
+        username_original = str(username_raw or "").strip()
+        username = username_original.lower()
         if not username or not isinstance(user_raw, dict):
             continue
 
@@ -5592,8 +5596,10 @@ def _normalize_auth_users(raw_users) -> dict[str, dict]:
         if not password_value:
             continue
 
+        display_name = str(user_raw.get("name") or username_original or username).strip() or username
+
         normalized[username] = {
-            "name": username,
+            "name": display_name,
             "password": password_value,
             "role": _normalize_auth_role(user_raw.get("role")),
             "enabled": _to_bool(user_raw.get("enabled"), True),
@@ -7174,11 +7180,17 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                         if hasattr(authenticator, "cookie_controller"):
                             authenticator.cookie_controller.set_cookie()
                         st.session_state.auth_silent_cookie_attempts = 0
+                        st.session_state.auth_silent_cookie_last_try_ts = 0.0
                         st.session_state.auth_login_portal_pending = False
                         st.session_state.auth_login_portal_requested_at = 0.0
                         st.session_state.auth_login_portal_error_message = ""
-                        st.success("? Login successful! Redirecting...")
-                        st.rerun()
+                        st.success("Login successful! Finalizing session...")
+                        # Give browser-side cookie write a brief moment before rerunning.
+                        # Immediate reruns can interrupt cookie persistence in some clients.
+                        if st_autorefresh is not None:
+                            st_autorefresh(interval=450, key="auth_post_login_cookie_commit")
+                        else:
+                            st.rerun()
 
                     _show_login_failure_toast("Invalid password.")
                 except Exception as e:
@@ -7342,13 +7354,24 @@ def _apply_auth_gate():
 
     auth_status = st.session_state.get("authentication_status")
     request_portal_pending = bool(st.session_state.get("auth_request_portal_pending", False))
+    now_ts = time.time()
+    existing_username = str(st.session_state.get("auth_username") or "").strip().lower()
+    existing_role = _normalize_auth_role(st.session_state.get("auth_role"))
+    existing_signed_in = bool(existing_username and existing_username != "guest" and existing_role != AUTH_ROLE_GUEST)
 
     # streamlit-authenticator may transiently report False/None during reruns even when
     # a valid auth cookie exists; retry cookie reads before falling back to Guest.
+    needs_cookie_retry_rerun = False
+
     if auth_status is not True:
         silent_attempts = int(st.session_state.get("auth_silent_cookie_attempts") or 0)
-        if silent_attempts < 12:
+        last_try_ts = float(st.session_state.get("auth_silent_cookie_last_try_ts") or 0.0)
+        if (
+            silent_attempts < AUTH_SILENT_COOKIE_MAX_ATTEMPTS
+            and (now_ts - last_try_ts) >= AUTH_SILENT_RETRY_INTERVAL_SECONDS
+        ):
             st.session_state.auth_silent_cookie_attempts = silent_attempts + 1
+            st.session_state.auth_silent_cookie_last_try_ts = now_ts
             # Try explicit cookie read first (streamlit-authenticator 0.4.x)
             if hasattr(authenticator, "cookie_controller"):
                 try:
@@ -7359,7 +7382,7 @@ def _apply_auth_gate():
             # Fall back to silent login call
             if auth_status is not True:
                 try:
-                    authenticator.login(location="unrendered", key=f"truckapp_silent_login_{silent_attempts}")
+                    authenticator.login(location="unrendered", key="truckapp_silent_login")
                 except TypeError:
                     try:
                         authenticator.login(location="unrendered")
@@ -7368,9 +7391,19 @@ def _apply_auth_gate():
                 except Exception:
                     pass
                 auth_status = st.session_state.get("authentication_status")
-            if auth_status is not True:
-                # Force another hydration pass before the app is allowed to fall back to Guest.
-                st.rerun()
+
+        current_attempts = int(st.session_state.get("auth_silent_cookie_attempts") or 0)
+        if auth_status is not True and current_attempts < AUTH_SILENT_COOKIE_MAX_ATTEMPTS:
+            needs_cookie_retry_rerun = True
+
+    if (
+        needs_cookie_retry_rerun
+        and not request_portal_pending
+        and not bool(st.session_state.get("auth_login_portal_pending", False))
+        and st_autorefresh is not None
+    ):
+        retry_interval_ms = max(400, int(AUTH_SILENT_RETRY_INTERVAL_SECONDS * 1000))
+        st_autorefresh(interval=retry_interval_ms, key="auth_cookie_restore_retry")
 
     if auth_status is not True:
         should_show_login_portal = False
@@ -7396,11 +7429,17 @@ def _apply_auth_gate():
             resolved_role or AUTH_ROLE_ADMIN
         )
         st.session_state.auth_silent_cookie_attempts = 0
+        st.session_state.auth_silent_cookie_last_try_ts = 0.0
+        st.session_state.auth_last_verified_ts = now_ts
         st.session_state.auth_login_portal_auto_prompted = False
         st.session_state.auth_login_portal_pending = False
         st.session_state.auth_login_portal_requested_at = 0.0
         st.session_state.auth_request_portal_pending = False
     else:
+        last_verified_ts = float(st.session_state.get("auth_last_verified_ts") or 0.0)
+        if existing_signed_in and (now_ts - last_verified_ts) <= AUTH_RESTORE_GRACE_SECONDS:
+            st.session_state.auth_login_portal_auto_prompted = False
+            return authenticator
         st.session_state.auth_name = "Guest"
         st.session_state.auth_username = "guest"
         st.session_state.auth_role = AUTH_ROLE_GUEST
@@ -13151,19 +13190,13 @@ def render_numeric_truck_buttons(
         else _truck_grid_columns(default_cols)
     )
 
-    if _is_mobile_client() and cols_per_row > 1:
-        remainder = len(button_entries) % cols_per_row
-        if remainder:
-            spacer_count = cols_per_row - remainder
-            for spacer_idx in range(spacer_count):
-                button_entries.append(("", f"__spacer_{key_prefix}_{len(button_entries)}_{spacer_idx}", False))
-
     for trailing_label, trailing_value in trailing_buttons:
         button_entries.append((str(trailing_label), str(trailing_value), False))
 
     for start in range(0, len(button_entries), cols_per_row):
         row_vals = button_entries[start : start + cols_per_row]
-        row_cols = st.columns(cols_per_row)
+        row_col_count = len(row_vals) if (_is_mobile_client() and len(row_vals) < cols_per_row) else cols_per_row
+        row_cols = st.columns(row_col_count)
         for idx, entry in enumerate(row_vals):
             label, value, _is_numeric = entry
             with row_cols[idx]:
@@ -25222,7 +25255,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 _render_start_blocked_dialog_body()
 
     if st.session_state.active_screen == "STATUS_UNLOADED" and _is_mobile_client():
-        st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
         _render_route_card(always_show=False, dock_left=False, expanded=False, mobile_docked=True)
 
 # --------------------------
@@ -31774,9 +31806,6 @@ elif st.session_state.active_screen == "UNLOAD":
             mime="application/pdf",
             width='stretch',
         )
-
-        if is_mobile_unload:
-            st.markdown("<div style='height:88px;'></div>", unsafe_allow_html=True)
 
     if unload_right_col is not None:
         with unload_right_col:

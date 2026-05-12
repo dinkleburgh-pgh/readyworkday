@@ -35,9 +35,9 @@ def load_quick_amounts():
         return {}
 QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
-_APP_VERSION = "1.7.4"
-_APP_DATE = "20260512"  
-_APP_BUILD = 27
+_APP_VERSION = "1.7.5"
+_APP_DATE = "20260512"
+_APP_BUILD = 29
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -643,7 +643,7 @@ PERSISTENT_SPARE_TRUCKS = {10, 11, 12, 13, 14, 15, 16, 17}
 FLEET_MIN = min(DEFAULT_FLEET_TRUCKS)
 FLEET_MAX = max(DEFAULT_FLEET_TRUCKS)
 FLEET = sorted(set(DEFAULT_FLEET_TRUCKS) | set(PERSISTENT_SPARE_TRUCKS))
-DUST_GARMENT_TRUCK_OPTIONS = [t for t in range(80, 96) if t != 91]
+DUST_GARMENT_TRUCK_OPTIONS = [t for t in range(80, 96) if t not in (90, 91)]
 
 BATCH_COUNT = 6
 BATCH_CAP = 400  # cannot go over
@@ -27490,7 +27490,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
             @st.dialog("Run Day - Step 3/4", on_dismiss=_dismiss_sup_run_day_specials_dialog)
             def _render_sup_run_day_specials_dialog():
                 st.markdown(
-                    "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>What trucks are NOT here or possibly ran special?</p>",
+                    "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>What trucks are NOT here to start the day?</p>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<p style='text-align:center;color:rgba(148,163,184,0.92);font-size:0.88rem;margin:0 0 1.25rem 0;font-weight:500;line-height:1.3;'>Select trucks that may currently be running special or not currently here for other reasons.</p>",
                     unsafe_allow_html=True,
                 )
                 st.markdown(
@@ -27509,19 +27513,56 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         margin-right: auto !important;
                     }
                     div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] > label {
-                        min-height: 46px !important;
-                        padding: 0.35rem 0.5rem !important;
+                        min-height: 65px !important;
+                        min-width: 65px !important;
+                        height: 65px !important;
+                        width: 65px !important;
+                        padding: 0 !important;
                         border: 1px solid rgba(148, 163, 184, 0.45) !important;
                         border-radius: 10px !important;
                         display: flex !important;
                         align-items: center !important;
+                        justify-content: center !important;
+                        flex-shrink: 0 !important;
+                        position: relative !important;
+                        overflow: hidden !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] > label > span:first-child {
+                        display: none !important;
                     }
                     div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] input[type="checkbox"] {
-                        transform: scale(1.25) !important;
-                        margin-right: 0.35rem !important;
+                        transform: none !important;
+                        margin: 0 !important;
+                        position: absolute !important;
+                        inset: 0 !important;
+                        width: 100% !important;
+                        height: 100% !important;
+                        opacity: 0 !important;
+                        cursor: pointer !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] [data-testid="stWidgetLabel"] {
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        width: 100% !important;
+                        height: 100% !important;
+                        margin: 0 !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] {
+                        width: 100% !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] p {
+                        margin: 0 !important;
+                        text-align: center !important;
+                        white-space: nowrap !important;
+                        line-height: 1 !important;
+                    }
+                    div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] div[data-testid="stCheckbox"] > label:has(input[type="checkbox"]:checked) {
+                        border-color: rgba(34, 197, 94, 0.95) !important;
+                        background: rgba(22, 101, 52, 0.35) !important;
                     }
                     div[role="dialog"] div[class*="st-key-sup_run_day_absent_"] p {
-                        font-size: 1.02rem !important;
+                        font-size: 1.275rem !important;
                         font-weight: 700 !important;
                     }
                     @media (max-width: 760px) {

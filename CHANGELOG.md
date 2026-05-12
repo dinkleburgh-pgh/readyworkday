@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-1. Hardened refresh auth persistence across desktop/mobile by adding bounded silent cookie rehydrate retries, a short post-login cookie-commit delay before rerun, and lowercase username normalization for authenticator token consistency.
+## v1.7.5 - 2026-05-12
+
+1. Updated app metadata release to **v1.7.5** with release date **20260512**.
+2. Hardened refresh auth persistence across desktop/mobile by adding bounded silent cookie rehydrate retries, a short post-login cookie-commit delay before rerun, and lowercase username normalization for authenticator token consistency.
+3. Fixed login failure for users whose username was stored with mixed case by normalizing cookie lookup to lowercase.
+4. Renamed "Save Dust Clothes" button to **Save Garments** with green styling; updated caption to "Select FS (Dust) garments for this load day".
+5. Changed OFF status badge color from red to pink.
+6. Condensed user directory card layout: compact single-row format with repositioned edit button.
+7. Updated Run Day Step 2/4 dialog: all buttons scaled 25% larger.
+8. Updated Run Day Step 3/4 dialog: renamed instruction text to "What trucks are NOT here to start the day?", added helper sub-text, and scaled truck bubbles to 65×65 px with centered labels and green checked state.
+9. Fixed `DUST_GARMENT_TRUCK_OPTIONS` fallback to exclude truck 90 (not in fleet) in addition to 91; dust garment dialogs now correctly filter to Dust-type trucks only.
 
 ## v1.7.4 - 2026-05-12
 

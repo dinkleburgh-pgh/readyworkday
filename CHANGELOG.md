@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 32 - 2026-05-12
+
+1. Bumped build to **32**.
+2. **CRITICAL FIX**: Added auth_users.json and auth_user_requests.json to git repo (removed from .gitignore) so login credentials are deployed with the Docker image.
+3. Created data/ directory structure in git repo to match docker-compose volume mount point (/app/data) for proper credential and state file persistence in containerized environments.
+4. Fixed startup timing: moved version banner to execute immediately on app load instead of waiting for first client connection.
+
 ## v1.7.5 build 30 - 2026-05-12
 
 1. Bumped build to **30**.

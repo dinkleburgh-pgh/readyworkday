@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 34 - 2026-05-12
+
+1. Bumped build to **34**.
+2. **FIXED**: Login dialog now closes immediately after successful authentication and redirects to the authenticated page.
+3. Improved: Explicit authentication state synchronization ensures proper session state on login redirect.
+
 ## v1.7.5 build 32 - 2026-05-12
 
 1. Bumped build to **32**.

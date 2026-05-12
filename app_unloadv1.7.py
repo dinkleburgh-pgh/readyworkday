@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.4"
 _APP_DATE = "20260512"  
-_APP_BUILD = 25
+_APP_BUILD = 26
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -7344,10 +7344,10 @@ def _apply_auth_gate():
     request_portal_pending = bool(st.session_state.get("auth_request_portal_pending", False))
 
     # streamlit-authenticator may transiently report False/None during reruns even when
-    # a valid auth cookie exists; retry cookie reads for up to 5 attempts per session.
+    # a valid auth cookie exists; retry cookie reads before falling back to Guest.
     if auth_status is not True:
         silent_attempts = int(st.session_state.get("auth_silent_cookie_attempts") or 0)
-        if silent_attempts < 5:
+        if silent_attempts < 12:
             st.session_state.auth_silent_cookie_attempts = silent_attempts + 1
             # Try explicit cookie read first (streamlit-authenticator 0.4.x)
             if hasattr(authenticator, "cookie_controller"):
@@ -7368,6 +7368,9 @@ def _apply_auth_gate():
                 except Exception:
                     pass
                 auth_status = st.session_state.get("authentication_status")
+            if auth_status is not True:
+                # Force another hydration pass before the app is allowed to fall back to Guest.
+                st.rerun()
 
     if auth_status is not True:
         should_show_login_portal = False
@@ -11652,8 +11655,7 @@ def _force_mobile_button_grid(
                         }}
 
                         const rowSlots = Array.from(groupData.slots || []);
-                        const activeSlots = rowSlots.filter((slot) => uniqueButtons.some((btn) => slot.contains(btn)));
-                        const slots = activeSlots.length ? activeSlots : rowSlots;
+                            const slots = rowSlots;
 
                         if (mobile) {{
                             const gridCols = Math.max(1, Math.min(requestedCols, slots.length || requestedCols));
@@ -13148,10 +13150,13 @@ def render_numeric_truck_buttons(
         if (_is_mobile_client() and resolved_mobile_cols is not None)
         else _truck_grid_columns(default_cols)
     )
-    if len(trailing_buttons) > 1 and cols_per_row > 1:
+
+    if _is_mobile_client() and cols_per_row > 1:
         remainder = len(button_entries) % cols_per_row
-        if remainder == cols_per_row - 1:
-            button_entries.append(("", f"__spacer_{key_prefix}_{len(button_entries)}", False))
+        if remainder:
+            spacer_count = cols_per_row - remainder
+            for spacer_idx in range(spacer_count):
+                button_entries.append(("", f"__spacer_{key_prefix}_{len(button_entries)}_{spacer_idx}", False))
 
     for trailing_label, trailing_value in trailing_buttons:
         button_entries.append((str(trailing_label), str(trailing_value), False))
@@ -23016,6 +23021,15 @@ components.html(
                 var sid = doc.getElementById(id.replace('bouncer', 'bouncer-style'));
                 if (sid && sid.parentNode) sid.parentNode.removeChild(sid);
             });
+            // Remove desktop hint bouncer (legacy) so only one bouncer exists.
+            var legacyDesktopHint = doc.getElementById('truck-desktop-sidebar-open-hint');
+            if (legacyDesktopHint && legacyDesktopHint.parentNode) legacyDesktopHint.parentNode.removeChild(legacyDesktopHint);
+            var legacyDesktopHintStyle = doc.getElementById('truck-desktop-sidebar-open-hint-style');
+            if (legacyDesktopHintStyle && legacyDesktopHintStyle.parentNode) legacyDesktopHintStyle.parentNode.removeChild(legacyDesktopHintStyle);
+            if (root.__truckDesktopSidebarHintTimer) {
+                try { root.clearInterval(root.__truckDesktopSidebarHintTimer); } catch (e) {}
+                root.__truckDesktopSidebarHintTimer = null;
+            }
 
             // ── CSS ──────────────────────────────────────────────────────────
             if (!doc.getElementById(STYLE_ID)) {
@@ -23073,15 +23087,61 @@ components.html(
             var getSidebar = function() {
                 return doc.querySelector('section[data-testid="stSidebar"]');
             };
+            var isNodeVisible = function(node) {
+                if (!node) return false;
+                if (node.offsetParent !== null) return true;
+                try {
+                    var rect = node.getBoundingClientRect();
+                    return !!(rect && rect.width > 0 && rect.height > 0);
+                } catch (e) {
+                    return false;
+                }
+            };
             var isSidebarExpanded = function() {
                 var sb = getSidebar();
                 if (!sb) return false;
                 var v = String(sb.getAttribute('aria-expanded') || '').toLowerCase();
-                if (v === 'true')  return true;
-                if (v === 'false') return false;
-                // Fallback: measure position (desktop always-visible sidebar)
-                var rect = sb.getBoundingClientRect();
-                return rect.left > -80;
+                var ariaExpanded = (v === 'true');
+                var ariaCollapsed = (v === 'false');
+
+                try {
+                    var rect = sb.getBoundingClientRect();
+                    var visibleByRect = !!(rect && rect.width > 24 && rect.right > 20);
+                    var style = root.getComputedStyle ? root.getComputedStyle(sb) : null;
+                    var transform = style ? String(style.transform || '') : '';
+                    var translatedOffCanvas = false;
+
+                    if (transform && transform !== 'none') {
+                        var tx = 0;
+                        var m2d = transform.match(/matrix\\(([^)]+)\\)/);
+                        if (m2d && m2d[1]) {
+                            var p2d = m2d[1].split(',');
+                            tx = Number(p2d[4] || 0);
+                        } else {
+                            var m3d = transform.match(/matrix3d\\(([^)]+)\\)/);
+                            if (m3d && m3d[1]) {
+                                var p3d = m3d[1].split(',');
+                                tx = Number(p3d[12] || 0);
+                            }
+                        }
+                        if (isFinite(tx) && tx < -Math.max(36, (rect && rect.width ? rect.width * 0.55 : 180))) {
+                            translatedOffCanvas = true;
+                        }
+                    }
+
+                    var collapsedControl = doc.querySelector('[data-testid="stSidebarCollapsedControl"] button, [aria-label="Open sidebar"], [title="Open sidebar"]');
+                    var hasVisibleCollapsedControl = isNodeVisible(collapsedControl);
+                    if (hasVisibleCollapsedControl && translatedOffCanvas) return false;
+                    if (ariaCollapsed && !visibleByRect) return false;
+                    if (translatedOffCanvas) return false;
+                    if (ariaExpanded && visibleByRect) return true;
+                    if (ariaCollapsed) return false;
+                    return visibleByRect;
+                } catch (e) {
+                    if (ariaExpanded) return true;
+                    if (ariaCollapsed) return false;
+                    return false;
+                }
             };
             var collapseSidebar = function() {
                 var b = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
@@ -23458,95 +23518,14 @@ else:
             var root = window.parent || window;
             var doc = root.document;
             if (!doc) return;
-            var HINT_ID = 'truck-desktop-sidebar-open-hint';
-
-            var hint = doc.getElementById(HINT_ID);
-            if (!hint) {
-                hint = doc.createElement('button');
-                hint.id = HINT_ID;
-                hint.type = 'button';
-                hint.innerHTML = '<div style="font-size:0.62rem;font-weight:900;letter-spacing:0.12em;text-transform:uppercase;line-height:1;">Menu</div><div style="font-size:1.15rem;line-height:1;margin-top:4px;">&#8594;</div>';
-                hint.setAttribute('aria-label', 'Open sidebar menu');
-                hint.style.cssText = (
-                    'position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:99999;' +
-                    'padding:10px 6px 10px 4px;border-radius:0 10px 10px 0;border:1px solid rgba(147,197,253,0.7);' +
-                    'background:rgba(30,64,175,0.92);color:#eff6ff;font-weight:900;font-size:0.78rem;' +
-                    'display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;' +
-                    'letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;min-width:24px;' +
-                    'pointer-events:auto;' +
-                    'box-shadow:0 8px 18px rgba(0,0,0,0.35);display:none;' +
-                    'animation:truckDesktopMenuHintBounce 1.35s ease-in-out infinite;'
-                );
-
-                var styleId = 'truck-desktop-sidebar-open-hint-style';
-                if (!doc.getElementById(styleId)) {
-                    var styleEl = doc.createElement('style');
-                    styleEl.id = styleId;
-                    styleEl.textContent = (
-                        '@keyframes truckDesktopMenuHintBounce{' +
-                        '0%,100%{transform:translateY(-50%) translateX(0);}' +
-                        '50%{transform:translateY(-50%) translateX(12px);}' +
-                        '}'
-                    );
-                    doc.head.appendChild(styleEl);
-                }
-
-                doc.body.appendChild(hint);
-            }
-
-            var isSidebarOpen = function() {
-                var sb = doc.querySelector('section[data-testid="stSidebar"]');
-                if (!sb) return false;
-                var ariaOpen = String(sb.getAttribute('aria-expanded') || '').toLowerCase() === 'true';
-                try {
-                    var rect = sb.getBoundingClientRect();
-                    var vw = Math.max(0, root.innerWidth || doc.documentElement.clientWidth || 0);
-                    var visibleByRect = rect && rect.width > 24 && rect.right > 10 && rect.left < Math.max(40, vw - 10);
-                    if (visibleByRect) return true;
-                    if (!ariaOpen) return false;
-                    return !!(rect && rect.right > 18);
-                } catch (e) {
-                    return ariaOpen;
-                }
-            };
-
-            var updateVisibility = function() {
-                hint.style.display = isSidebarOpen() ? 'none' : 'inline-flex';
-            };
-
-            var forceOpenSidebar = function() {
-                var selectors = [
-                    '[data-testid="stSidebarCollapseButton"] button',
-                    '[data-testid="stSidebarCollapsedControl"] button',
-                    '[data-testid="collapsedControl"] button',
-                    '[aria-label="Open sidebar"]',
-                    '[title="Open sidebar"]'
-                ];
-                for (var i = 0; i < selectors.length; i++) {
-                    var btn = doc.querySelector(selectors[i]);
-                    if (btn) {
-                        try { btn.click(); } catch (e) {}
-                        return;
-                    }
-                }
-                // Fallback when Streamlit collapsed control is missing.
-                var sb = doc.querySelector('section[data-testid="stSidebar"]');
-                if (!sb) return;
-                try {
-                    sb.setAttribute('aria-expanded', 'true');
-                    sb.style.setProperty('transform', 'translateX(0%)', 'important');
-                } catch (e) {}
-            };
-
-            hint.onclick = function() {
-                forceOpenSidebar();
-            };
-
-            updateVisibility();
-            setTimeout(updateVisibility, 120);
-            setTimeout(updateVisibility, 420);
-            if (!root.__truckDesktopSidebarHintTimer) {
-                root.__truckDesktopSidebarHintTimer = root.setInterval(updateVisibility, 700);
+            // Desktop keeps the unified v3 bouncer; remove any legacy desktop hint.
+            var hint = doc.getElementById('truck-desktop-sidebar-open-hint');
+            if (hint && hint.parentNode) { hint.parentNode.removeChild(hint); }
+            var hintStyle = doc.getElementById('truck-desktop-sidebar-open-hint-style');
+            if (hintStyle && hintStyle.parentNode) { hintStyle.parentNode.removeChild(hintStyle); }
+            if (root.__truckDesktopSidebarHintTimer) {
+                try { root.clearInterval(root.__truckDesktopSidebarHintTimer); } catch (e) {}
+                root.__truckDesktopSidebarHintTimer = null;
             }
         } catch(e) {}
         })();

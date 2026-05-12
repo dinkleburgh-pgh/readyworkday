@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.4"
 _APP_DATE = "20260512"  
-_APP_BUILD = 22
+_APP_BUILD = 23
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -20499,9 +20499,9 @@ def render_truck_bubbles(
         button_badges=bubble_badges if bubble_badges else None,
         button_corner_badges=garment_corner_badges if garment_corner_badges else None,
         preserve_order=preserve_order,
-        mobile_cols=(3 if from_page_key == "STATUS_UNLOADED" else None),
-        mobile_cell_gap_rem=(0.38 if from_page_key == "STATUS_UNLOADED" else 0.62),
-        mobile_min_button_height_px=(56 if from_page_key == "STATUS_UNLOADED" else 64),
+        mobile_cols=2,
+        mobile_cell_gap_rem=0.5,
+        mobile_min_button_height_px=64,
     )
     if clicked_truck is not None:
         t = int(clicked_truck)
@@ -33031,30 +33031,6 @@ elif st.session_state.active_screen == "LOAD":
         if not is_mobile_load:
             render_page_heading("Load Management")
 
-        # Remaining-trucks breakdown by type
-        _load_bd = _current_load_day_remaining_breakdown()
-        if _load_bd["total_left"] > 0:
-            _load_type_parts: list[str] = []
-            if _load_bd["dusts_left"] > 0:
-                _load_type_parts.append(
-                    f"<span style='color:#f9a8d4;font-weight:800;'>{_load_bd['dusts_left']} Dust</span>"
-                )
-            if _load_bd["uniforms_left"] > 0:
-                _load_type_parts.append(
-                    f"<span style='color:#93c5fd;font-weight:800;'>{_load_bd['uniforms_left']} Uniform</span>"
-                )
-            if _load_bd["spares_left"] > 0:
-                _load_type_parts.append(
-                    f"<span style='color:#86efac;font-weight:800;'>{_load_bd['spares_left']} Spare</span>"
-                )
-            if _load_type_parts:
-                st.markdown(
-                    "<div style='text-align:center;font-size:0.82rem;font-weight:700;margin:0 0 0.55rem 0;opacity:0.9;'>"
-                    + " &nbsp;·&nbsp; ".join(_load_type_parts)
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
-
         def _render_load_unloaded_truck_buttons(key_prefix: str):
             unloaded_trucks = [int(t) for t in status_unloaded_trucks]
             if not unloaded_trucks:
@@ -33072,6 +33048,8 @@ elif st.session_state.active_screen == "LOAD":
                 unloaded_trucks,
                 key_prefix,
                 default_cols=8,
+                mobile_cols=2,
+                mobile_cell_gap_rem=0.5,
                 button_corner_badges=merged_corner_badges if merged_corner_badges else None,
                 button_corner_badge_tooltips=warning_corner_tooltips if warning_corner_tooltips else None,
             )
@@ -33119,6 +33097,8 @@ elif st.session_state.active_screen == "LOAD":
                     true_available,
                     "load_start",
                     default_cols=8,
+                    mobile_cols=2,
+                    mobile_cell_gap_rem=0.5,
                     button_corner_badges=load_merged_corner_badges if load_merged_corner_badges else None,
                     button_corner_badge_tooltips=load_warning_corner_tooltips if load_warning_corner_tooltips else None,
                 )
@@ -33140,6 +33120,36 @@ elif st.session_state.active_screen == "LOAD":
                     st.rerun()
 
         if is_mobile_load:
+            _load_bd = _current_load_day_remaining_breakdown()
+            if _load_bd["total_left"] > 0:
+                _load_mobile_cards = [
+                    ("Dusts Left", _load_bd["dusts_left"], "rgba(190,24,93,0.34)", "rgba(244,114,182,0.58)", "#fbcfe8"),
+                    ("Uniforms Left", _load_bd["uniforms_left"], "rgba(30,64,175,0.30)", "rgba(96,165,250,0.52)", "#dbeafe"),
+                    ("Spares Left", _load_bd["spares_left"], "rgba(21,128,61,0.28)", "rgba(74,222,128,0.48)", "#dcfce7"),
+                    ("Total Left", _load_bd["total_left"], "rgba(15,23,42,0.62)", "rgba(148,163,184,0.42)", "#f8fafc"),
+                ]
+                _load_mobile_summary_markup = "".join(
+                    (
+                        "<div class='status-loaded-mobile-summary-card' "
+                        f"style='background:{bg}; border-color:{bd};'>"
+                        f"<div class='status-loaded-mobile-summary-label'>{html.escape(lbl)}</div>"
+                        f"<div class='status-loaded-mobile-summary-value' style='color:{vc};'>{int(val)}</div>"
+                        "</div>"
+                    )
+                    for lbl, val, bg, bd, vc in _load_mobile_cards
+                )
+                st.markdown(
+                    (
+                        "<style>"
+                        ".status-loaded-mobile-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.65rem;margin:0.6rem 0 0.55rem 0;}"
+                        ".status-loaded-mobile-summary-card{min-height:88px;padding:0.8rem 0.7rem;border:1px solid;border-radius:14px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 10px 24px rgba(0,0,0,0.18);text-align:center;}"
+                        ".status-loaded-mobile-summary-label{font-size:0.74rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;opacity:0.82;line-height:1.2;}"
+                        ".status-loaded-mobile-summary-value{font-size:1.9rem;font-weight:900;line-height:1.0;margin-top:0.35rem;}"
+                        "</style>"
+                        f"<div class='status-loaded-mobile-summary-grid'>{_load_mobile_summary_markup}</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
             st.markdown("<div style='height:80px;'></div>", unsafe_allow_html=True)
         st.divider()
         now_local = _now_local()

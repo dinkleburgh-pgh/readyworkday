@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 33
+_APP_BUILD = 34
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -7178,6 +7178,9 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                         )
 
                     if login_ok:
+                        # Explicitly set authentication state to ensure proper session sync
+                        st.session_state.authentication_status = True
+                        st.session_state.username = canonical_username
                         if hasattr(authenticator, "cookie_controller"):
                             authenticator.cookie_controller.set_cookie()
                         st.session_state.auth_silent_cookie_attempts = 0
@@ -7185,13 +7188,8 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                         st.session_state.auth_login_portal_pending = False
                         st.session_state.auth_login_portal_requested_at = 0.0
                         st.session_state.auth_login_portal_error_message = ""
-                        st.success("Login successful! Finalizing session...")
-                        # Give browser-side cookie write a brief moment before rerunning.
-                        # Immediate reruns can interrupt cookie persistence in some clients.
-                        if st_autorefresh is not None:
-                            st_autorefresh(interval=450, key="auth_post_login_cookie_commit")
-                        else:
-                            st.rerun()
+                        # Immediately rerun to close dialog and refresh with authenticated state
+                        st.rerun()
 
                     _show_login_failure_toast("Invalid password.")
                 except Exception as e:

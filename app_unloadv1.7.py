@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 37
+_APP_BUILD = 38
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -2642,9 +2642,20 @@ def _render_audit_capture_panel(
                                 parent.style.setProperty('column-gap', '0.34rem', 'important');
                                 parent.style.setProperty('row-gap', '0.34rem', 'important');
 
+                                // Re-order non-button grid items to appear first
+                                Array.from(parent.children).forEach((child) => {{
+                                    if (!nodes.includes(child)) {{
+                                        // Non-button element: span full width and position early
+                                        child.style.setProperty('grid-column', '1 / -1', 'important');
+                                        child.style.setProperty('grid-row', 'auto', 'important');
+                                    }}
+                                }});
+
+                                // Position button elements after non-button elements
+                                const firstButtonRow = 3; // Start buttons at row 3 to allow space for truck header and change truck
                                 nodes.forEach((node, idx) => {{
                                     const col = (idx % 2) + 1;
-                                    const row = Math.floor(idx / 2) + 1;
+                                    const row = Math.floor(idx / 2) + firstButtonRow;
                                     node.style.setProperty('margin', '0', 'important');
                                     node.style.setProperty('padding', '0', 'important');
                                     node.style.setProperty('grid-column', `${{col}} / span 1`, 'important');
@@ -34228,10 +34239,9 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
         if is_mobile_audit:
             with audit_main_col:
-                # Inject CSS to control mobile layout
+                # CSS for truck header
                 st.markdown(
                     """<style>
-                    /* Truck header styling */
                     .audit_truck_header_mobile {
                         text-align: center;
                         padding: 0.52rem 0.5rem;
@@ -34241,14 +34251,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                         font-weight: 900;
                         letter-spacing: 0.05em;
                         color: #1e293b;
-                        margin-bottom: 0.12rem;
-                        width: 100%;
-                        box-sizing: border-box;
-                    }
-                    /* Ensure Bulk button spans full width on mobile */
-                    div.st-key-audit_cat_mobile_bulk_wrap > div[data-testid="stButton"] > button {
-                        width: 100% !important;
-                        max-width: 100% !important;
+                        margin-bottom: 0.2rem;
                     }
                     </style>""",
                     unsafe_allow_html=True,
@@ -34267,8 +34270,8 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                         st.session_state.audit_fleet_selected_truck = None
                         st.rerun()
                 
-                # Small spacer
-                st.markdown("<div style='height:0.05rem;'></div>", unsafe_allow_html=True)
+                # Spacer
+                st.markdown("<div style='height:0.08rem;'></div>", unsafe_allow_html=True)
                 
                 # Audit capture panel
                 _render_audit_capture_panel(

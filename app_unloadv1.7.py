@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 42
+_APP_BUILD = 43
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -19112,7 +19112,7 @@ def _compress_mobile_heading_to_content_gap(heading_slug: str) -> None:
                         root.querySelector('.main .block-container');
                     if (!main) return;
 
-                    const aggressiveSlugs = new Set(['unloaded', 'loaded', 'off', 'oos-spare']);
+                    const aggressiveSlugs = new Set(['dirty', 'unloaded', 'loaded', 'off', 'oos-spare']);
                     const isAggressive = aggressiveSlugs.has(headingSlug);
 
                     const headingDiv = main.querySelector('.page-heading-' + headingSlug);
@@ -21066,7 +21066,7 @@ def _start_batch_flow_for_dirty_truck(truck: int, *, set_unload_url_when_disable
 
 def _render_batching_information_panel(*, include_info_text: bool = False) -> None:
     if bool(include_info_text):
-        st.info("Select a truck to begin unloading.")
+        st.caption("Select a truck to begin unloading.")
 
     st.divider()
     batch_cols = _truck_grid_columns(3)

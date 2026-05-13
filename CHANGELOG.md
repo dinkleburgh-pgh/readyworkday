@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 43 - 2026-05-13
+
+1. Bumped build to **43**.
+2. **STATUS DIRTY**: Fixed the mobile Dirty page spacing so the truck grid sits correctly under the page heading like the Unloaded page.
+3. **STATUS DIRTY**: Replaced the repeated dirty-page batching hint toast with a quiet caption so mobile navigation no longer gets spammed.
+
 ## v1.7.5 build 42 - 2026-05-13
 
 1. Bumped build to **42**.

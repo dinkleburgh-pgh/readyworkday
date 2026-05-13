@@ -54,6 +54,14 @@ Current release: **v1.7.3**
 - Generates operational PDFs (load/shortages, batch cards, end-of-day summary).
 - Persists state locally in JSON files.
 
+## OCR status (WIP)
+
+- OCR support is currently a **work in progress** and not considered production-ready.
+- OCR work is isolated from the live app in the standalone module/app:
+	- `loadunload_ocr/`
+	- `loadunload_ocr_app.py`
+- Use OCR outputs as assisted draft data and review all extracted fields before operational use.
+
 ## Requirements
 
 - Python 3.10+

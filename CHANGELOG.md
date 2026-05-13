@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.7.5 build 36 - 2026-05-13
+
+1. Bumped build to **36**.
+2. **AUDIT FLEET**: Enhanced mobile audit layout with orange truck header styling (background #f59e0b, font-size 1.32rem).
+3. Improved: Centered "Change Truck" button below truck header with adjusted spacing.
+4. Refined: Mobile audit category buttons rendered in responsive 2x2 grid (3x10, 3x5, 4x6, Paper) with Bulk button for full-width selection.
+5. Updated: Reduced spacing and margins throughout audit panel for cleaner mobile appearance.
+
 ## v1.7.5 build 34 - 2026-05-12
 
 1. Bumped build to **34**.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 39 - 2026-05-13
+
+1. Bumped build to **39**.
+2. **AUDIT FLEET**: Replaced the mobile Auditing badge with an `Auditing Truck #` heading when a truck is open, and kept Change Truck directly below it.
+3. **AUDIT FLEET**: Prioritized OOS routes first in the step 2/4 route selector so the most important assignments are shown first.
+4. Preserved the mobile audit button grid layout and spacing so the option buttons remain unobstructed.
+
 ## v1.7.5 build 36 - 2026-05-13
 
 1. Bumped build to **36**.

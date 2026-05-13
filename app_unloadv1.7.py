@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 38
+_APP_BUILD = 39
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -2870,6 +2870,7 @@ def _render_audit_capture_panel(
     selected_route_num = int(mapped_route_num)
     route_pick_key = f"audit_route_pick_{source}_{t}"
     if needs_route_selection:
+        oos_route_set = {int(route_num) for route_num in (st.session_state.get("off_set") or set())}
         candidate_routes = {
             int(t),
             int(mapped_route_num),
@@ -2879,7 +2880,10 @@ def _render_audit_capture_panel(
                 if int(route_num) in set(FLEET)
             ],
         }
-        route_options = sorted(int(r) for r in candidate_routes)
+        route_options = sorted(
+            (int(r) for r in candidate_routes),
+            key=lambda route_num: (0 if int(route_num) in oos_route_set else 1, int(route_num)),
+        )
         if not route_options:
             route_options = [int(mapped_route_num)]
 
@@ -34238,31 +34242,28 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         inferred_loaded_day_num = _audit_loaded_day_num_from_applied(current_applied_day_num)
 
         if is_mobile_audit:
+            components.html(
+                f"""
+                <script>
+                (function() {{
+                    try {{
+                        const root = window.parent.document;
+                        const heading = root.querySelector('.page-heading-auditing');
+                        if (!heading) return;
+                        heading.textContent = 'Auditing Truck {int(selected_audit_truck_num)}';
+                        heading.style.fontSize = '24px';
+                        heading.style.padding = '0.34rem 0.9rem';
+                        heading.style.marginBottom = '0.28rem';
+                    }} catch (e) {{}}
+                }})();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+
+        if is_mobile_audit:
             with audit_main_col:
-                # CSS for truck header
-                st.markdown(
-                    """<style>
-                    .audit_truck_header_mobile {
-                        text-align: center;
-                        padding: 0.52rem 0.5rem;
-                        border-radius: 12px;
-                        background: #f59e0b;
-                        font-size: 1.32rem;
-                        font-weight: 900;
-                        letter-spacing: 0.05em;
-                        color: #1e293b;
-                        margin-bottom: 0.2rem;
-                    }
-                    </style>""",
-                    unsafe_allow_html=True,
-                )
-                
-                # Truck header
-                st.markdown(
-                    f"<div class='audit_truck_header_mobile'>Truck {int(selected_audit_truck_num)}</div>",
-                    unsafe_allow_html=True,
-                )
-                
                 # Change Truck button
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:

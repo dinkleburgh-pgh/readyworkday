@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 44 - 2026-05-13
+
+1. Bumped build to **44**.
+2. **PWA / MOBILE**: Added a branded iOS install prompt with Add to Home Screen steps for iPhone and iPad browsers.
+3. **PWA / MOBILE**: Reused the same install banner surface for native browser install prompts where supported and added prompt snoozing so it does not keep nagging users.
+
 ## v1.7.5 build 43 - 2026-05-13
 
 1. Bumped build to **43**.

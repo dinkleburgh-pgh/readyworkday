@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 43
+_APP_BUILD = 44
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -439,6 +439,247 @@ def _inject_pwa_bootstrap() -> None:
             appleIcon.setAttribute("sizes", "180x180");
             appleIcon.setAttribute("type", "image/png");
 
+            const appVersion = __APP_VERSION_JSON__;
+            const installStorageKey = `truckappInstallPromptSnooze:${appVersion}`;
+            const installDismissDays = 7;
+            const isiOS = () => {
+                try {
+                    const ua = String(parentWin.navigator.userAgent || "").toLowerCase();
+                    const platform = String(parentWin.navigator.platform || "");
+                    const touchMac = platform === "MacIntel" && Number(parentWin.navigator.maxTouchPoints || 0) > 1;
+                    return /iphone|ipad|ipod/.test(ua) || touchMac;
+                } catch (_) {
+                    return false;
+                }
+            };
+            const isStandalone = () => {
+                try {
+                    return Boolean(
+                        parentWin.matchMedia?.('(display-mode: standalone)').matches ||
+                        parentWin.navigator.standalone === true
+                    );
+                } catch (_) {
+                    return false;
+                }
+            };
+            const isMobileViewport = () => {
+                try {
+                    return parentWin.matchMedia('(max-width: 980px)').matches || parentWin.innerWidth <= 980;
+                } catch (_) {
+                    return (parentWin.innerWidth || window.innerWidth || 1200) <= 980;
+                }
+            };
+            const promptSuppressed = () => {
+                if (isStandalone()) {
+                    return true;
+                }
+                try {
+                    const raw = parentWin.localStorage.getItem(installStorageKey);
+                    if (!raw) {
+                        return false;
+                    }
+                    const untilTs = Number(raw);
+                    return Number.isFinite(untilTs) && untilTs > Date.now();
+                } catch (_) {
+                    return false;
+                }
+            };
+            const snoozePrompt = (days = installDismissDays) => {
+                try {
+                    const untilTs = Date.now() + (Math.max(1, Number(days) || installDismissDays) * 24 * 60 * 60 * 1000);
+                    parentWin.localStorage.setItem(installStorageKey, String(untilTs));
+                } catch (_) {}
+            };
+
+            let deferredInstallEvent = null;
+            const installHostId = "truckapp-install-banner-host";
+            const removeInstallPrompt = () => {
+                const host = doc.getElementById(installHostId);
+                if (host) {
+                    host.remove();
+                }
+            };
+            const renderInstallPrompt = (mode) => {
+                if (!isMobileViewport() || promptSuppressed()) {
+                    removeInstallPrompt();
+                    return;
+                }
+
+                let host = doc.getElementById(installHostId);
+                if (!host) {
+                    host = doc.createElement('div');
+                    host.id = installHostId;
+                    doc.body.appendChild(host);
+                }
+
+                const title = "Install TruckApp";
+                const body = mode === 'ios'
+                    ? "Add TruckApp to your Home Screen for a full-screen app experience on iPhone or iPad."
+                    : "Install TruckApp on this device for faster access and a full-screen app experience.";
+                const primaryLabel = mode === 'ios' ? "Show Steps" : "Install";
+                const stepsMarkup = mode === 'ios'
+                    ? `
+                        <div class="truckapp-install-steps" data-install-steps hidden>
+                            <div>1. Open the browser Share menu.</div>
+                            <div>2. Tap Add to Home Screen.</div>
+                            <div>3. Confirm Add to install TruckApp.</div>
+                        </div>
+                    `
+                    : "";
+
+                host.innerHTML = `
+                    <style>
+                    #${installHostId} {
+                        position: fixed;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        display: flex;
+                        justify-content: center;
+                        pointer-events: none;
+                        z-index: 2200;
+                        padding: 0 10px calc(12px + env(safe-area-inset-bottom));
+                        box-sizing: border-box;
+                    }
+                    #${installHostId} .truckapp-install-card {
+                        width: min(100%, 460px);
+                        border: 1px solid rgba(125, 211, 252, 0.34);
+                        border-radius: 18px;
+                        background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(30,41,59,0.96));
+                        box-shadow: 0 18px 36px rgba(2,6,23,0.42);
+                        color: #e2e8f0;
+                        pointer-events: auto;
+                        overflow: hidden;
+                    }
+                    #${installHostId} .truckapp-install-inner {
+                        padding: 14px 14px 12px 14px;
+                    }
+                    #${installHostId} .truckapp-install-title {
+                        font-size: 1rem;
+                        font-weight: 900;
+                        letter-spacing: 0.02em;
+                        margin-bottom: 6px;
+                    }
+                    #${installHostId} .truckapp-install-body {
+                        font-size: 0.92rem;
+                        line-height: 1.35;
+                        opacity: 0.96;
+                    }
+                    #${installHostId} .truckapp-install-steps {
+                        margin-top: 10px;
+                        padding: 10px 11px;
+                        border-radius: 12px;
+                        border: 1px solid rgba(148,163,184,0.26);
+                        background: rgba(15,23,42,0.6);
+                        font-size: 0.88rem;
+                        line-height: 1.4;
+                    }
+                    #${installHostId} .truckapp-install-steps div + div {
+                        margin-top: 4px;
+                    }
+                    #${installHostId} .truckapp-install-actions {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 8px;
+                        margin-top: 12px;
+                    }
+                    #${installHostId} button {
+                        min-height: 42px;
+                        border-radius: 12px;
+                        border: 1px solid rgba(148,163,184,0.28);
+                        font-size: 0.94rem;
+                        font-weight: 800;
+                        cursor: pointer;
+                    }
+                    #${installHostId} button[data-action="primary"] {
+                        background: linear-gradient(180deg, #38bdf8, #0284c7);
+                        color: #082f49;
+                        border-color: rgba(125,211,252,0.6);
+                    }
+                    #${installHostId} button[data-action="secondary"] {
+                        background: rgba(15,23,42,0.62);
+                        color: #e2e8f0;
+                    }
+                    </style>
+                    <div class="truckapp-install-card">
+                        <div class="truckapp-install-inner">
+                            <div class="truckapp-install-title">${title}</div>
+                            <div class="truckapp-install-body">${body}</div>
+                            ${stepsMarkup}
+                            <div class="truckapp-install-actions">
+                                <button type="button" data-action="primary">${primaryLabel}</button>
+                                <button type="button" data-action="secondary">Later</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const primaryBtn = host.querySelector('button[data-action="primary"]');
+                const secondaryBtn = host.querySelector('button[data-action="secondary"]');
+                const stepsNode = host.querySelector('[data-install-steps]');
+
+                if (primaryBtn) {
+                    primaryBtn.onclick = async () => {
+                        if (mode === 'ios') {
+                            if (stepsNode) {
+                                const showing = !stepsNode.hasAttribute('hidden');
+                                if (showing) {
+                                    snoozePrompt(14);
+                                    removeInstallPrompt();
+                                } else {
+                                    stepsNode.removeAttribute('hidden');
+                                    primaryBtn.textContent = 'Done';
+                                }
+                            }
+                            return;
+                        }
+
+                        if (!deferredInstallEvent) {
+                            return;
+                        }
+                        try {
+                            deferredInstallEvent.prompt();
+                            const choiceResult = await deferredInstallEvent.userChoice;
+                            if (choiceResult && choiceResult.outcome === 'accepted') {
+                                removeInstallPrompt();
+                                try { parentWin.localStorage.removeItem(installStorageKey); } catch (_) {}
+                            } else {
+                                snoozePrompt();
+                                removeInstallPrompt();
+                            }
+                        } catch (_) {
+                            snoozePrompt();
+                            removeInstallPrompt();
+                        } finally {
+                            deferredInstallEvent = null;
+                        }
+                    };
+                }
+
+                if (secondaryBtn) {
+                    secondaryBtn.onclick = () => {
+                        snoozePrompt();
+                        removeInstallPrompt();
+                    };
+                }
+            };
+
+            parentWin.addEventListener('beforeinstallprompt', (event) => {
+                event.preventDefault();
+                deferredInstallEvent = event;
+                renderInstallPrompt('native');
+            });
+
+            parentWin.addEventListener('appinstalled', () => {
+                deferredInstallEvent = null;
+                try { parentWin.localStorage.removeItem(installStorageKey); } catch (_) {}
+                removeInstallPrompt();
+            });
+
+            if (isiOS() && !isStandalone()) {
+                parentWin.setTimeout(() => renderInstallPrompt('ios'), 900);
+            }
+
             if (staticWorkerAvailable && "serviceWorker" in parentWin.navigator) {
                 try {
                     const swScope = new URL(`${staticRoot.replace(/\\/$/, "")}/`, parentWin.location.origin).pathname;
@@ -449,7 +690,7 @@ def _inject_pwa_bootstrap() -> None:
             }
         })();
         </script>
-        """,
+        """.replace("__APP_VERSION_JSON__", json.dumps(str(_APP_VERSION))),
         height=0,
         width=0,
     )

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 41 - 2026-05-13
+
+1. Bumped build to **41**.
+2. **TRENDS**: Stopped the mobile trends screen from repeatedly surfacing selection-detail toast popups while navigating the page.
+3. **MANAGEMENT / RUN DAY**: Added an explicit **Reset Swap** action to the route-change workflow so a single route swap can be cleared directly from fleet management or Run Day.
+
 ## v1.7.5 build 40 - 2026-05-13
 
 1. Bumped build to **40**.

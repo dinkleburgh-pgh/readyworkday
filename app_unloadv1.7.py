@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 40
+_APP_BUILD = 42
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -4156,7 +4156,7 @@ def _render_supervisor_audit_trends(
                 st.session_state[details_state_key] = details_payload
                 if prev_payload != details_payload:
                     if _is_mobile_client() and str(st.session_state.get("active_screen") or "").upper() == "TRENDS":
-                        st.session_state["sup_audit_trends_mobile_details_dialog_open"] = True
+                        st.session_state.pop("sup_audit_trends_mobile_details_dialog_open", None)
                     st.rerun()
         return
 
@@ -4549,7 +4549,7 @@ def _render_supervisor_audit_trends(
             st.session_state[details_state_key] = details_payload
             if prev_payload != details_payload:
                 if _is_mobile_client() and str(st.session_state.get("active_screen") or "").upper() == "TRENDS":
-                    st.session_state["sup_audit_trends_mobile_details_dialog_open"] = True
+                    st.session_state.pop("sup_audit_trends_mobile_details_dialog_open", None)
                 st.rerun()
 
 
@@ -14504,6 +14504,24 @@ def render_fleet_management():
                 else:
                     st.caption("No fleet trucks available for Load On.")
 
+            def _reset_route_change_selection():
+                route_pick = _coerce_swap_dropdown_pick(st.session_state.get(swap_route_input_key))
+                if route_pick is None:
+                    st.session_state[swap_feedback_key] = {
+                        "ok": False,
+                        "message": "Select a Truck first to reset that swap.",
+                    }
+                    st.rerun()
+                ok_swap, swap_message = _apply_manual_route_change(str(route_pick), str(route_pick))
+                st.session_state[swap_feedback_key] = {
+                    "ok": bool(ok_swap),
+                    "message": str(swap_message),
+                }
+                if ok_swap:
+                    st.session_state.pop(swap_route_input_key, None)
+                    st.session_state.pop(swap_load_input_key, None)
+                st.rerun()
+
             def _submit_route_change_dialog():
                 route_pick = _coerce_swap_dropdown_pick(st.session_state.get(swap_route_input_key))
                 load_on_pick = _coerce_swap_dropdown_pick(st.session_state.get(swap_load_input_key))
@@ -14539,6 +14557,8 @@ def render_fleet_management():
                     with c_cancel:
                         if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel"):
                             _cancel_route_change_dialog()
+                    if st.button("Reset Swap", width='stretch', key="sup_manage_route_change_reset"):
+                        _reset_route_change_selection()
 
                 _render_route_change_dialog()
             else:
@@ -14552,6 +14572,8 @@ def render_fleet_management():
                 with c_cancel:
                     if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel_inline"):
                         _cancel_route_change_dialog()
+                if st.button("Reset Swap", width='stretch', key="sup_manage_route_change_reset_inline"):
+                    _reset_route_change_selection()
         return
 
     sel = int(selected)
@@ -27940,6 +27962,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _open_supervisor_dialog("sup_dust_clothes_dialog_open")
                     st.rerun()
 
+                if st.button("Reset Swap", width='stretch', key="sup_run_day_spares_reset"):
+                    route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+                    if route_pick is None:
+                        _set_run_day_swap_feedback(False, "Select a Truck first to reset that swap.")
+                    else:
+                        ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, route_pick)
+                        _set_run_day_swap_feedback(ok_swap, swap_message)
+                        if ok_swap:
+                            _clear_run_day_swap_selection()
+                    st.rerun()
+
                 if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
                     _clear_run_day_swap_selection()
                     st.session_state["sup_run_day_spares_dialog_open"] = False
@@ -31650,11 +31683,11 @@ elif st.session_state.active_screen == "TRENDS":
     st.markdown("#### Coming Soon")
     future_cols = st.columns(3)
     with future_cols[0]:
-        st.success("Load pace trend is live")
+        st.caption("Load pace trend is live.")
     with future_cols[1]:
-        st.info("Unload throughput trends")
+        st.caption("Unload throughput trends.")
     with future_cols[2]:
-        st.info("Status mix trends")
+        st.caption("Status mix trends.")
 
 # --------------------------
 # Communications

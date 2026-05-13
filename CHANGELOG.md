@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 40 - 2026-05-13
+
+1. Bumped build to **40**.
+2. **UNLOAD**: Removed the mobile pace card from the Unload/Management flow so it no longer blocks the screen on mobile.
+3. **MANAGEMENT / RUN DAY**: Exposed OOS trucks in the route-swap Truck dropdown, including the Run Day step 2/4 dialog, and labeled them clearly.
+4. Kept the route-swap picker ordering stable so OOS trucks appear first in the list.
+
 ## v1.7.5 build 39 - 2026-05-13
 
 1. Bumped build to **39**.

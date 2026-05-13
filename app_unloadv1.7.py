@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 39
+_APP_BUILD = 40
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -14452,15 +14452,10 @@ def render_fleet_management():
         if st.session_state.get(swap_dialog_open_key, False):
             fleet_dropdown_options = sorted({int(t) for t in FLEET})
             off_trucks_now = {int(t) for t in (st.session_state.get("off_set") or set())}
-            truck_dropdown_options = [
-                int(t)
-                for t in fleet_dropdown_options
-                if int(t) not in off_trucks_now
-            ] + [
-                int(t)
-                for t in fleet_dropdown_options
-                if int(t) in off_trucks_now
-            ]
+            truck_dropdown_options = sorted(
+                [int(t) for t in fleet_dropdown_options],
+                key=lambda truck_num: (0 if int(truck_num) in off_trucks_now else 1, int(truck_num)),
+            )
             load_on_dropdown_options = [int(t) for t in fleet_dropdown_options]
 
             def _coerce_swap_dropdown_pick(value) -> int | None:
@@ -27766,10 +27761,12 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _seen_swap_routes.add(int(route_num))
 
                 truck_dropdown_options = [
-                    int(t)
-                    for t in fleet_dropdown_options
-                    if int(t) not in off_trucks_now
+                    int(t) for t in fleet_dropdown_options
                 ]
+                truck_dropdown_options = sorted(
+                    truck_dropdown_options,
+                    key=lambda truck_num: (0 if int(truck_num) in off_trucks_now else 1, int(truck_num)),
+                )
 
                 def _coerce_run_day_swap_pick(value) -> int | None:
                     try:
@@ -27870,9 +27867,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             "Select route truck..."
                             if truck_num is None
                             else (
-                                f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
-                                if int(truck_num) in deduped_swap_routes
-                                else f"Truck {int(truck_num)}"
+                                f"Route {int(truck_num)} (OOS) \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
+                                if int(truck_num) in off_trucks_now and int(truck_num) in deduped_swap_routes
+                                else (
+                                    f"Route {int(truck_num)} (OOS)"
+                                    if int(truck_num) in off_trucks_now
+                                    else (
+                                        f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
+                                        if int(truck_num) in deduped_swap_routes
+                                        else f"Truck {int(truck_num)}"
+                                    )
+                                )
                             )
                         ),
                     )
@@ -33837,122 +33842,104 @@ elif st.session_state.active_screen == "LOAD":
         if not load_day_started:
             pace_title_text = f"{pace_title_text} - Awaiting first load"
 
-        st.markdown(
-            (
-                "<style>"
-                ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
-                ".load-pace-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;text-align:left;user-select:none;}"
-                ".load-pace-toggle-hit{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;cursor:pointer;}"
-                ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-                ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
-                ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
-                ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
-                ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
-                ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
-                "@media (max-width:980px){.load-pace-wrap.load-pace-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock.collapsed{background:transparent !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock .load-pace-body{max-height:min(56vh,460px);overflow:auto;}"
-                ".load-pace-wrap.load-pace-mobile-dock.collapsed .load-pace-body{max-height:0 !important;overflow:hidden;}}"
-                "</style>"
-                f"<div class='load-pace-wrap{pace_mobile_dock_class}' data-load-pace-card='1' style='border:{pace_border_style};'>"
-                f"  <div class='load-pace-label' data-load-pace-header='1' style='background:{pace_header_gradient};'>"
-                "    <span class='load-pace-toggle-hit' data-load-pace-toggle-hit='1' role='button' tabindex='0'>"
-                f"      <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
-                f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
-                "      <span class='load-pace-chevron'>v</span>"
-                "    </span>"
-                "  </div>"
-                f"  <div class='load-pace-body'>{pace_body_html}</div>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
-        components.html(
-            """
-            <script>
-            (function(){
-                try {
-                    const rootWindow = window.parent || window;
-                    const root = rootWindow.document;
-                    if (!root) return;
+        if not is_mobile_load:
+            st.markdown(
+                (
+                    "<style>"
+                    ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
+                    ".load-pace-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;text-align:left;user-select:none;}"
+                    ".load-pace-toggle-hit{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;cursor:pointer;}"
+                    ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+                    ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
+                    ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
+                    ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
+                    ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
+                    ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
+                    "</style>"
+                    f"<div class='load-pace-wrap' data-load-pace-card='1' style='border:{pace_border_style};'>"
+                    f"  <div class='load-pace-label' data-load-pace-header='1' style='background:{pace_header_gradient};'>"
+                    "    <span class='load-pace-toggle-hit' data-load-pace-toggle-hit='1' role='button' tabindex='0'>"
+                    f"      <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
+                    f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
+                    "      <span class='load-pace-chevron'>v</span>"
+                    "    </span>"
+                    "  </div>"
+                    f"  <div class='load-pace-body'>{pace_body_html}</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            components.html(
+                """
+                <script>
+                (function(){
+                    try {
+                        const rootWindow = window.parent || window;
+                        const root = rootWindow.document;
+                        if (!root) return;
 
-                    const cards = root.querySelectorAll('[data-load-pace-card="1"]');
-                    if (!cards.length) return;
-                    const card = cards[cards.length - 1];
-                    const header = card.querySelector('[data-load-pace-toggle-hit="1"]') || card.querySelector('[data-load-pace-header="1"]');
-                    if (!header) return;
+                        const cards = root.querySelectorAll('[data-load-pace-card="1"]');
+                        if (!cards.length) return;
+                        const card = cards[cards.length - 1];
+                        const header = card.querySelector('[data-load-pace-toggle-hit="1"]') || card.querySelector('[data-load-pace-header="1"]');
+                        if (!header) return;
 
-                    const storageKey = 'loadPaceCollapsed';
-                    const isMobileViewport = () => {
-                        try {
-                            const viewportWidth = Math.max(
-                                0,
-                                rootWindow.innerWidth || 0,
-                                root.documentElement ? root.documentElement.clientWidth || 0 : 0,
-                            );
-                            return viewportWidth <= 980;
-                        } catch (e) {
-                            return false;
-                        }
-                    };
+                        const storageKey = 'loadPaceCollapsed';
+                        const storage = (() => {
+                            try { return rootWindow.localStorage; } catch (e) { return null; }
+                        })();
 
-                    const storage = (() => {
-                        try { return rootWindow.localStorage; } catch (e) { return null; }
-                    })();
-
-                    const getCollapsed = () => {
-                        const defaultCollapsed = isMobileViewport();
-                        try {
-                            if (!storage) return defaultCollapsed;
-                            const raw = storage.getItem(storageKey);
-                            if (raw === null) return defaultCollapsed;
-                            return raw === '1';
-                        } catch (e) {
-                            return defaultCollapsed;
-                        }
-                    };
-
-                    const setCollapsed = (collapsed) => {
-                        try {
-                            if (storage) storage.setItem(storageKey, collapsed ? '1' : '0');
-                        } catch (e) {}
-                    };
-
-                    const applyCollapsed = () => {
-                        card.classList.toggle('collapsed', getCollapsed());
-                    };
-
-                    applyCollapsed();
-
-                    if (!header.dataset.boundLoadPaceToggle) {
-                        const toggle = () => {
-                            const willCollapse = !card.classList.contains('collapsed');
-                            card.classList.toggle('collapsed', willCollapse);
-                            setCollapsed(willCollapse);
+                        const getCollapsed = () => {
+                            try {
+                                if (!storage) return false;
+                                const raw = storage.getItem(storageKey);
+                                if (raw === null) return false;
+                                return raw === '1';
+                            } catch (e) {
+                                return false;
+                            }
                         };
 
-                        header.addEventListener('click', function(ev) {
-                            ev.preventDefault();
-                            ev.stopPropagation();
-                            toggle();
-                        });
-                        header.addEventListener('keydown', function(ev) {
-                            if (ev.key === 'Enter' || ev.key === ' ') {
+                        const setCollapsed = (collapsed) => {
+                            try {
+                                if (storage) storage.setItem(storageKey, collapsed ? '1' : '0');
+                            } catch (e) {}
+                        };
+
+                        const applyCollapsed = () => {
+                            card.classList.toggle('collapsed', getCollapsed());
+                        };
+
+                        applyCollapsed();
+
+                        if (!header.dataset.boundLoadPaceToggle) {
+                            const toggle = () => {
+                                const willCollapse = !card.classList.contains('collapsed');
+                                card.classList.toggle('collapsed', willCollapse);
+                                setCollapsed(willCollapse);
+                            };
+
+                            header.addEventListener('click', function(ev) {
                                 ev.preventDefault();
                                 ev.stopPropagation();
                                 toggle();
-                            }
-                        });
-                        header.dataset.boundLoadPaceToggle = '1';
-                    }
-                } catch (e) {}
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+                            });
+                            header.addEventListener('keydown', function(ev) {
+                                if (ev.key === 'Enter' || ev.key === ' ') {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    toggle();
+                                }
+                            });
+                            header.dataset.boundLoadPaceToggle = '1';
+                        }
+                    } catch (e) {}
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
 
     with load_right_col:
         if not is_mobile_load:

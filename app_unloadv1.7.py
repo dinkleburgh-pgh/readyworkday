@@ -58,7 +58,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 50
+_APP_BUILD = 51
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -27836,8 +27836,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["sup_dust_clothes_dialog_open"] = False
                     _mark_and_save()
                     if run_day_flow_active:
-                        st.session_state["sup_run_day_flow_active"] = False
+                        # Keep flow active until final step
                         _queue_management_confirmation("Dust clothes saved.")
+                        st.session_state["sup_run_day_flow_active"] = True
                         _open_supervisor_dialog("sup_run_day_spares_dialog_open")
                     else:
                         _queue_management_confirmation("Dust clothes updated.")
@@ -27846,7 +27847,8 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 if run_day_flow_active:
                     if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
                         st.session_state["sup_dust_clothes_dialog_open"] = False
-                        st.session_state["sup_run_day_flow_active"] = False
+                        # Keep flow active until final step
+                        st.session_state["sup_run_day_flow_active"] = True
                         _open_supervisor_dialog("sup_run_day_spares_dialog_open")
                         st.rerun()
                 if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
@@ -28416,10 +28418,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         _apply_truck_status_change(t, "Dirty")
                     if dirty_picks:
                         _mark_and_save()
+                    # Keep flow active until final step
+                    st.session_state["sup_run_day_flow_active"] = True
                     _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
                     st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
+                    # Keep flow active until final step
+                    st.session_state["sup_run_day_flow_active"] = True
                     _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
                     st.rerun()
 
@@ -28511,6 +28517,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state[daily_notes_seed_key] = current_run_day_key
                     st.session_state["sup_last_run_day_completed_key"] = current_run_day_key
                     st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+                    # End the flow after final step
                     st.session_state["sup_run_day_flow_active"] = False
                     _queue_management_confirmation("Run day setup complete.")
                     _mark_and_save()

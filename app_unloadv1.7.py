@@ -58,7 +58,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 49
+_APP_BUILD = 50
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -3122,27 +3122,36 @@ def _render_audit_capture_panel(
     else:
         st.session_state.pop(route_pick_key, None)
 
-    can_add_request = bool(selected_item) and int(qty) >= 1
-    if can_add_request and st.button("Add Remove Request", width='stretch', key=f"audit_add_{source}_{t}"):
+    def _submit_audit_request_entry() -> None:
         if not full_item_label:
             st.warning("Select an audit item before adding.")
-        else:
-            if _append_audit_history_entry(
-                truck=t,
-                route_override=int(selected_route_num),
-                item_label=full_item_label,
-                qty=int(qty),
-                note=pending_note,
-                source=source,
-                warn_on_next_load=bool(pending_warn_next_load),
-            ):
-                st.success("Audit request added.")
-                st.session_state[note_clear_pending_key] = True
-                st.session_state[warn_clear_pending_key] = True
-                _reset_audit_button_state()
-                st.rerun()
-            else:
-                st.error("Could not save audit request.")
+            return
+        if _append_audit_history_entry(
+            truck=t,
+            route_override=int(selected_route_num),
+            item_label=full_item_label,
+            qty=int(qty),
+            note=pending_note,
+            source=source,
+            warn_on_next_load=bool(pending_warn_next_load),
+        ):
+            st.success("Audit request added.")
+            st.session_state[note_clear_pending_key] = True
+            st.session_state[warn_clear_pending_key] = True
+            _reset_audit_button_state()
+            st.rerun()
+        st.error("Could not save audit request.")
+
+    can_add_request = bool(selected_item) and int(qty) >= 1
+    if is_qty_step and can_add_request and st.button(
+        "Apply Audit",
+        width='stretch',
+        key=f"audit_apply_{source}_{t}",
+    ):
+        _submit_audit_request_entry()
+
+    if can_add_request and st.button("Add Remove Request", width='stretch', key=f"audit_add_{source}_{t}"):
+        _submit_audit_request_entry()
 
     if is_qty_step and st.button("Back", width='stretch', key=f"audit_qty_back_{source}_{t}"):
         _set_audit_button_state(
@@ -10835,17 +10844,16 @@ def scheduled_trucks_for_current_load_day() -> set[int]:
         for t in FLEET
         if int(t) not in persistent_spares
     }
-    runtime_non_route_spares = {
+    runtime_spares = {
         int(t)
         for t in (st.session_state.get("spare_set") or set())
-        if int(t) not in route_capable_fleet
     }
-    excluded_routes = off_today | persistent_spares | runtime_non_route_spares
+    excluded_routes = off_today | persistent_spares | runtime_spares
 
-    # Original fallback cohort: scheduled routes for current load day.
+    # Fallback cohort: only route-capable trucks (not persistent spares)
     fallback_routes = {
         int(t)
-        for t in FLEET
+        for t in route_capable_fleet
         if int(t) not in excluded_routes
     }
 
@@ -10891,21 +10899,19 @@ def unload_trucks_for_current_day() -> set[int]:
         for t in FLEET
         if int(t) not in persistent_spares
     }
-    runtime_non_route_spares = {
+    runtime_spares = {
         int(t)
         for t in (st.session_state.get("spare_set") or set())
-        if int(t) not in route_capable_fleet
     }
-    excluded_routes = persistent_spares | runtime_non_route_spares
+    off_prev_day = {int(t) for t in off_trucks_for_day(previous_day_num)}
+    excluded_routes = persistent_spares | runtime_spares | off_prev_day
 
-    # Legacy fallback when mapping data is not yet populated.
-    # Unload day is one day behind the current load day.
+    # Fallback cohort: only route-capable trucks (not persistent spares)
     fallback_targets = {
         int(t)
-        for t in FLEET
-        if int(t) not in off_trucks_for_day(previous_day_num)
+        for t in route_capable_fleet
+        if int(t) not in excluded_routes
     }
-    fallback_targets -= excluded_routes
 
     mapped_filtered = {
         int(t)

@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## v1.7.5 build 45 - 2026-05-14
+## v1.7.5 build 46 - 2026-05-14
 
-1. Bumped build to **45**.
+1. Bumped build to **46**.
 2. **LOAD / UNLOAD COUNTS**: Fixed sidebar progress to use stable current-day totals even when day mapping is partial, while still excluding non-route spare trucks from route totals.
 3. **LOAD MANAGEMENT**: Restored original remaining-card logic (Dusts/Uniforms/Spares/Total Left) with reliable countdown values.
 4. **AUDIT FLEET (MOBILE)**: Removed duplicate truck header, kept the existing Auditing Truck pill heading, and added positioning protection so it is not hidden by the Notices overlay.

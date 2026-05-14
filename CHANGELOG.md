@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.5 build 51 - 2026-05-14
+
+1. Bumped build to **51**.
+2. **MANAGEMENT / RUN DAY**: Fixed Run Day dialog stepper so all 4 steps (Dust Clothes, Spares/Swaps, Specials, Daily Notes) now complete in sequence before ending the flow. Dialog no longer stalls after step 1/4.
+
 ## Unreleased
 
 ## v1.7.5 build 49 - 2026-05-14

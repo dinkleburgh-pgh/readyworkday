@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 49 - 2026-05-14
+
+1. Bumped build to **49**.
+2. **MANAGEMENT / RUN DAY**: Fixed a crash on all devices by removing an invalid call to `_render_sup_run_day_specials_dialog` in the Step 3 flow path.
+3. **LOAD / UNLOAD PROGRESS**: Fixed off-by-one route totals by treating runtime spare exclusions against the live route-capable fleet instead of the static default-fleet constant.
+4. **LOAD MANAGEMENT CARDS**: Restored route-level remaining counts so Dust/Uniform/Spare/Total cards stay in sync with sidebar progress totals.
+
 ## v1.7.5 build 48 - 2026-05-14
 
 1. Bumped build to **48**.

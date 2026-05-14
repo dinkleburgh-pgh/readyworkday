@@ -58,7 +58,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 48
+_APP_BUILD = 49
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -10830,10 +10830,15 @@ def scheduled_trucks_for_current_load_day() -> set[int]:
 
     off_today = {int(t) for t in off_trucks_for_today()}
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
+    route_capable_fleet = {
+        int(t)
+        for t in FLEET
+        if int(t) not in persistent_spares
+    }
     runtime_non_route_spares = {
         int(t)
         for t in (st.session_state.get("spare_set") or set())
-        if int(t) not in set(DEFAULT_FLEET_TRUCKS)
+        if int(t) not in route_capable_fleet
     }
     excluded_routes = off_today | persistent_spares | runtime_non_route_spares
 
@@ -10881,10 +10886,15 @@ def unload_trucks_for_current_day() -> set[int]:
                     previous_day_routes.add(int(truck_num))
 
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
+    route_capable_fleet = {
+        int(t)
+        for t in FLEET
+        if int(t) not in persistent_spares
+    }
     runtime_non_route_spares = {
         int(t)
         for t in (st.session_state.get("spare_set") or set())
-        if int(t) not in set(DEFAULT_FLEET_TRUCKS)
+        if int(t) not in route_capable_fleet
     }
     excluded_routes = persistent_spares | runtime_non_route_spares
 
@@ -11030,21 +11040,14 @@ def _current_load_day_remaining_breakdown() -> dict[str, object]:
         if route_value in remaining_routes:
             route_assignments[route_value] = int(truck_num)
 
-    # Enforce: each truck can only be assigned to one remaining route.
-    seen_trucks = set()
-    filtered_route_assignments = {}
-    for route, truck in route_assignments.items():
-        if truck not in seen_trucks:
-            filtered_route_assignments[route] = truck
-            seen_trucks.add(truck)
-    # If a truck is assigned to multiple routes, only the first is kept.
-
     # Classify each remaining route by the type of the truck that will service it.
+    # Keep route-level counting (do not deduplicate trucks) so card totals match
+    # current load-day progress totals.
     dust_trucks_left: list[int] = []
     uniform_trucks_left: list[int] = []
     spare_trucks_left: list[int] = []
     total_trucks_left: list[int] = []
-    for _assigned_truck in filtered_route_assignments.values():
+    for _assigned_truck in route_assignments.values():
         total_trucks_left.append(int(_assigned_truck))
         _truck_type = _get_truck_type(int(_assigned_truck))
         if _truck_type == TRUCK_TYPE_DUST:
@@ -11063,7 +11066,7 @@ def _current_load_day_remaining_breakdown() -> dict[str, object]:
         "dusts_left": int(len(dust_trucks_left)),
         "uniforms_left": int(len(uniform_trucks_left)),
         "spares_left": int(len(spare_trucks_left)),
-        "total_left": int(len(filtered_route_assignments)),
+        "total_left": int(len(route_assignments)),
         "dusts_left_trucks": dust_trucks_left,
         "uniforms_left_trucks": uniform_trucks_left,
         "spares_left_trucks": spare_trucks_left,
@@ -28424,7 +28427,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["sup_run_day_flow_active"] = False
                     st.rerun()
 
-            _render_sup_run_day_specials_dialog()
+            # Step 3 runs inline in this block; avoid calling a missing wrapper.
 
         def _dismiss_sup_run_day_daily_notes_dialog():
             st.session_state["sup_run_day_daily_notes_dialog_open"] = False

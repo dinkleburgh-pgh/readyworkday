@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 58
+_APP_BUILD = 59
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -15267,13 +15267,6 @@ def render_fleet_management():
                                 if (btn.dataset.fleetMultiToastBound === '1') return;
                                 btn.dataset.fleetMultiToastBound = '1';
                                 btn.addEventListener('click', (evt) => {{
-                                    try {{
-                                        if (evt) {{
-                                            evt.preventDefault();
-                                            evt.stopPropagation();
-                                            if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                                        }}
-                                    }} catch (e) {{}}
                                     const truckLabel = truckLabelFromButton(btn);
                                     if (!truckLabel) return;
                                     const selected = getSelectedSet();
@@ -15346,12 +15339,8 @@ def render_fleet_management():
         if clicked_truck is not None:
             clicked_num = int(clicked_truck)
             if multi_mode_active:
-                currently_selected = set(int(t) for t in (st.session_state.get(selected_trucks_key) or []))
-                if clicked_num in currently_selected:
-                    currently_selected.discard(clicked_num)
-                else:
-                    currently_selected.add(clicked_num)
-                st.session_state[selected_trucks_key] = sorted(currently_selected)
+                synced_multi_selected = _parse_fleet_multi_selected_query_param({int(t) for t in FLEET})
+                st.session_state[selected_trucks_key] = synced_multi_selected
             else:
                 st.session_state.sup_manage_new_mode = False
                 st.session_state.sup_manage_multi_mode = False

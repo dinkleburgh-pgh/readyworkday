@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 59
+_APP_BUILD = 60
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -14714,14 +14714,9 @@ def _render_fleet_left_rail_actions():
         _render_unload_request_dialog_if_needed()
     else:
         fleet_now = {int(t) for t in FLEET}
-        qp_selected = _parse_fleet_multi_selected_query_param(fleet_now)
         target_trucks = sorted({
             int(t) for t in (st.session_state.get(selected_trucks_key) or []) if int(t) in fleet_now
         })
-        if qp_selected:
-            target_trucks = list(qp_selected)
-        elif _query_param_first_value(_get_query_params(), "msel") is not None:
-            target_trucks = []
         st.session_state[selected_trucks_key] = target_trucks
         st.caption(f"Selected trucks: {len(target_trucks)}")
         selected_statuses = sorted({current_status_label(t) for t in target_trucks})
@@ -15114,23 +15109,7 @@ def render_fleet_management():
                     st.rerun()
 
         multi_mode_active = bool(st.session_state.get("sup_manage_multi_mode"))
-        if multi_mode_active:
-            try:
-                qp_multi_raw = _query_param_first_value(_get_query_params(), "msel")
-                qp_multi_text = str(qp_multi_raw or "").strip()
-                if qp_multi_text:
-                    qp_multi_selected = {
-                        int(tok)
-                        for tok in re.split(r"[^0-9]+", qp_multi_text)
-                        if str(tok or "").strip()
-                    }
-                    if qp_multi_selected:
-                        st.session_state[selected_trucks_key] = sorted(
-                            int(t) for t in qp_multi_selected if int(t) in set(FLEET)
-                        )
-            except Exception:
-                pass
-        else:
+        if not multi_mode_active:
             if _query_param_first_value(_get_query_params(), "msel") is not None:
                 _set_query_params(msel=None)
 
@@ -15339,8 +15318,12 @@ def render_fleet_management():
         if clicked_truck is not None:
             clicked_num = int(clicked_truck)
             if multi_mode_active:
-                synced_multi_selected = _parse_fleet_multi_selected_query_param({int(t) for t in FLEET})
-                st.session_state[selected_trucks_key] = synced_multi_selected
+                currently_selected = set(int(t) for t in (st.session_state.get(selected_trucks_key) or []))
+                if clicked_num in currently_selected:
+                    currently_selected.discard(clicked_num)
+                else:
+                    currently_selected.add(clicked_num)
+                st.session_state[selected_trucks_key] = sorted(currently_selected)
             else:
                 st.session_state.sup_manage_new_mode = False
                 st.session_state.sup_manage_multi_mode = False

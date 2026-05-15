@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 56
+_APP_BUILD = 57
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -17566,7 +17566,7 @@ def _render_route_card_assign_dialog_if_needed():
                     else:
                         ok_assign, msg_assign = _assign_truck_to_oos_route(int(route_num), int(picked_truck))
                     if ok_assign:
-                        st.session_state["route_card_assign_feeMdback"] = str(msg_assign)
+                        st.session_state["route_card_assign_feedback"] = str(msg_assign)
                         st.session_state.pop("route_card_assign_route", None)
                         st.rerun()
                     st.warning(msg_assign)
@@ -18144,23 +18144,30 @@ def _render_route_card(
                             const openAssign = () => {{
                                 try {{
                                     const triggerLabel = `RouteAssignTrigger ${{routeNum}}`;
-                                    const allButtons = Array.from(root.querySelectorAll('button'));
-                                    const triggerButton = allButtons.find((btn) => normalize(btn.innerText || btn.textContent || '') === triggerLabel);
-                                    if (triggerButton) {{
-                                        triggerButton.click();
-                                        return;
+                                    let triggerButton = null;
+
+                                    try {{
+                                        const exactAria = root.querySelector(`button[aria-label="${{triggerLabel}}"]`);
+                                        if (exactAria) triggerButton = exactAria;
+                                    }} catch (e) {{}}
+
+                                    if (!triggerButton) {{
+                                        const allButtons = Array.from(root.querySelectorAll('button'));
+                                        triggerButton = allButtons.find((btn) => {{
+                                            const labelFromAria = normalize(btn.getAttribute('aria-label') || '');
+                                            const labelFromText = normalize(btn.innerText || btn.textContent || '');
+                                            return labelFromAria === triggerLabel || labelFromText === triggerLabel;
+                                        }}) || null;
                                     }}
 
-                                    const parentWin = window.parent;
-                                    const url = new URL(parentWin.location.href);
-                                    url.searchParams.set('route_assign', String(routeNum));
-                                    const targetHref = url.toString();
-                                    try {{
-                                        parentWin.history.pushState({{}}, '', targetHref);
-                                    }} catch (e) {{
-                                        try {{ parentWin.history.replaceState({{}}, '', targetHref); }} catch (e2) {{}}
+                                    if (triggerButton) {{
+                                        try {{
+                                            triggerButton.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window.parent }}));
+                                        }} catch (e) {{
+                                            triggerButton.click();
+                                        }}
+                                        return;
                                     }}
-                                    try {{ parentWin.dispatchEvent(new Event('popstate')); }} catch (e) {{}}
                                 }} catch (e) {{}}
                             }};
 

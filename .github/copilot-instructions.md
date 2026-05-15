@@ -5,6 +5,20 @@
 - State is JSON-file based (`.truck_state.json`, `truck_fleet.json`, `auth_users.json`, etc.). Keep schema changes backward-compatible.
 - UI relies on `st.session_state` and Streamlit reruns — avoid changes that reset session keys unexpectedly.
 
+## Logic Storage & Runtime Flow
+- Core runtime logic lives in `app_unloadv1.7.py` and is page-routed by `st.session_state.active_screen`.
+- Durable app state is loaded/saved through `load_state()` and `save_state()`. Most UI actions should persist via `_mark_and_save()` after state mutations.
+- Derived operational counts should come from shared helpers (`current_load_day_completion()`, `_current_load_progress_snapshot()`, `_current_load_day_remaining_breakdown()`) instead of ad-hoc per-page math.
+- Route-level logic and truck-level logic are different: when reporting "totals", prefer route-level counting to avoid double-counting when spare/OOS/swap coverage is active.
+- Route assignment overlays are applied via `_active_oos_spare_assignments()` and `_active_route_swap_assignments()`; update these pathways when changing coverage behavior.
+- Screen rendering is state-machine style: each button mutates session state, optionally calls `_mark_and_save()`, then relies on Streamlit rerun to re-evaluate the active page.
+
+### Change Safety Rules
+- Do not create parallel sources of truth for progress counts; extend shared helpers and consume those outputs across pages.
+- Keep JSON schema changes backward-compatible and provide defaults/migration-safe reads.
+- Prefer targeted helper updates over broad refactors in page blocks.
+- When modifying a cross-page helper, verify impact on at least `LOAD`, `UNLOAD`, and `FLEET` views.
+
 ## Build & Run
 ```sh
 # Local (Windows)

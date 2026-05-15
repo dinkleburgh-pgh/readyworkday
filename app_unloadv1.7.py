@@ -34,6 +34,7 @@ import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
 from datetime import date, timedelta, datetime
 import time
+import base64
 from io import BytesIO, StringIO
 import json
 import html
@@ -47,6 +48,32 @@ import socket
 import csv
 from pathlib import Path
 import bcrypt
+
+
+_MOBILE_CAMERA_COMPONENT = None
+try:
+    _mobile_camera_component_path = os.path.join(
+        os.path.dirname(__file__),
+        "components",
+        "mobile_camera_component",
+        "frontend",
+    )
+    if os.path.isdir(_mobile_camera_component_path):
+        _MOBILE_CAMERA_COMPONENT = declare_component(
+            "mobile_camera_component",
+            path=_mobile_camera_component_path,
+        )
+except Exception:
+    _MOBILE_CAMERA_COMPONENT = None
+
+
+class _InMemoryUploadedPhoto:
+    def __init__(self, raw_bytes: bytes, name: str = "camera_capture.jpg"):
+        self._raw_bytes = bytes(raw_bytes or b"")
+        self.name = str(name or "camera_capture.jpg")
+
+    def getvalue(self) -> bytes:
+        return self._raw_bytes
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -58,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 54
+_APP_BUILD = 55
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -2011,7 +2038,7 @@ def _render_mobile_audit_photo_uploader(
         "<div style='margin-top:0.85rem; font-size:0.88rem; letter-spacing:0.08em; text-transform:uppercase; font-weight:900; opacity:0.82;'>Audit Photos</div>",
         unsafe_allow_html=True,
     )
-    st.caption("Upload from camera or photo library. Images are auto-compressed and archived by date.")
+    st.caption("Tap Camera to capture quickly. Photos are auto-compressed, attached, and archived by date.")
 
     if Image is None:
         st.warning("Photo upload needs Pillow (PIL). Add `pillow` to requirements and reinstall dependencies.")
@@ -2035,48 +2062,115 @@ def _render_mobile_audit_photo_uploader(
         )
 
     photo_note_key = f"audit_mobile_photo_note_{target_truck_num}"
-    camera_key = f"audit_mobile_camera_capture_{target_truck_num}"
     upload_key = f"audit_mobile_file_upload_{target_truck_num}"
-    save_btn_key = f"audit_mobile_photo_save_btn_{target_truck_num}"
-    camera_capture = st.camera_input("Take audit photo", key=camera_key)
+    camera_saved_token_key = f"audit_mobile_camera_saved_token_{target_truck_num}"
+    upload_saved_tokens_key = f"audit_mobile_upload_saved_tokens_{target_truck_num}"
+    if upload_saved_tokens_key not in st.session_state or not isinstance(st.session_state.get(upload_saved_tokens_key), list):
+        st.session_state[upload_saved_tokens_key] = []
+
+    st.text_input("Photo note (optional)", key=photo_note_key, max_chars=120)
+
+    camera_capture_payload = None
+    if _MOBILE_CAMERA_COMPONENT is not None:
+        camera_capture_payload = _MOBILE_CAMERA_COMPONENT(
+            key=f"audit_mobile_direct_camera_{target_truck_num}",
+            button_label="Open Camera",
+            hint_text="Rear camera is requested when supported by your browser.",
+            default=None,
+        )
+    else:
+        camera_capture_payload = st.camera_input(
+            "Camera",
+            key=f"audit_mobile_camera_capture_{target_truck_num}",
+            help="Your browser controls camera selection. Use the camera flip control if it opens on selfie camera.",
+        )
+
     upload_files = st.file_uploader(
-        "Or upload image files",
+        "Upload from photo library",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
         key=upload_key,
     )
-    st.text_input("Photo note (optional)", key=photo_note_key, max_chars=120)
 
-    if st.button("Save Audit Photo(s)", width='stretch', key=save_btn_key):
-        candidates: list[tuple[str, object]] = []
-        if camera_capture is not None:
-            candidates.append(("camera", camera_capture))
-        for uploaded in (upload_files or []):
-            if uploaded is not None:
-                candidates.append(("upload", uploaded))
-
-        if not candidates:
-            st.warning("Take or select at least one photo first.")
+    note_text = str(st.session_state.get(photo_note_key) or "").strip()
+    camera_capture_file = None
+    if isinstance(camera_capture_payload, dict):
+        payload_error = str(camera_capture_payload.get("error") or "").strip()
+        if payload_error:
+            st.error(payload_error)
         else:
-            note_text = str(st.session_state.get(photo_note_key) or "").strip()
-            success_count = 0
-            fail_messages: list[str] = []
-            for source_label, upload_obj in candidates:
+            data_url = str(camera_capture_payload.get("data_url") or "")
+            file_name = str(camera_capture_payload.get("file_name") or "camera_capture.jpg")
+            if data_url and "," in data_url:
+                try:
+                    b64_data = data_url.split(",", 1)[1]
+                    raw_camera_bytes = base64.b64decode(b64_data)
+                except Exception:
+                    raw_camera_bytes = b""
+                if raw_camera_bytes:
+                    camera_capture_file = _InMemoryUploadedPhoto(raw_camera_bytes, file_name)
+    elif camera_capture_payload is not None:
+        camera_capture_file = camera_capture_payload
+
+    if camera_capture_file is not None:
+        try:
+            camera_bytes = bytes(camera_capture_file.getvalue() or b"")
+        except Exception:
+            camera_bytes = b""
+        if camera_bytes:
+            camera_token = hashlib.sha1(camera_bytes).hexdigest()
+            current_camera_token = f"{int(target_truck_num)}:{camera_token}"
+            if st.session_state.get(camera_saved_token_key) != current_camera_token:
                 ok, err, _entry = _save_audit_photo_file(
-                    upload_obj,
+                    camera_capture_file,
                     truck_num=int(target_truck_num),
-                    source_label=source_label,
+                    source_label="camera",
                     note_text=note_text,
                 )
                 if ok:
-                    success_count += 1
+                    st.session_state[camera_saved_token_key] = current_camera_token
+                    st.success("Photo captured and uploaded.")
+                    st.rerun()
                 elif err:
-                    fail_messages.append(str(err))
+                    st.error(str(err))
 
-            if success_count:
-                st.success(f"Saved {success_count} audit photo(s).")
-            if fail_messages:
-                st.error(" ".join(fail_messages[:2]))
+    uploaded_saved_tokens = set(str(x) for x in (st.session_state.get(upload_saved_tokens_key) or []))
+    upload_success_count = 0
+    upload_fail_messages: list[str] = []
+    newly_saved_upload_tokens: list[str] = []
+    for uploaded in (upload_files or []):
+        if uploaded is None:
+            continue
+        try:
+            uploaded_bytes = bytes(uploaded.getvalue() or b"")
+        except Exception:
+            uploaded_bytes = b""
+        if not uploaded_bytes:
+            continue
+        upload_token = hashlib.sha1(uploaded_bytes).hexdigest()
+        token_key = f"{int(target_truck_num)}:{upload_token}"
+        if token_key in uploaded_saved_tokens:
+            continue
+        ok, err, _entry = _save_audit_photo_file(
+            uploaded,
+            truck_num=int(target_truck_num),
+            source_label="upload",
+            note_text=note_text,
+        )
+        if ok:
+            upload_success_count += 1
+            newly_saved_upload_tokens.append(token_key)
+        elif err:
+            upload_fail_messages.append(str(err))
+
+    if newly_saved_upload_tokens:
+        existing_tokens = list(st.session_state.get(upload_saved_tokens_key) or [])
+        merged_tokens = existing_tokens + [tok for tok in newly_saved_upload_tokens if tok not in existing_tokens]
+        st.session_state[upload_saved_tokens_key] = merged_tokens[-50:]
+    if upload_success_count:
+        st.success(f"Uploaded {upload_success_count} photo(s) from library.")
+    if upload_fail_messages:
+        st.error(" ".join(upload_fail_messages[:2]))
 
     run_date_key = _current_run_date_iso()
     recent_entries = _recent_audit_photo_entries(run_date_key, limit=6)
@@ -35423,8 +35517,6 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         st.session_state.audit_fleet_selected_truck = None
 
     with audit_left_col:
-        if not is_mobile_audit:
-            _render_audit_left_rail_card(max_items=6, recent_days=7)
         if selected_audit_truck_num is None and (not is_mobile_audit):
             st.caption("Select a truck to start an audit removal request.")
 
@@ -35653,6 +35745,9 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
                     help="Optional detail saved with this remove request.",
                 )
 
+                st.divider()
+                _render_audit_left_rail_card(max_items=6, recent_days=7)
+
             with audit_main_col:
                 st.markdown(
                     (
@@ -35675,11 +35770,10 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
     if is_mobile_audit:
         with audit_main_col:
-            with st.expander("Audit Photo Upload", expanded=False):
-                _render_mobile_audit_photo_uploader(
-                    selected_truck_num=selected_audit_truck_num,
-                    truck_options=all_fleet_audit_trucks,
-                )
+            _render_mobile_audit_photo_uploader(
+                selected_truck_num=selected_audit_truck_num,
+                truck_options=all_fleet_audit_trucks,
+            )
         st.markdown("<div style='height:86px;'></div>", unsafe_allow_html=True)
         _render_mobile_audit_dock_card(max_items=6, recent_days=7, expanded=False)
 

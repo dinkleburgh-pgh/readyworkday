@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mobile Camera Component</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: transparent;
+      }
+      .wrap {
+        width: 100%;
+        padding: 4px 0 6px 0;
+      }
+      .cam-btn {
+        width: 100%;
+        border: 1px solid rgba(100, 116, 139, 0.6);
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 0.98rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        background: linear-gradient(180deg, rgba(30, 64, 175, 0.92), rgba(30, 58, 138, 0.96));
+        color: #f8fafc;
+        cursor: pointer;
+      }
+      .cam-btn:active {
+        transform: translateY(1px);
+      }
+      .hint {
+        margin-top: 6px;
+        font-size: 0.72rem;
+        opacity: 0.86;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <button id="captureBtn" class="cam-btn" type="button">Open Camera</button>
+      <div id="hint" class="hint">Rear camera is requested when supported by your browser.</div>
+      <input id="cameraInput" class="sr-only" type="file" accept="image/*" capture="environment" />
+    </div>
+
+    <script>
+      const captureBtn = document.getElementById('captureBtn');
+      const cameraInput = document.getElementById('cameraInput');
+      const hint = document.getElementById('hint');
+
+      function postToStreamlit(message) {
+        window.parent.postMessage(Object.assign({ isStreamlitMessage: true }, message), '*');
+      }
+
+      function setFrameHeight() {
+        const height = Math.ceil(document.body.scrollHeight + 6);
+        postToStreamlit({ type: 'streamlit:setFrameHeight', height: height });
+      }
+
+      function initStreamlit() {
+        postToStreamlit({ type: 'streamlit:componentReady', apiVersion: 1 });
+        setFrameHeight();
+      }
+
+      function safeFileName(name) {
+        const raw = String(name || 'camera_capture.jpg').trim();
+        return raw || 'camera_capture.jpg';
+      }
+
+      captureBtn.addEventListener('click', () => {
+        cameraInput.click();
+      });
+
+      cameraInput.addEventListener('change', async () => {
+        const file = cameraInput.files && cameraInput.files[0] ? cameraInput.files[0] : null;
+        if (!file) return;
+
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('Could not read camera image.'));
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(file);
+          });
+
+          postToStreamlit({
+            type: 'streamlit:setComponentValue',
+            value: {
+              file_name: safeFileName(file.name),
+              mime_type: String(file.type || 'image/jpeg'),
+              data_url: String(dataUrl || ''),
+              size: Number(file.size || 0),
+              last_modified: Number(file.lastModified || Date.now()),
+              source: 'camera',
+            }
+          });
+        } catch (err) {
+          postToStreamlit({
+            type: 'streamlit:setComponentValue',
+            value: {
+              error: String((err && err.message) || err || 'Unknown camera error')
+            }
+          });
+        } finally {
+          cameraInput.value = '';
+        }
+      });
+
+      window.addEventListener('message', (event) => {
+        const data = event && event.data ? event.data : {};
+        if (!data || data.type !== 'streamlit:render') return;
+        const args = data.args || {};
+        const label = String(args.button_label || '').trim();
+        if (label) {
+          captureBtn.textContent = label;
+        }
+        const hintText = String(args.hint_text || '').trim();
+        if (hintText) {
+          hint.textContent = hintText;
+        }
+        setFrameHeight();
+      });
+
+      window.addEventListener('resize', setFrameHeight);
+      initStreamlit();
+    </script>
+  </body>
+</html>

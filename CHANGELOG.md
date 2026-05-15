@@ -1,8 +1,8 @@
 # Changelog
 
-## v1.7.5 build 53 - 2026-05-15
+## v1.7.5 build 54 - 2026-05-15
 
-1. Bumped build to **53**.
+1. Bumped build to **54**.
 2. **FLEET MULTI-SELECT**: Kept truck taps responsive without per-click reruns, persisted selection through `msel`, and cleaned up the multi-edit toast on exit.
 3. **FLEET / ROUTE SWAPS**: Added click-to-edit on route swap cards so assigned routes can reopen the Route Change dialog directly.
 4. **ROUTE SWAP DROPDOWNS**: Ordered Load On choices with spares first, OFF trucks second, then the remaining fleet.

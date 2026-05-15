@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 57
+_APP_BUILD = 58
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -24143,6 +24143,7 @@ if st.session_state.setup_done:
             unsafe_allow_html=True,
         )
         if st.sidebar.button("Run Day", key="sidebar_run_day_alert_btn", width='stretch'):
+            st.session_state["sup_run_day_return_screen"] = str(st.session_state.get("active_screen") or "SUPERVISOR")
             st.session_state["sup_run_day_flow_active"] = True
             st.session_state["sup_run_day_spares_complete"] = False
             st.session_state["sup_run_day_specials_complete"] = False
@@ -28528,6 +28529,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         )
 
         if st.button("Run Day", width='stretch', key="sup_run_day_btn"):
+            st.session_state["sup_run_day_return_screen"] = str(st.session_state.get("active_screen") or "SUPERVISOR")
             st.session_state["sup_run_day_flow_active"] = True
             st.session_state["sup_run_day_spares_complete"] = False
             st.session_state["sup_run_day_specials_complete"] = False
@@ -29457,8 +29459,12 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     # End the flow after final step
                     st.session_state["sup_run_day_flow_active"] = False
                     _queue_management_confirmation("Run day setup complete.")
-                    _mark_and_save()
-                    st.rerun()
+                    return_screen = str(st.session_state.pop("sup_run_day_return_screen", "") or "").strip().upper()
+                    if return_screen and return_screen != "SUPERVISOR" and _screen_allowed_for_current_user(return_screen):
+                        _sidebar_navigate(return_screen)
+                    else:
+                        _mark_and_save()
+                        st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
                     st.session_state["sup_run_day_flow_active"] = True

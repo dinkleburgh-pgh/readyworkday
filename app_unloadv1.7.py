@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 55
+_APP_BUILD = 56
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -15806,37 +15806,30 @@ def render_fleet_management():
                     st.session_state[spare_toggle_key] = bool(int(sel) in set(st.session_state.get("spare_set") or set()))
 
                 st.markdown("<div style='font-size:0.8rem;opacity:0.78;margin:0.15rem 0 0.35rem 0;'>Quick Toggles</div>", unsafe_allow_html=True)
-                oos_btn_col, oos_chk_col = st.columns([5.0, 1.0], gap="small")
-                with oos_btn_col:
-                    if st.button("Out Of Service", width='stretch', key=f"sup_manage_dialog_status_oos_btn_{int(sel)}"):
-                        next_oos = not bool(st.session_state.get(oos_toggle_key))
-                        st.session_state[oos_toggle_key] = bool(next_oos)
-                        if next_oos:
-                            st.session_state[spare_toggle_key] = False
-                        st.rerun()
-                with oos_chk_col:
-                    st.checkbox(
-                        "",
-                        key=oos_toggle_key,
-                        label_visibility="collapsed",
-                        help="Enable or disable Out Of Service",
-                    )
+                oos_enabled = bool(st.session_state.get(oos_toggle_key))
+                spare_enabled = bool(st.session_state.get(spare_toggle_key))
 
-                spare_btn_col, spare_chk_col = st.columns([5.0, 1.0], gap="small")
-                with spare_btn_col:
-                    if st.button("Spare", width='stretch', key=f"sup_manage_dialog_status_spare_btn_{int(sel)}"):
-                        next_spare = not bool(st.session_state.get(spare_toggle_key))
-                        st.session_state[spare_toggle_key] = bool(next_spare)
-                        if next_spare:
-                            st.session_state[oos_toggle_key] = False
-                        st.rerun()
-                with spare_chk_col:
-                    st.checkbox(
-                        "",
-                        key=spare_toggle_key,
-                        label_visibility="collapsed",
-                        help="Enable or disable Spare",
-                    )
+                if st.button(
+                    f"Out Of Service: {'Enabled' if oos_enabled else 'Disabled'}",
+                    width='stretch',
+                    key=f"sup_manage_dialog_status_oos_btn_{int(sel)}",
+                ):
+                    next_oos = not oos_enabled
+                    st.session_state[oos_toggle_key] = bool(next_oos)
+                    if next_oos:
+                        st.session_state[spare_toggle_key] = False
+                    st.rerun()
+
+                if st.button(
+                    f"Spare: {'Enabled' if spare_enabled else 'Disabled'}",
+                    width='stretch',
+                    key=f"sup_manage_dialog_status_spare_btn_{int(sel)}",
+                ):
+                    next_spare = not spare_enabled
+                    st.session_state[spare_toggle_key] = bool(next_spare)
+                    if next_spare:
+                        st.session_state[oos_toggle_key] = False
+                    st.rerun()
 
                 shop_load_on = ""
                 if status_sel == "Shop":
@@ -16200,8 +16193,41 @@ def render_fleet_management():
         cur_status = current_status_label(sel)
         st.caption(f"Current status: {cur_status}")
 
-        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop", "Out Of Service", "Spare"]
+        status_options = ["Dirty", "Unloaded", "In Progress", "Loaded", "Shop"]
         status_sel = st.selectbox("Status", status_options, index=status_options.index(cur_status) if cur_status in status_options else 0, key="sup_manage_status_sel")
+
+        inline_oos_toggle_key = f"sup_manage_status_oos_toggle_{int(sel)}"
+        inline_spare_toggle_key = f"sup_manage_status_spare_toggle_{int(sel)}"
+        if inline_oos_toggle_key not in st.session_state:
+            is_oos_now = int(sel) in set(st.session_state.get("off_set") or set()) and int(sel) not in set(off_trucks_for_today() or [])
+            st.session_state[inline_oos_toggle_key] = bool(is_oos_now)
+        if inline_spare_toggle_key not in st.session_state:
+            st.session_state[inline_spare_toggle_key] = bool(int(sel) in set(st.session_state.get("spare_set") or set()))
+
+        st.markdown("<div style='font-size:0.8rem;opacity:0.78;margin:0.15rem 0 0.35rem 0;'>Quick Toggles</div>", unsafe_allow_html=True)
+        inline_oos_enabled = bool(st.session_state.get(inline_oos_toggle_key))
+        inline_spare_enabled = bool(st.session_state.get(inline_spare_toggle_key))
+        if st.button(
+            f"Out Of Service: {'Enabled' if inline_oos_enabled else 'Disabled'}",
+            width='stretch',
+            key=f"sup_manage_status_oos_btn_{int(sel)}",
+        ):
+            next_oos = not inline_oos_enabled
+            st.session_state[inline_oos_toggle_key] = bool(next_oos)
+            if next_oos:
+                st.session_state[inline_spare_toggle_key] = False
+            st.rerun()
+        if st.button(
+            f"Spare: {'Enabled' if inline_spare_enabled else 'Disabled'}",
+            width='stretch',
+            key=f"sup_manage_status_spare_btn_{int(sel)}",
+        ):
+            next_spare = not inline_spare_enabled
+            st.session_state[inline_spare_toggle_key] = bool(next_spare)
+            if next_spare:
+                st.session_state[inline_oos_toggle_key] = False
+            st.rerun()
+
         shop_load_on = ""
         if status_sel == "Shop":
             shop_load_on = _render_shop_load_on_dropdown(
@@ -16211,6 +16237,10 @@ def render_fleet_management():
                 current_value=str((st.session_state.get("shop_spares") or {}).get(int(sel), "") or ""),
             )
         if st.button("Apply status change", key="sup_manage_apply_status"):
+            if bool(st.session_state.get(inline_oos_toggle_key)):
+                status_sel = "Out Of Service"
+            elif bool(st.session_state.get(inline_spare_toggle_key)):
+                status_sel = "Spare"
             _apply_truck_status_change(
                 int(sel),
                 status_sel,
@@ -16678,6 +16708,46 @@ def _active_cover_truck_usage(exclude_route: int | None = None) -> dict[int, int
     return usage
 
 
+def _release_cover_truck_assignments(truck_num: int, *, exclude_route: int | None = None):
+    truck_value = int(truck_num)
+    route_exclude = None
+    if exclude_route is not None:
+        try:
+            route_exclude = int(exclude_route)
+        except Exception:
+            route_exclude = None
+
+    oos_assignments_raw = st.session_state.get("oos_spare_assignments") or {}
+    cleaned_oos_assignments: dict[int, int] = {}
+    for route_raw, spare_raw in oos_assignments_raw.items():
+        try:
+            route_num = int(route_raw)
+            spare_num = int(spare_raw)
+        except Exception:
+            continue
+        if spare_num == truck_value and (route_exclude is None or int(route_num) != int(route_exclude)):
+            continue
+        cleaned_oos_assignments[int(route_num)] = int(spare_num)
+
+    swaps_raw = st.session_state.get("route_swap_assignments") or {}
+    cleaned_swaps: dict[int, int] = {}
+    for route_raw, mapped_raw in swaps_raw.items():
+        try:
+            route_num = int(route_raw)
+            mapped_num = int(mapped_raw)
+        except Exception:
+            continue
+        if mapped_num == truck_value and (route_exclude is None or int(route_num) != int(route_exclude)):
+            continue
+        cleaned_swaps[int(route_num)] = int(mapped_num)
+
+    st.session_state.oos_spare_assignments = cleaned_oos_assignments
+    st.session_state.route_swap_assignments = cleaned_swaps
+    _normalize_oos_spare_assignments()
+    _normalize_route_swap_assignments()
+    _sync_shop_spares_with_active_swaps()
+
+
 def _sync_shop_spares_with_active_swaps():
     shop_routes = {int(t) for t in (st.session_state.get("shop_set") or set())}
     active_swaps = _active_route_swap_assignments()
@@ -16864,10 +16934,7 @@ def _set_shop_load_on_route_assignment(shop_truck: int, load_on_value: str):
     swaps.pop(route_num, None)
 
     if load_on_truck is not None and int(load_on_truck) != route_num:
-        active_cover_usage = _active_cover_truck_usage(exclude_route=route_num)
-        if int(load_on_truck) in active_cover_usage:
-            _sync_shop_spares_with_active_swaps()
-            return
+        _release_cover_truck_assignments(int(load_on_truck), exclude_route=route_num)
         swaps[route_num] = int(load_on_truck)
 
     st.session_state.route_swap_assignments = swaps
@@ -16899,14 +16966,6 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
         return False, f"Truck {load_on_num} is in Shop and cannot be used for Load On."
     if load_on_num in loaded_set:
         return False, f"Truck {load_on_num} is already Loaded and cannot be used for Load On."
-    if int(route_num) != int(load_on_num):
-        active_cover_usage = _active_cover_truck_usage(exclude_route=route_num)
-        existing_route = active_cover_usage.get(int(load_on_num))
-        if existing_route is not None:
-            return False, (
-                f"Truck {load_on_num} is already assigned to route {int(existing_route)}. "
-                "Clear that assignment first."
-            )
 
     swaps_now = dict(_active_route_swap_assignments())
     prior_swap_raw = swaps_now.get(int(route_num))
@@ -17118,8 +17177,6 @@ def _set_two_way_route_swap(source_truck: int, second_truck: int) -> tuple[bool,
 def _ordered_route_card_truck_options(route_num: int) -> tuple[list[int], dict[int, str]]:
     route = int(route_num)
     route_targets = _truck_route_targets()
-    active_cover_usage = _active_cover_truck_usage(exclude_route=route)
-
     fleet_set = {int(t) for t in FLEET}
     oos_set = {int(t) for t in (st.session_state.get("off_set") or set())}
     shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
@@ -17134,7 +17191,6 @@ def _ordered_route_card_truck_options(route_num: int) -> tuple[list[int], dict[i
             int(t) != route
             and int(t) not in oos_set
             and int(t) not in shop_set
-            and int(t) not in active_cover_usage
         )
     )
 
@@ -17196,13 +17252,7 @@ def _assign_truck_to_oos_route(route_num: int, selected_truck: int) -> tuple[boo
         return False, f"Truck {chosen_truck} is In Progress and cannot cover route {route}."
     if chosen_truck in loaded_set:
         return False, f"Truck {chosen_truck} is already Loaded and cannot cover route {route}."
-    active_cover_usage = _active_cover_truck_usage(exclude_route=route)
-    existing_route = active_cover_usage.get(int(chosen_truck))
-    if existing_route is not None:
-        return False, (
-            f"Truck {chosen_truck} is already assigned to route {int(existing_route)}. "
-            "Clear that assignment first."
-        )
+    _release_cover_truck_assignments(int(chosen_truck), exclude_route=route)
     assignments_raw = st.session_state.get("oos_spare_assignments") or {}
     assignments: dict[int, int] = {}
     for route_raw, spare_raw in assignments_raw.items():
@@ -17278,13 +17328,7 @@ def _assign_truck_to_shop_route(route_num: int, selected_truck: int) -> tuple[bo
         return False, f"Truck {chosen_truck} is in Shop and cannot cover route {route}."
     if chosen_truck in loaded_set:
         return False, f"Truck {chosen_truck} is already Loaded and cannot cover route {route}."
-    active_cover_usage = _active_cover_truck_usage(exclude_route=route)
-    existing_route = active_cover_usage.get(int(chosen_truck))
-    if existing_route is not None:
-        return False, (
-            f"Truck {chosen_truck} is already assigned to route {int(existing_route)}. "
-            "Clear that assignment first."
-        )
+    _release_cover_truck_assignments(int(chosen_truck), exclude_route=route)
 
     prior_swap_raw = _active_route_swap_assignments().get(int(route))
     try:
@@ -17341,13 +17385,7 @@ def _assign_truck_to_swap_route(route_num: int, selected_truck: int) -> tuple[bo
         return False, f"Truck {chosen_truck} is in Shop and cannot cover route {route}."
     if chosen_truck in loaded_set:
         return False, f"Truck {chosen_truck} is already Loaded and cannot cover route {route}."
-    active_cover_usage = _active_cover_truck_usage(exclude_route=route)
-    existing_route = active_cover_usage.get(int(chosen_truck))
-    if existing_route is not None:
-        return False, (
-            f"Truck {chosen_truck} is already assigned to route {int(existing_route)}. "
-            "Clear that assignment first."
-        )
+    _release_cover_truck_assignments(int(chosen_truck), exclude_route=route)
 
     _set_shop_load_on_route_assignment(int(route), str(int(chosen_truck)))
     _mark_and_save()

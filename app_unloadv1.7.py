@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 60
+_APP_BUILD = 62
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -490,16 +490,6 @@ def _inject_pwa_bootstrap() -> None:
             const appVersion = __APP_VERSION_JSON__;
             const installStorageKey = `truckappInstallPromptSnooze:${appVersion}`;
             const installDismissDays = 7;
-            const isiOS = () => {
-                try {
-                    const ua = String(parentWin.navigator.userAgent || "").toLowerCase();
-                    const platform = String(parentWin.navigator.platform || "");
-                    const touchMac = platform === "MacIntel" && Number(parentWin.navigator.maxTouchPoints || 0) > 1;
-                    return /iphone|ipad|ipod/.test(ua) || touchMac;
-                } catch (_) {
-                    return false;
-                }
-            };
             const isStandalone = () => {
                 try {
                     return Boolean(
@@ -561,10 +551,8 @@ def _inject_pwa_bootstrap() -> None:
                 }
 
                 const title = "Install TruckApp";
-                const body = mode === 'ios'
-                    ? "On iPhone/iPad: tap Share, then Add to Home Screen."
-                    : "Install TruckApp on this device for faster access and a full-screen app experience.";
-                const primaryLabel = mode === 'ios' ? "Got it" : "Install";
+                const body = "Install TruckApp on this device for faster access and a full-screen app experience.";
+                const primaryLabel = "Install";
 
                 host.innerHTML = `
                     <style>
@@ -645,12 +633,6 @@ def _inject_pwa_bootstrap() -> None:
 
                 if (primaryBtn) {
                     primaryBtn.onclick = async () => {
-                        if (mode === 'ios') {
-                            snoozePrompt(14);
-                            removeInstallPrompt();
-                            return;
-                        }
-
                         if (!deferredInstallEvent) {
                             return;
                         }
@@ -692,10 +674,6 @@ def _inject_pwa_bootstrap() -> None:
                 try { parentWin.localStorage.removeItem(installStorageKey); } catch (_) {}
                 removeInstallPrompt();
             });
-
-            if (isiOS() && !isStandalone()) {
-                parentWin.setTimeout(() => renderInstallPrompt('ios'), 900);
-            }
 
             if (staticWorkerAvailable && "serviceWorker" in parentWin.navigator) {
                 try {
@@ -987,9 +965,9 @@ def _normalize_inprog_layout_style(value) -> str:
     return INPROG_LAYOUT_CURRENT_LEFT
 
 SHORTS_BUTTON_MAP = {
-    "3x10": ["Black", "Onyx", "Copper", "Indigo", "Blue", "Brown"],
-    "3x5": ["Black", "Onyx", "Copper", "Indigo", "Blue", "Brown"],
-    "4x6": ["Logo", "Black", "Onyx", "Copper", "Indigo", "Blue", "Brown", "2x3"],
+    "3x10": ["Black", "Onyx", "Copper", "Indigo", "Blue"],
+    "3x5": ["Black", "Onyx", "Copper", "Indigo", "Blue"],
+    "4x6": ["Logo", "Black", "Onyx", "Copper", "Indigo", "Blue"],
     "Paper": [
         "C-PULL",
         "DRC (AIRLAID)",
@@ -1003,7 +981,7 @@ SHORTS_BUTTON_MAP = {
     ],
     "Bulk": {
         "Dust Mops": ["WET MOP", "24\"", "36\"", "46\"", "60\"", "Fender Covers"],
-        "Aprons": ["White", "Black", "Red", "Green", "Blue", "Denim"],
+        "Aprons": ["White", "Black", "Green", "Blue", "Denim"],
         "Towels": [
             "Grid/Terry",
             "Glass",
@@ -1012,7 +990,6 @@ SHORTS_BUTTON_MAP = {
             "Small Ink",
             "Large Ink",
             "Napkins",
-            "Red Shop",
             "White Shop",
         ],
     },
@@ -5853,7 +5830,7 @@ def _render_guest_live_status_pace_card():
     raw_time_left_seconds = max(0, min(shift_total_seconds, int((shift_end - now_local).total_seconds())))
     elapsed_wall_seconds = max(0, min(shift_total_seconds, shift_total_seconds - raw_time_left_seconds))
     shift_time_left_seconds = max(0, effective_shift_seconds - elapsed_wall_seconds)
-    work_time_left_display_seconds = raw_time_left_seconds
+    work_time_left_display_seconds = shift_time_left_seconds
 
     avg_per_truck_seconds = _pace_avg_seconds_for_cards()
     pace_avg_source_name = _pace_avg_source_label()
@@ -5872,6 +5849,7 @@ def _render_guest_live_status_pace_card():
     pace_used_avg_seconds = None
     pace_used_avg_source = str(pace_avg_source_name)
     estimated_finish_text = "N/A"
+    estimated_finish_shift_note = ""
 
     if avg_per_truck_seconds is not None:
         pace_used_avg_seconds = max(1, int(avg_per_truck_seconds))
@@ -5904,6 +5882,9 @@ def _render_guest_live_status_pace_card():
             seconds=max(0, int(needed_seconds) + int(estimate_break_adjustment_seconds))
         )
         estimated_finish_text = estimated_finish_dt.strftime("%I:%M %p").lstrip("0")
+        shift_overrun_seconds = max(0, int(needed_seconds) - int(shift_time_left_seconds))
+        if shift_overrun_seconds > 0:
+            estimated_finish_shift_note = f" (shift +{seconds_to_mmss(shift_overrun_seconds)})"
 
     awaiting_first_load_html = (
         "<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>Awaiting first load start</div>"
@@ -5924,9 +5905,9 @@ def _render_guest_live_status_pace_card():
             f"<div style='font-size:0.75rem; opacity:0.84; margin-top:2px;'>{pace_status_line}</div>"
             f"<div style='font-size:0.69rem; opacity:0.74; margin-top:3px;'>Avg {seconds_to_mmss(pace_used_avg_seconds) if pace_used_avg_seconds is not None else 'N/A'} ({html.escape(pace_used_avg_source)})</div>"
             f"<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>{html.escape(pace_loader_line)}</div>"
-            f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} - Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
+            f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} - Shift Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
             f"{awaiting_first_load_html}"
-            f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text)}</div>"
+            f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text + estimated_finish_shift_note)}</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -5960,7 +5941,7 @@ def _render_inprog_mini_pace_card():
     raw_time_left_seconds = max(0, min(shift_total_seconds, int((shift_end - now_local).total_seconds())))
     elapsed_wall_seconds = max(0, min(shift_total_seconds, shift_total_seconds - raw_time_left_seconds))
     shift_time_left_seconds = max(0, effective_shift_seconds - elapsed_wall_seconds)
-    work_time_left_display_seconds = raw_time_left_seconds
+    work_time_left_display_seconds = shift_time_left_seconds
 
     avg_per_truck_seconds = _pace_avg_seconds_for_cards()
     pace_avg_source_name = _pace_avg_source_label()
@@ -5979,6 +5960,7 @@ def _render_inprog_mini_pace_card():
     pace_used_avg_seconds = None
     pace_used_avg_source = str(pace_avg_source_name)
     estimated_finish_text = "N/A"
+    estimated_finish_shift_note = ""
 
     if avg_per_truck_seconds is not None:
         pace_used_avg_seconds = max(1, int(avg_per_truck_seconds))
@@ -6011,6 +5993,9 @@ def _render_inprog_mini_pace_card():
             seconds=max(0, int(needed_seconds) + int(estimate_break_adjustment_seconds))
         )
         estimated_finish_text = estimated_finish_dt.strftime("%I:%M %p").lstrip("0")
+        shift_overrun_seconds = max(0, int(needed_seconds) - int(shift_time_left_seconds))
+        if shift_overrun_seconds > 0:
+            estimated_finish_shift_note = f" (shift +{seconds_to_mmss(shift_overrun_seconds)})"
 
     awaiting_first_load_html = (
         "<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>Awaiting first load start</div>"
@@ -6037,9 +6022,9 @@ def _render_inprog_mini_pace_card():
             f"<div style='font-size:0.75rem; opacity:0.84; margin-top:2px;'>{pace_status_line}</div>"
             f"<div style='font-size:0.69rem; opacity:0.74; margin-top:3px;'>Avg {seconds_to_mmss(pace_used_avg_seconds) if pace_used_avg_seconds is not None else 'N/A'} ({html.escape(pace_used_avg_source)})</div>"
             f"<div style='font-size:0.69rem; opacity:0.7; margin-top:2px;'>{html.escape(pace_loader_line)}</div>"
-            f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} - Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
+            f"<div style='font-size:0.69rem; opacity:0.72; margin-top:2px;'>Remaining {remaining_count} - Shift Work Left {seconds_to_mmss(work_time_left_display_seconds)}</div>"
             f"{awaiting_first_load_html}"
-            f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text)}</div>"
+            f"<div style='font-size:0.69rem; opacity:0.78; margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.22); font-weight:800;'>Estimated Finish {html.escape(estimated_finish_text + estimated_finish_shift_note)}</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -6780,6 +6765,36 @@ def remove_abnormal_loadtimes(min_seconds: int = 120, max_seconds: int = 1800) -
     return removed_history, removed_live_entries, len(removed_trucks)
 
 
+def _migrate_tracked_items_map(tracked_map: dict) -> dict:
+    """Remove deprecated tracked items (Brown, 2x3, Red, Red Shop) from tracked_items_map."""
+    if not isinstance(tracked_map, dict):
+        return tracked_map
+    
+    out = {}
+    for category, items in tracked_map.items():
+        if category == "Bulk" and isinstance(items, dict):
+            # Handle Bulk subcategories
+            bulk_out = {}
+            for group, group_items in items.items():
+                if isinstance(group_items, list):
+                    # Remove deprecated items from this group
+                    filtered = [item for item in group_items 
+                               if item not in ("Red", "Red Shop")]
+                    bulk_out[group] = filtered
+                else:
+                    bulk_out[group] = group_items
+            out[category] = bulk_out
+        elif isinstance(items, list):
+            # Remove deprecated items from regular lists (but keep BROWN HW in Paper)
+            filtered = [item for item in items 
+                       if item not in ("Brown", "2x3", "Red")]
+            out[category] = filtered
+        else:
+            out[category] = items
+    
+    return out
+
+
 def _deserialize_state_payload(data: dict) -> dict:
     out = {}
     if not isinstance(data, dict):
@@ -6870,7 +6885,14 @@ def load_state() -> dict:
     except Exception as e:
         logging.error(f"Failed to load state from {path}: {e}")
         return {}
-    return _deserialize_state_payload(data)
+    
+    deserialized = _deserialize_state_payload(data)
+    
+    # Migration: remove deprecated tracked items (Brown, 2x3, Red, Red Shop) from tracked_items_map
+    if "tracked_items_map" in deserialized:
+        deserialized["tracked_items_map"] = _migrate_tracked_items_map(deserialized["tracked_items_map"])
+    
+    return deserialized
 
 
 def _run_date_key(d: date | None) -> str | None:
@@ -13980,19 +14002,7 @@ def render_numeric_truck_buttons(
                                 badge.style.setProperty('color', fg, 'important');
                                 badge.style.setProperty('-webkit-text-fill-color', fg, 'important');
                             }};
-                            if (badgeTextUpper === 'OFF') {{
-                                badge.classList.add('truck-route-badge-off');
-                                applyBadgeFg('#fee2e2');
-                            }} else if (badgeTextUpper === 'OOS') {{
-                                badge.classList.add('truck-route-badge-oos');
-                                applyBadgeFg('#f3f4f6');
-                            }} else if (badgeTextUpper === 'SHOP') {{
-                                badge.classList.add('truck-route-badge-shop');
-                                applyBadgeFg('#b91c1c');
-                            }} else if (badgeTextUpper === 'SPECIAL') {{
-                                badge.classList.add('truck-route-badge-special');
-                                applyBadgeFg('#f3e8ff');
-                            }} else if (/^\d+$/.test(badgeTextUpper)) {{
+                            if (/^\d+$/.test(badgeTextUpper)) {{
                                 badge.classList.add('truck-route-badge-swap');
                                 applyBadgeFg('#ecfeff');
                                 badge.style.setProperty('top', 'auto', 'important');
@@ -16930,14 +16940,6 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
     off_set = {int(t) for t in (st.session_state.get("off_set") or set())}
     shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
     loaded_set = {int(t) for t in (st.session_state.get("loaded_set") or set())}
-    if route_num in off_set:
-        return False, f"Truck {route_num} is Out Of Service and cannot be assigned a route swap."
-    if load_on_num in off_set:
-        return False, f"Truck {load_on_num} is Out Of Service and cannot be used for Load On."
-    if load_on_num in shop_set:
-        return False, f"Truck {load_on_num} is in Shop and cannot be used for Load On."
-    if load_on_num in loaded_set:
-        return False, f"Truck {load_on_num} is already Loaded and cannot be used for Load On."
 
     swaps_now = dict(_active_route_swap_assignments())
     prior_swap_raw = swaps_now.get(int(route_num))
@@ -16947,6 +16949,31 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
         prior_swap_num = None
 
     if int(route_num) == int(load_on_num):
+        if route_num in off_set:
+            assignments = dict(st.session_state.get("oos_spare_assignments") or {})
+            prior_spare_raw = assignments.pop(int(route_num), None)
+            try:
+                prior_spare_num = int(prior_spare_raw) if prior_spare_raw is not None else None
+            except Exception:
+                prior_spare_num = None
+
+            st.session_state.oos_spare_assignments = assignments
+            st.session_state.pending_oos_route = None
+            st.session_state.pending_start_truck = None
+            _mark_and_save()
+
+            if prior_spare_num is not None:
+                push_shop_notice(
+                    f"OOS route #{route_num} Load On cleared (was Truck #{int(prior_spare_num)}).",
+                    kind="shop",
+                    notice_type="oos_load_on_clear",
+                    truck=int(route_num),
+                )
+                save_state()
+                return True, f"Route {route_num} Load On cleared."
+
+            return True, f"Route {route_num} does not have a Load On assignment."
+
         # Reset route assignment; if this is part of a true two-way swap, clear both sides.
         partner = prior_swap_num if prior_swap_num is not None and int(prior_swap_num) != int(route_num) else None
         swaps_now.pop(int(route_num), None)
@@ -16970,6 +16997,16 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
                 truck=int(route_num),
             )
         return True, f"Route {route_num} reset to Truck {route_num}."
+
+    if load_on_num in off_set:
+        return False, f"Truck {load_on_num} is Out Of Service and cannot be used for Load On."
+    if load_on_num in shop_set:
+        return False, f"Truck {load_on_num} is in Shop and cannot be used for Load On."
+    if load_on_num in loaded_set:
+        return False, f"Truck {load_on_num} is already Loaded and cannot be used for Load On."
+
+    if route_num in off_set:
+        return _assign_truck_to_oos_route(int(route_num), int(load_on_num))
 
     ok_swap, swap_message = _set_two_way_route_swap(int(route_num), int(load_on_num))
     if ok_swap:
@@ -24122,6 +24159,8 @@ if st.session_state.setup_done:
             st.session_state["sup_dust_clothes_dialog_open"] = True
             st.session_state["sup_run_day_spares_dialog_open"] = False
             st.session_state["sup_run_day_specials_dialog_open"] = False
+            st.session_state["sup_run_day_daily_notes_dialog_open"] = False
+            st.session_state["sup_current_day_summary_dialog_open"] = False
             st.session_state["sup_operations_audit_dialog_open"] = False
             st.session_state["sup_operations_view_audits_dialog_open"] = False
             st.session_state["sup_comms_history_dialog_open"] = False
@@ -24131,7 +24170,6 @@ if st.session_state.setup_done:
             st.session_state["mgmt_dev_direct_import_dialog_open"] = False
             st.session_state["sup_configure_load_day_open_once"] = True
             st.session_state.active_screen = "SUPERVISOR"
-            _mark_and_save()
             st.rerun()
 
     run = st.session_state.run_date
@@ -28463,6 +28501,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         "sup_run_day_spares_dialog_open",
         "sup_run_day_specials_dialog_open",
         "sup_run_day_daily_notes_dialog_open",
+        "sup_current_day_summary_dialog_open",
         "sup_operations_audit_dialog_open",
         "sup_operations_view_audits_dialog_open",
         "sup_comms_history_dialog_open",
@@ -28841,6 +28880,32 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         align-items: center !important;
                         justify-content: center !important;
                     }
+                    [class*="st-key-sup_run_day_swap_edit_"] button {
+                        background: #1e3a8a !important;
+                        border: 1px solid #2563eb !important;
+                        color: #dbeafe !important;
+                        min-height: 38px !important;
+                        border-radius: 999px !important;
+                        font-size: 0.9rem !important;
+                        font-weight: 900 !important;
+                        padding: 0 0.55rem !important;
+                        width: 82px !important;
+                        min-width: 82px !important;
+                        max-width: 82px !important;
+                        margin-left: auto !important;
+                        display: inline-flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                    }
+                    [class*="st-key-sup_run_day_swap_edit_"] button p,
+                    [class*="st-key-sup_run_day_swap_edit_"] button span,
+                    [class*="st-key-sup_run_day_swap_edit_"] button div {
+                        white-space: nowrap !important;
+                        word-break: keep-all !important;
+                        overflow-wrap: normal !important;
+                        line-height: 1 !important;
+                        display: inline !important;
+                    }
                     [class*="st-key-sup_run_day_swap_remove_"] button p,
                     [class*="st-key-sup_run_day_swap_remove_"] button span {
                         color: #fef2f2 !important;
@@ -28851,13 +28916,16 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     }
                     div[role="dialog"] div[class*="st-key-sup_run_day_swap_row_"] div[data-testid="stHorizontalBlock"] {
                         display: grid !important;
-                        grid-template-columns: minmax(0, 1fr) 42px !important;
+                        grid-template-columns: minmax(0, 1fr) 86px 42px !important;
                         align-items: center !important;
                         gap: 0.42rem !important;
                     }
                     div[role="dialog"] div[class*="st-key-sup_run_day_swap_row_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                         min-width: 0 !important;
                         width: 100% !important;
+                    }
+                    div[role="dialog"] .sup-run-day-loadon {
+                        white-space: nowrap !important;
                     }
                     [class*="st-key-sup_run_day_spares_back"] button {
                         background: #1e3a5f !important;
@@ -28952,6 +29020,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 dirty_trucks_now = {int(t) for t in (st.session_state.get("dirty_set") or set())}
                 loaded_trucks_now = {int(t) for t in (st.session_state.get("loaded_set") or set())}
                 active_swaps = _active_route_swap_assignments()
+                active_oos_assignments = _active_oos_spare_assignments()
 
                 deduped_swap_rows: list[tuple[int, int]] = []
                 deduped_swap_routes: set[int] = set()
@@ -29018,6 +29087,18 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state[run_day_swap_route_key] = None
 
                 display_swap_rows: list[dict[str, object]] = []
+                for route_num, truck_num in sorted((int(route_num), int(truck_num)) for route_num, truck_num in active_oos_assignments.items()):
+                    route_value = int(route_num)
+                    truck_value = int(truck_num)
+                    display_swap_rows.append(
+                        {
+                            "row_key": f"oos_route_{int(route_value)}",
+                            "label": f"Route {int(route_value)} (OOS) -> Load On {int(truck_value)}",
+                            "remove_route": int(route_value),
+                            "load_on": int(truck_value),
+                        }
+                    )
+
                 for route_num, truck_num in deduped_swap_rows:
                     route_value = int(route_num)
                     truck_value = int(truck_num)
@@ -29026,48 +29107,78 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             "row_key": f"route_{int(route_value)}",
                             "label": f"Route {int(route_value)} -> Load On {int(truck_value)}",
                             "remove_route": int(route_value),
+                            "load_on": int(truck_value),
                         }
                     )
 
+                st.markdown(
+                    "<div style='margin:0.1rem 0 0.35rem 0;font-size:1rem;font-weight:900;color:#e2e8f0;'>Active Route Swaps</div>",
+                    unsafe_allow_html=True,
+                )
                 if display_swap_rows:
                     st.markdown(
-                        "<div style='margin:0 0 0.35rem 0;font-size:0.94rem;font-weight:800;color:#e2e8f0;'>Current Route Swaps</div>",
+                        """
+                        <style>
+                        div[class*="st-key-sup_run_day_swap_edit_"] button {
+                            min-width: 74px !important;
+                        }
+                        div[class*="st-key-sup_run_day_swap_edit_"] button p,
+                        div[class*="st-key-sup_run_day_swap_edit_"] button span,
+                        div[class*="st-key-sup_run_day_swap_edit_"] button div {
+                            white-space: nowrap !important;
+                            word-break: normal !important;
+                            overflow-wrap: normal !important;
+                            line-height: 1.05 !important;
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        "<div style='margin:0 0 0.45rem 0;color:#cbd5e1;font-size:0.88rem;'>Use Edit to load a swap into the form below, then save changes.</div>",
                         unsafe_allow_html=True,
                     )
                     for row in display_swap_rows:
                         remove_route = int(row.get("remove_route") or 0)
-                        load_on_route = int(row.get("load_on_route") or remove_route)
+                        load_on_route = int(row.get("load_on") or 0)
                         row_key = str(row.get("row_key") or f"route_{int(remove_route)}")
-                        row_label = str(row.get("label") or "")
+                        is_oos_route = "(OOS)" in str(row.get("label") or "")
+                        route_display = f"Route {int(remove_route)}" + (" (OOS)" if is_oos_route else "")
+                        route_bg, route_border, _ = _truck_status_colors(int(remove_route))
+                        load_bg, load_border, _ = _truck_status_colors(int(load_on_route))
+                        route_text_color = _color_text_for_background(route_bg)
+                        load_text_color = _color_text_for_background(load_bg)
                         with st.container(key=f"sup_run_day_swap_row_{row_key}"):
-                            swap_info_col, swap_edit_col, swap_remove_col = st.columns([4.9, 1.2, 0.44], gap="small")
+                            swap_info_col, swap_edit_col, swap_remove_col = st.columns([4.8, 1.35, 0.55], gap="small")
                             with swap_info_col:
                                 st.markdown(
                                     (
-                                        "<div style='padding:0.68rem 0.8rem; border-radius:10px; "
-                                        "border:1px solid rgba(59,130,246,0.34); background:rgba(30,41,59,0.72); "
-                                        "color:#dbeafe; font-size:1.02rem; font-weight:800;'>"
-                                        f"{row_label}"
+                                        "<div style='padding:0.62rem 0.72rem; border-radius:10px; "
+                                        "border:1px solid rgba(59,130,246,0.34); background:rgba(15,23,42,0.62); "
+                                        "font-size:1.02rem; font-weight:800;'>"
+                                        "<div style='display:flex;align-items:center;gap:0.42rem;flex-wrap:wrap;'>"
+                                        f"<span style='display:inline-flex;align-items:center;white-space:nowrap;padding:0.24rem 0.58rem;border-radius:999px;border:1px solid {route_border};background:{route_bg};color:{route_text_color};font-weight:900;'>"
+                                        f"{route_display}"
+                                        "</span>"
+                                        "<span style='opacity:0.9;color:#cbd5e1;'>&rarr;</span>"
+                                        f"<span class='sup-run-day-loadon' style='display:inline-flex;align-items:center;white-space:nowrap;padding:0.24rem 0.58rem;border-radius:999px;border:1px solid {load_border};background:{load_bg};color:{load_text_color};font-weight:900;'>"
+                                        f"Load On {int(load_on_route)}"
+                                        "</span>"
+                                        "</div>"
                                         "</div>"
                                     ),
                                     unsafe_allow_html=True,
                                 )
                             with swap_edit_col:
                                 if st.button(
-                                    "Click to edit",
+                                    "Edit",
                                     key=f"sup_run_day_swap_edit_{row_key}",
-                                    help="Load this swap into the Route / Load On selectors",
-                                    width='stretch',
+                                    help="Edit this route swap",
                                 ):
-                                    if int(remove_route) in truck_dropdown_options:
-                                        st.session_state[run_day_swap_route_key] = int(remove_route)
-                                        st.session_state[run_day_swap_synced_route_key] = int(remove_route)
-                                    if int(load_on_route) in load_on_dropdown_options:
-                                        st.session_state[run_day_swap_load_key] = int(load_on_route)
-                                    elif int(remove_route) in load_on_dropdown_options:
-                                        st.session_state[run_day_swap_load_key] = int(remove_route)
-                                    elif load_on_dropdown_options:
-                                        st.session_state[run_day_swap_load_key] = int(load_on_dropdown_options[0])
+                                    st.session_state[run_day_swap_route_key] = int(remove_route)
+                                    st.session_state[run_day_swap_load_key] = int(load_on_route)
+                                    st.session_state[run_day_swap_synced_route_key] = int(remove_route)
+                                    _set_run_day_swap_feedback(True, f"Loaded Route {int(remove_route)} for editing.")
                                     st.rerun()
                             with swap_remove_col:
                                 if st.button(
@@ -29081,7 +29192,10 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                         _clear_run_day_swap_selection()
                                     st.rerun()
                 else:
-                    st.caption("No route swaps set yet.")
+                    st.markdown(
+                        "<div style='padding:0.6rem 0.72rem;border-radius:10px;border:1px dashed rgba(148,163,184,0.45);background:rgba(15,23,42,0.45);color:#cbd5e1;font-size:0.92rem;font-weight:700;margin:0 0 0.5rem 0;'>No route swaps set yet.</div>",
+                        unsafe_allow_html=True,
+                    )
 
                 current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
                 synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
@@ -29094,7 +29208,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         if int(t) not in load_on_excluded or int(t) == (current_route_pick or -1)
                     ],
                     key=lambda truck_num: (
-                        0 if int(truck_num) in spare_trucks_now else (1 if int(truck_num) in off_trucks_now else 2),
+                        0 if int(truck_num) not in spare_trucks_now and int(truck_num) not in off_trucks_now else (1 if int(truck_num) in spare_trucks_now else 2),
                         int(truck_num),
                     ),
                 )
@@ -29117,22 +29231,18 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             existing_load_on = _coerce_run_day_swap_pick(active_swaps.get(int(selected_route_num)))
                             if existing_load_on is not None and int(existing_load_on) in load_on_dropdown_options:
                                 st.session_state[run_day_swap_load_key] = int(existing_load_on)
-                            elif int(selected_route_num) in load_on_dropdown_options:
-                                st.session_state[run_day_swap_load_key] = int(selected_route_num)
-                            elif load_on_dropdown_options:
-                                st.session_state[run_day_swap_load_key] = int(load_on_dropdown_options[0])
                             else:
                                 st.session_state[run_day_swap_load_key] = None
 
                         load_on_pick_now = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
                         if load_on_dropdown_options:
                             if load_on_pick_now not in load_on_dropdown_options:
-                                st.session_state[run_day_swap_load_key] = int(load_on_dropdown_options[0])
+                                st.session_state[run_day_swap_load_key] = None
                             st.selectbox(
                                 "Load On Truck",
-                                options=load_on_dropdown_options,
+                                options=[None, *load_on_dropdown_options],
                                 key=run_day_swap_load_key,
-                                format_func=_format_run_day_load_on_option,
+                                format_func=lambda truck_num: "Choose a Load On truck" if truck_num is None else _format_run_day_load_on_option(int(truck_num)),
                             )
                         else:
                             st.session_state[run_day_swap_load_key] = None

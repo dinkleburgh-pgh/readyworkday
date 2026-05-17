@@ -7,6 +7,17 @@
 
 ## Unreleased
 
+## v1.7.5 build 61 - 2026-05-17
+
+1. Bumped build to **61**.
+2. **TRACKED ITEMS**: Removed Browns, 2x3, and Red/Red Shop from all tracking categories (Brown HW in Paper preserved).
+3. **MANAGEMENT / RUN DAY**: Step 2/4 now shows a visible list of active route swaps (OOS + swap assignments) with Edit and Remove (×) actions.
+4. **MANAGEMENT / RUN DAY**: Edit button and Load On token now display on the same horizontal line instead of stacking vertically.
+5. **MANAGEMENT / RUN DAY**: Fixed delete (×) failing for OOS entries due to validation order.
+6. **MANAGEMENT / RUN DAY**: Load On dropdown now starts blank (no auto-fill) and lists routes first.
+7. **TRUCK BUTTONS**: Route badges on truck buttons are now consistently blue.
+8. **PWA / MOBILE**: Removed the iOS install prompt (Add to Home Screen banner).
+
 ## v1.7.5 build 49 - 2026-05-14
 
 1. Bumped build to **49**.

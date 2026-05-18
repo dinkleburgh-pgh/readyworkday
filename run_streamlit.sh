@@ -13,6 +13,12 @@ LOG_FILE="${LOG_FILE:-$LOG_DIR/streamlit.log}"
 PID_FILE="${PID_FILE:-$LOG_DIR/streamlit.pid}"
 STREAMLIT_PORT="${STREAMLIT_PORT:-8501}"
 STREAMLIT_HOST="${STREAMLIT_HOST:-0.0.0.0}"
+RUST_API_ENABLED="${RUST_API_ENABLED:-1}"
+RUST_API_DIR="${RUST_API_DIR:-$SCRIPT_DIR/rust_api}"
+RUST_API_PORT="${RUST_API_PORT:-8787}"
+RUST_API_DATA_DIR="${RUST_API_DATA_DIR:-$SCRIPT_DIR}"
+RUST_API_LOG_FILE="${RUST_API_LOG_FILE:-$LOG_DIR/rust_api.log}"
+RUST_API_PID_FILE="${RUST_API_PID_FILE:-$LOG_DIR/rust_api.pid}"
 APP_VERSION_LABEL="unknown"
 
 info() {
@@ -72,6 +78,20 @@ resolve_python_bin() {
   return 1
 }
 
+resolve_cargo_bin() {
+  if have_cmd cargo; then
+    command -v cargo
+    return 0
+  fi
+
+  if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    printf '%s' "$HOME/.cargo/bin/cargo"
+    return 0
+  fi
+
+  return 1
+}
+
 find_latest_app_file() {
   local latest
   latest="$(compgen -G "app_unloadv*.py" | sort -V 2>/dev/null | tail -n 1 || true)"
@@ -123,7 +143,73 @@ is_running_streamlit_pid() {
   return 0
 }
 
+is_running_rust_api_pid() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return 1
+  fi
+
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if have_cmd ps; then
+    ps -p "$pid" -o args= 2>/dev/null | grep -q "cargo run"
+    return $?
+  fi
+
+  return 0
+}
+
+ensure_rust_api_running() {
+  if [ "$RUST_API_ENABLED" != "1" ]; then
+    info "Rust API startup disabled (RUST_API_ENABLED=$RUST_API_ENABLED)."
+    return 0
+  fi
+
+  if [ ! -d "$RUST_API_DIR" ] || [ ! -f "$RUST_API_DIR/Cargo.toml" ]; then
+    warn "Rust API directory not found at '$RUST_API_DIR'. Skipping Rust API startup."
+    return 0
+  fi
+
+  if [ -f "$RUST_API_PID_FILE" ]; then
+    EXISTING_RUST_PID="$(cat "$RUST_API_PID_FILE" 2>/dev/null || true)"
+    if is_running_rust_api_pid "$EXISTING_RUST_PID"; then
+      info "Rust API already running (PID $EXISTING_RUST_PID)."
+      info "Rust API URL: http://localhost:$RUST_API_PORT"
+      return 0
+    fi
+    warn "Removing stale Rust API PID file."
+    rm -f "$RUST_API_PID_FILE"
+  fi
+
+  if ! CARGO_BIN="$(resolve_cargo_bin)"; then
+    warn "cargo not found. Streamlit will start, but Rust API was not started."
+    return 0
+  fi
+
+  info "Starting Rust API on port $RUST_API_PORT..."
+  nohup env TRUCKAPP_DATA_DIR="$RUST_API_DATA_DIR" RUST_API_PORT="$RUST_API_PORT" \
+    "$CARGO_BIN" run --manifest-path "$RUST_API_DIR/Cargo.toml" --release \
+    >> "$RUST_API_LOG_FILE" 2>&1 &
+
+  NEW_RUST_PID=$!
+  echo "$NEW_RUST_PID" > "$RUST_API_PID_FILE"
+
+  sleep 2
+  if kill -0 "$NEW_RUST_PID" >/dev/null 2>&1; then
+    info "Rust API started (PID $NEW_RUST_PID)."
+    info "Rust API URL: http://localhost:$RUST_API_PORT"
+    info "Rust API Log: $RUST_API_LOG_FILE"
+  else
+    warn "Rust API failed to start. Recent log output:"
+    tail -n 40 "$RUST_API_LOG_FILE" || true
+  fi
+}
+
 mkdir -p "$LOG_DIR"
+
+ensure_rust_api_running
 
 if [ ! -f "$APP_FILE" ]; then
   FALLBACK_APP="$(find_latest_app_file)"

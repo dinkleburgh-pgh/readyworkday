@@ -31,6 +31,22 @@ services:
 
     restart: unless-stopped
 
+  rust_api:
+    image: "${RUST_API_IMAGE_NAME:-ghcr.io/dinkleburgh-pgh/readyworkday-rust-api:latest}"
+    pull_policy: always
+    container_name: truckapp-rust-api
+    ports:
+      - "${RUST_API_PORT:-8787}:8787"
+    environment:
+      TRUCKAPP_DATA_DIR: /app/data
+      RUST_API_BIND: 0.0.0.0:8787
+      TRUCKAPP_API_KEY: ${TRUCKAPP_API_KEY:-}
+      TRUCKAPP_API_KEY_READ: ${TRUCKAPP_API_KEY_READ:-}
+      TRUCKAPP_API_KEY_WRITE: ${TRUCKAPP_API_KEY_WRITE:-}
+    volumes:
+      - truckapp-data:/app/data
+    restart: unless-stopped
+
 volumes:
   truckapp-data:
     name: truckapp-data

@@ -85,7 +85,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 62
+_APP_BUILD = 63
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -13917,17 +13917,17 @@ def render_numeric_truck_buttons(
                             padding: 2px 4px !important;
                         }}
                         button[kind="primary"] .truck-route-badge.truck-route-badge-swap {{
-                            right: 3px !important;
-                            left: auto !important;
-                            top: auto !important;
-                            bottom: 3px !important;
-                            transform: none !important;
-                            max-width: 72% !important;
-                            font-size: 15px !important;
-                            line-height: 1 !important;
-                            padding: 3px 9px !important;
-                            min-width: 42px !important;
-                            min-height: 24px !important;
+                            right: 6%;
+                            left: auto;
+                            top: 6%;
+                            bottom: auto;
+                            transform: none;
+                            max-width: 72%;
+                            font-size: 0.8em;
+                            line-height: 1;
+                            padding: 0.2em 0.7em;
+                            min-width: 1.5em;
+                            min-height: 1.1em;
                         }}`;
 
                     if (!existingStyleEl) {{

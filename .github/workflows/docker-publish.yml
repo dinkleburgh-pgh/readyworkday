@@ -60,3 +60,22 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract Rust API image metadata
+        id: meta_rust
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-rust-api
+          tags: |
+            type=raw,value=latest
+            type=raw,value=v${{ steps.app_version.outputs.version }}
+            type=sha,prefix=sha-
+
+      - name: Build and push Rust API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./rust_api
+          file: ./rust_api/Dockerfile
+          push: true
+          tags: ${{ steps.meta_rust.outputs.tags }}
+          labels: ${{ steps.meta_rust.outputs.labels }}

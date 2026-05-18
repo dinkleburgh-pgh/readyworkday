@@ -29,3 +29,25 @@ services:
       - ./:/app
       - ${TRUCKAPP_DATA_DIR:-./data}:/app/data
     restart: unless-stopped
+
+  rust_api:
+    image: rust:1.78
+    container_name: truckapp-rust-api
+    working_dir: /workspace/rust_api
+    command: >
+      bash -lc "cargo run --release"
+    ports:
+      - "${RUST_API_PORT:-8787}:8787"
+    environment:
+      TRUCKAPP_DATA_DIR: /workspace/data
+      RUST_API_BIND: 0.0.0.0:8787
+      TRUCKAPP_API_KEY: ${TRUCKAPP_API_KEY:-}
+      TRUCKAPP_API_KEY_READ: ${TRUCKAPP_API_KEY_READ:-}
+      TRUCKAPP_API_KEY_WRITE: ${TRUCKAPP_API_KEY_WRITE:-}
+    volumes:
+      - ./:/workspace
+      - cargo-target-cache:/workspace/rust_api/target
+    restart: unless-stopped
+
+volumes:
+  cargo-target-cache:

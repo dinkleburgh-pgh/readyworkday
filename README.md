@@ -79,6 +79,12 @@ pip install -r requirements.txt
 streamlit run app_unloadv1.7.py
 ```
 
+Or use the combined launcher (starts Rust API + Streamlit):
+
+```powershell
+.\run_truckapp.ps1
+```
+
 Then open: `http://localhost:8501`
 
 ## Quick start (Linux / TrueNAS)
@@ -90,7 +96,9 @@ chmod +x run_streamlit.sh
 
 Notes:
 - `run_streamlit.sh` starts Streamlit in the background.
+- `run_streamlit.sh` also attempts to start `rust_api` in the background (if `cargo` is available).
 - Script log output goes to `.data/streamlit.log`.
+- Rust API log output goes to `.data/rust_api.log`.
 - The script runs `app_unloadv1.7.py` by default.
 
 ## Containerized run (Docker)
@@ -104,6 +112,21 @@ docker compose up --build
 ```
 
 Open: `http://localhost:8501`
+
+Rust API layer (optional): `http://localhost:8787`
+
+Optional auth: set `TRUCKAPP_API_KEY` to require `x-api-key` or `Authorization: Bearer <key>` on all `/api/v1/*` endpoints.
+
+- Health: `GET /health`
+- State: `GET /api/v1/state`
+- Fleet: `GET /api/v1/fleet`
+- Save state: `PUT /api/v1/state`
+- Save fleet: `PUT /api/v1/fleet`
+- Assignments snapshot: `GET /api/v1/assignments`
+- Upsert route swap: `PUT /api/v1/assignments/route-swaps`
+- Delete route swap: `DELETE /api/v1/assignments/route-swaps/:route`
+- Upsert OOS spare: `PUT /api/v1/assignments/oos-spares`
+- Delete OOS spare: `DELETE /api/v1/assignments/oos-spares/:route`
 
 ### Run in background
 
@@ -144,7 +167,13 @@ Use a **Git-based Stack** in Portainer.
 2. In Portainer, use the same repository/branch but set compose path to `docker-compose.portainer.yml`.
 3. Set env vars:
 	- `APP_FILE=app_unloadv1.7.py`
+	- `RUST_API_IMAGE_NAME=ghcr.io/dinkleburgh-pgh/readyworkday-rust-api:latest`
+	- `RUST_API_PORT=8787`
+	- `TRUCKAPP_API_KEY_READ=<strong-read-key>`
+	- `TRUCKAPP_API_KEY_WRITE=<strong-write-key>`
 4. Deploy and open `http://<docker-host>:8501`.
+
+Rust API endpoint will be available at `http://<docker-host>:8787` after deploy.
 
 Notes:
 - The Portainer compose file now tracks `ghcr.io/dinkleburgh-pgh/readyworkday:latest`.
@@ -152,6 +181,7 @@ Notes:
 - If GHCR package visibility is private, add registry credentials in Portainer before deploy.
 - The no-build compose avoids Portainer compose-build permissions entirely.
 - The Portainer compose now persists runtime state in the Docker-managed named volume `truckapp-data`, so it deploys cleanly even when host root paths like `/srv/...` are read-only.
+- The same `truckapp-data` volume is shared by both `truckapp` and `rust_api`, so mobile/API reads and writes operate on the same state files.
 - If you prefer a host bind mount instead, replace `truckapp-data:/app/data` in `docker-compose.portainer.yml` with an existing writable host path such as `/mnt/coxmain/apps/truckapp-data:/app/data` before deploying.
 
 ### Stop
@@ -172,6 +202,8 @@ docker compose down
 ## Key project files
 
 - Main app (latest): `app_unloadv1.7.py`
+- Rust API service: `rust_api/src/main.rs`
+- Rust API docs: `rust_api/README.md`
 - Previous release entry file: `backups/v1.6/app_unloadv1.6.py`
 - Previous release snapshot: `backups/v1.5/app_unloadv1.5.py`
 - Legacy snapshots: `backups/v1.4/`, `backups/v1.3/`, `backups/v1.2/`, `backups/v1.1/`, `backups/v1.0/`

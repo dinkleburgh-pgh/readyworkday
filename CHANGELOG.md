@@ -7,6 +7,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 68 - 2026-05-18
+
+1. Bumped build to **68**.
+2. **MANAGEMENT / ROUTE CHANGE**: Added a direct **Reset Swap** action in the Route Change panel so incorrect route swaps can be reverted immediately from the same workflow.
+3. **MANAGEMENT / RUN DAY**: Hardened wizard step state transitions (Step 1-4) so dialogs stay in sync and are less likely to stall or end in partial state.
+4. **RESPONSIVENESS**: Reduced repeat JSON disk reads during reruns by adding session-level mtime caches for communications, auth users/requests, audit history, and batch history.
+
 ## v1.7.5 build 67 - 2026-05-18
 
 1. Bumped build to **67**.

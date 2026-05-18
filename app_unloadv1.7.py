@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 67
+_APP_BUILD = 68
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -1367,12 +1367,30 @@ def _batch_history_path() -> str:
 
 def _load_audit_history() -> list[dict]:
     path = _audit_history_path()
+    try:
+        mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
+    except Exception:
+        mtime = -1.0
+
+    cache_raw = st.session_state.get("_audit_history_cache")
+    if isinstance(cache_raw, dict):
+        try:
+            cache_mtime = float(cache_raw.get("mtime", -2.0))
+        except Exception:
+            cache_mtime = -2.0
+        if cache_mtime == mtime:
+            cache_data = cache_raw.get("data")
+            if isinstance(cache_data, list):
+                return [dict(entry) for entry in cache_data if isinstance(entry, dict)]
+
     if not os.path.exists(path):
+        st.session_state["_audit_history_cache"] = {"mtime": mtime, "data": []}
         return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except Exception:
+        st.session_state["_audit_history_cache"] = {"mtime": mtime, "data": []}
         return []
 
     if not isinstance(raw, list):
@@ -1382,6 +1400,7 @@ def _load_audit_history() -> list[dict]:
     for entry in raw:
         if isinstance(entry, dict):
             out.append(entry)
+    st.session_state["_audit_history_cache"] = {"mtime": mtime, "data": [dict(entry) for entry in out]}
     return out
 
 
@@ -1390,6 +1409,7 @@ def _save_audit_history(entries: list[dict]) -> bool:
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(entries, f, ensure_ascii=False, indent=2)
+        st.session_state.pop("_audit_history_cache", None)
         return True
     except Exception:
         return False
@@ -1852,12 +1872,30 @@ def _render_mobile_audit_photo_uploader(
 
 def _load_batch_history() -> list[dict]:
     path = _batch_history_path()
+    try:
+        mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
+    except Exception:
+        mtime = -1.0
+
+    cache_raw = st.session_state.get("_batch_history_cache")
+    if isinstance(cache_raw, dict):
+        try:
+            cache_mtime = float(cache_raw.get("mtime", -2.0))
+        except Exception:
+            cache_mtime = -2.0
+        if cache_mtime == mtime:
+            cache_data = cache_raw.get("data")
+            if isinstance(cache_data, list):
+                return [dict(entry) for entry in cache_data if isinstance(entry, dict)]
+
     if not os.path.exists(path):
+        st.session_state["_batch_history_cache"] = {"mtime": mtime, "data": []}
         return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except Exception:
+        st.session_state["_batch_history_cache"] = {"mtime": mtime, "data": []}
         return []
 
     if not isinstance(raw, list):
@@ -1867,6 +1905,7 @@ def _load_batch_history() -> list[dict]:
     for entry in raw:
         if isinstance(entry, dict):
             out.append(entry)
+    st.session_state["_batch_history_cache"] = {"mtime": mtime, "data": [dict(entry) for entry in out]}
     return out
 
 
@@ -1875,6 +1914,7 @@ def _save_batch_history(entries: list[dict]) -> bool:
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(entries, f, ensure_ascii=False, indent=2)
+        st.session_state.pop("_batch_history_cache", None)
         return True
     except Exception:
         return False
@@ -5617,16 +5657,36 @@ def _normalize_auth_users(raw_users) -> dict[str, dict]:
 
 def _load_auth_users() -> dict[str, dict]:
     path = _auth_users_path()
+    try:
+        mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
+    except Exception:
+        mtime = -1.0
+
+    cache_raw = st.session_state.get("_auth_users_cache")
+    if isinstance(cache_raw, dict):
+        try:
+            cache_mtime = float(cache_raw.get("mtime", -2.0))
+        except Exception:
+            cache_mtime = -2.0
+        if cache_mtime == mtime:
+            cache_data = cache_raw.get("data")
+            if isinstance(cache_data, dict):
+                return {str(k): dict(v) for k, v in cache_data.items() if isinstance(v, dict)}
+
     if not os.path.exists(path):
+        st.session_state["_auth_users_cache"] = {"mtime": mtime, "data": {}}
         return {}
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
+        st.session_state["_auth_users_cache"] = {"mtime": mtime, "data": {}}
         return {}
 
-    return _normalize_auth_users(data)
+    normalized = _normalize_auth_users(data)
+    st.session_state["_auth_users_cache"] = {"mtime": mtime, "data": {str(k): dict(v) for k, v in normalized.items()}}
+    return normalized
 
 
 def _save_auth_users(users):
@@ -5639,6 +5699,7 @@ def _save_auth_users(users):
             os.makedirs(directory, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+        st.session_state.pop("_auth_users_cache", None)
     except Exception:
         pass
 
@@ -5684,16 +5745,36 @@ def _normalize_auth_requests(raw_requests) -> dict[str, dict]:
 
 def _load_auth_requests() -> dict[str, dict]:
     path = _auth_requests_path()
+    try:
+        mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
+    except Exception:
+        mtime = -1.0
+
+    cache_raw = st.session_state.get("_auth_requests_cache")
+    if isinstance(cache_raw, dict):
+        try:
+            cache_mtime = float(cache_raw.get("mtime", -2.0))
+        except Exception:
+            cache_mtime = -2.0
+        if cache_mtime == mtime:
+            cache_data = cache_raw.get("data")
+            if isinstance(cache_data, dict):
+                return {str(k): dict(v) for k, v in cache_data.items() if isinstance(v, dict)}
+
     if not os.path.exists(path):
+        st.session_state["_auth_requests_cache"] = {"mtime": mtime, "data": {}}
         return {}
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
+        st.session_state["_auth_requests_cache"] = {"mtime": mtime, "data": {}}
         return {}
 
-    return _normalize_auth_requests(data)
+    normalized = _normalize_auth_requests(data)
+    st.session_state["_auth_requests_cache"] = {"mtime": mtime, "data": {str(k): dict(v) for k, v in normalized.items()}}
+    return normalized
 
 
 def _save_auth_requests(requests):
@@ -5706,6 +5787,7 @@ def _save_auth_requests(requests):
             os.makedirs(directory, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+        st.session_state.pop("_auth_requests_cache", None)
     except Exception:
         pass
 
@@ -5774,16 +5856,39 @@ def _normalize_communications_messages(raw_messages) -> list[dict]:
 
 def _load_communications_messages() -> list[dict]:
     path = _communications_path()
+    try:
+        mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
+    except Exception:
+        mtime = -1.0
+
+    cache_raw = st.session_state.get("_communications_messages_cache")
+    if isinstance(cache_raw, dict):
+        try:
+            cache_mtime = float(cache_raw.get("mtime", -2.0))
+        except Exception:
+            cache_mtime = -2.0
+        if cache_mtime == mtime:
+            cache_data = cache_raw.get("data")
+            if isinstance(cache_data, list):
+                return [dict(entry) for entry in cache_data if isinstance(entry, dict)]
+
     if not os.path.exists(path):
+        st.session_state["_communications_messages_cache"] = {"mtime": mtime, "data": []}
         return []
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
+        st.session_state["_communications_messages_cache"] = {"mtime": mtime, "data": []}
         return []
 
-    return _normalize_communications_messages(data)
+    normalized = _normalize_communications_messages(data)
+    st.session_state["_communications_messages_cache"] = {
+        "mtime": mtime,
+        "data": [dict(entry) for entry in normalized if isinstance(entry, dict)],
+    }
+    return normalized
 
 
 def _save_communications_messages(messages):
@@ -5796,6 +5901,7 @@ def _save_communications_messages(messages):
             os.makedirs(directory, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+        st.session_state.pop("_communications_messages_cache", None)
     except Exception:
         pass
 
@@ -14269,6 +14375,28 @@ def render_fleet_management():
                     st.session_state.pop(swap_load_input_key, None)
                 st.rerun()
 
+            def _reset_route_change_dialog():
+                route_pick = _coerce_swap_dropdown_pick(st.session_state.get(swap_route_input_key))
+                if route_pick is None:
+                    st.session_state[swap_feedback_key] = {
+                        "ok": False,
+                        "message": "Select a Truck route first.",
+                    }
+                    st.rerun()
+
+                route_raw = str(route_pick)
+                ok_swap, swap_message = _apply_manual_route_change(route_raw, route_raw)
+                st.session_state[swap_feedback_key] = {
+                    "ok": bool(ok_swap),
+                    "message": str(swap_message),
+                }
+                if ok_swap:
+                    _mark_and_save()
+                    st.session_state[swap_dialog_open_key] = False
+                    st.session_state.pop(swap_route_input_key, None)
+                    st.session_state.pop(swap_load_input_key, None)
+                st.rerun()
+
             def _cancel_route_change_dialog():
                 st.session_state[swap_dialog_open_key] = False
                 st.session_state.pop(swap_route_input_key, None)
@@ -14280,10 +14408,13 @@ def render_fleet_management():
                 @dialog_api("Route Change")
                 def _render_route_change_dialog():
                     _render_route_change_fields()
-                    c_apply, c_cancel = st.columns([1, 1])
+                    c_apply, c_reset, c_cancel = st.columns([1, 1, 1])
                     with c_apply:
                         if st.button("Apply", width='stretch', key="sup_manage_route_change_apply"):
                             _submit_route_change_dialog()
+                    with c_reset:
+                        if st.button("Reset Swap", width='stretch', key="sup_manage_route_change_reset"):
+                            _reset_route_change_dialog()
                     with c_cancel:
                         if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel"):
                             _cancel_route_change_dialog()
@@ -14293,10 +14424,13 @@ def render_fleet_management():
                 st.markdown("### Route Change")
                 st.caption("Dialog is not available in this Streamlit version; using inline form.")
                 _render_route_change_fields()
-                c_apply, c_cancel = st.columns([1, 1])
+                c_apply, c_reset, c_cancel = st.columns([1, 1, 1])
                 with c_apply:
                     if st.button("Apply", width='stretch', key="sup_manage_route_change_apply_inline"):
                         _submit_route_change_dialog()
+                with c_reset:
+                    if st.button("Reset Swap", width='stretch', key="sup_manage_route_change_reset_inline"):
+                        _reset_route_change_dialog()
                 with c_cancel:
                     if st.button("Cancel", width='stretch', key="sup_manage_route_change_cancel_inline"):
                         _cancel_route_change_dialog()
@@ -27072,11 +27206,58 @@ elif st.session_state.active_screen == "SUPERVISOR":
             st.session_state[dialog_key] = False
     if "sup_run_day_flow_active" not in st.session_state:
         st.session_state["sup_run_day_flow_active"] = False
+    if "sup_run_day_flow_step" not in st.session_state:
+        st.session_state["sup_run_day_flow_step"] = 0
 
     def _open_supervisor_dialog(target_key: str):
         for dialog_key in supervisor_dialog_keys:
             st.session_state[dialog_key] = False
         st.session_state[target_key] = True
+
+    run_day_step_dialogs = {
+        1: "sup_dust_clothes_dialog_open",
+        2: "sup_run_day_spares_dialog_open",
+        3: "sup_run_day_specials_dialog_open",
+        4: "sup_run_day_daily_notes_dialog_open",
+    }
+
+    def _set_run_day_flow_step(step_value: int, *, open_dialog: bool = True):
+        try:
+            step_num = int(step_value)
+        except Exception:
+            step_num = 0
+        if step_num < 1 or step_num > 4:
+            step_num = 0
+
+        st.session_state["sup_run_day_flow_step"] = int(step_num)
+        st.session_state["sup_run_day_flow_active"] = bool(step_num > 0)
+
+        if step_num <= 0:
+            for dialog_key in run_day_step_dialogs.values():
+                st.session_state[dialog_key] = False
+            return
+
+        if open_dialog:
+            _open_supervisor_dialog(run_day_step_dialogs[int(step_num)])
+
+    if bool(st.session_state.get("sup_run_day_flow_active")):
+        try:
+            active_step = int(st.session_state.get("sup_run_day_flow_step") or 1)
+        except Exception:
+            active_step = 1
+        if active_step < 1 or active_step > 4:
+            active_step = 1
+            st.session_state["sup_run_day_flow_step"] = 1
+
+        expected_dialog_key = run_day_step_dialogs[int(active_step)]
+        open_run_day_dialogs = [
+            dialog_key
+            for dialog_key in run_day_step_dialogs.values()
+            if bool(st.session_state.get(dialog_key))
+        ]
+        if open_run_day_dialogs != [expected_dialog_key]:
+            for dialog_key in run_day_step_dialogs.values():
+                st.session_state[dialog_key] = (dialog_key == expected_dialog_key)
 
     open_supervisor_dialogs = [
         dialog_key for dialog_key in supervisor_dialog_keys if bool(st.session_state.get(dialog_key))
@@ -27097,8 +27278,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         )
 
         if st.button("Run Day", width='stretch', key="sup_run_day_btn"):
-            st.session_state["sup_run_day_flow_active"] = True
-            _open_supervisor_dialog("sup_dust_clothes_dialog_open")
+            _set_run_day_flow_step(1)
             st.rerun()
 
         if st.button("Current Day Summary", width='stretch', key="sup_current_day_summary_btn"):
@@ -27108,13 +27288,13 @@ elif st.session_state.active_screen == "SUPERVISOR":
         sup_dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
         sup_dust_button_label = "Edit Dust Garments" if sup_dust_clothes_set_today else "Set Dust Clothes"
         if st.button(sup_dust_button_label, width='stretch', key="sup_open_dust_clothes_dialog"):
-            st.session_state["sup_run_day_flow_active"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
             _open_supervisor_dialog("sup_dust_clothes_dialog_open")
             st.rerun()
 
         def _dismiss_sup_dust_clothes_dialog():
             st.session_state["sup_dust_clothes_dialog_open"] = False
-            st.session_state["sup_run_day_flow_active"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_dust_clothes_dialog_open"):
             dust_dialog_title = (
@@ -27251,22 +27431,18 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["sup_dust_clothes_dialog_open"] = False
                     _mark_and_save()
                     if run_day_flow_active:
-                        st.session_state["sup_run_day_flow_active"] = False
                         _queue_management_confirmation("Dust clothes saved.")
-                        _open_supervisor_dialog("sup_run_day_spares_dialog_open")
+                        _set_run_day_flow_step(2)
                     else:
                         _queue_management_confirmation("Dust clothes updated.")
                     st.rerun()
 
                 if run_day_flow_active:
                     if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
-                        st.session_state["sup_dust_clothes_dialog_open"] = False
-                        st.session_state["sup_run_day_flow_active"] = False
-                        _open_supervisor_dialog("sup_run_day_spares_dialog_open")
+                        _set_run_day_flow_step(2)
                         st.rerun()
                 if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
-                    st.session_state["sup_dust_clothes_dialog_open"] = False
-                    st.session_state["sup_run_day_flow_active"] = False
+                    _set_run_day_flow_step(0)
                     st.rerun()
 
             _render_sup_dust_clothes_dialog()
@@ -27354,7 +27530,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
         def _dismiss_sup_run_day_spares_dialog():
             st.session_state["sup_run_day_spares_dialog_open"] = False
-            st.session_state["sup_run_day_flow_active"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_spares_dialog_open"):
             @st.dialog("Run Day - Step 2/4", on_dismiss=_dismiss_sup_run_day_spares_dialog)
@@ -27688,30 +27864,29 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             if swap_message:
                                 _queue_management_confirmation(str(swap_message))
                         _clear_run_day_swap_selection()
-                        _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                        _set_run_day_flow_step(3)
                         st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
                     _clear_run_day_swap_selection()
-                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                    _set_run_day_flow_step(3)
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
                     _clear_run_day_swap_selection()
-                    st.session_state["sup_run_day_flow_active"] = True
-                    _open_supervisor_dialog("sup_dust_clothes_dialog_open")
+                    _set_run_day_flow_step(1)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
                     _clear_run_day_swap_selection()
-                    st.session_state["sup_run_day_spares_dialog_open"] = False
-                    st.session_state["sup_run_day_flow_active"] = False
+                    _set_run_day_flow_step(0)
                     st.rerun()
 
             _render_sup_run_day_spares_dialog()
 
         def _dismiss_sup_run_day_specials_dialog():
             st.session_state["sup_run_day_specials_dialog_open"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_specials_dialog_open"):
             @st.dialog("Run Day - Step 3/4", on_dismiss=_dismiss_sup_run_day_specials_dialog)
@@ -27881,28 +28056,26 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         _apply_truck_status_change(t, "Dirty")
                     if dirty_picks:
                         _mark_and_save()
-                    _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
+                    _set_run_day_flow_step(4)
                     st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
-                    _open_supervisor_dialog("sup_run_day_daily_notes_dialog_open")
+                    _set_run_day_flow_step(4)
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_specials_back"):
-                    st.session_state["sup_run_day_flow_active"] = True
-                    _open_supervisor_dialog("sup_run_day_spares_dialog_open")
+                    _set_run_day_flow_step(2)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_specials_close"):
-                    st.session_state["sup_run_day_specials_dialog_open"] = False
-                    st.session_state["sup_run_day_flow_active"] = False
+                    _set_run_day_flow_step(0)
                     st.rerun()
 
             _render_sup_run_day_specials_dialog()
 
         def _dismiss_sup_run_day_daily_notes_dialog():
             st.session_state["sup_run_day_daily_notes_dialog_open"] = False
-            st.session_state["sup_run_day_flow_active"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_daily_notes_dialog_open"):
             @st.dialog("Run Day - Step 4/4", on_dismiss=_dismiss_sup_run_day_daily_notes_dialog)
@@ -27975,20 +28148,17 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.session_state["daily_notes"] = saved_daily_notes
                     st.session_state[daily_notes_seed_key] = current_run_day_key
                     st.session_state["sup_last_run_day_completed_key"] = current_run_day_key
-                    st.session_state["sup_run_day_daily_notes_dialog_open"] = False
-                    st.session_state["sup_run_day_flow_active"] = False
+                    _set_run_day_flow_step(0)
                     _queue_management_confirmation("Run day setup complete.")
                     _mark_and_save()
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
-                    st.session_state["sup_run_day_flow_active"] = True
-                    _open_supervisor_dialog("sup_run_day_specials_dialog_open")
+                    _set_run_day_flow_step(3)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_daily_notes_close"):
-                    st.session_state["sup_run_day_daily_notes_dialog_open"] = False
-                    st.session_state["sup_run_day_flow_active"] = False
+                    _set_run_day_flow_step(0)
                     st.rerun()
 
             _render_sup_run_day_daily_notes_dialog()

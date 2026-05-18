@@ -7,6 +7,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 69 - 2026-05-18
+
+1. Bumped build to **69**.
+2. **AUTH / MOBILE**: Increased mobile auth restore grace window to reduce accidental fallback to Guest during transient cookie/session restore hiccups.
+3. **MOBILE UI**: Hid pace-card surfaces on mobile (including Load pace card wrappers) to declutter the small-screen flow.
+4. **STATUS LOADED**: Hardened the **Go to Unloaded** action with an explicit button key and constant-based target screen assignment.
+
 ## v1.7.5 build 68 - 2026-05-18
 
 1. Bumped build to **68**.

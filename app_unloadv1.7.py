@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 68
+_APP_BUILD = 69
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -671,6 +671,7 @@ BLANK_PAGE_WATCHDOG_MAX_RELOADS = 5
 AUTH_SILENT_COOKIE_MAX_ATTEMPTS = 4
 AUTH_SILENT_RETRY_INTERVAL_SECONDS = 1.25
 AUTH_RESTORE_GRACE_SECONDS = 10 * 60
+AUTH_RESTORE_MOBILE_GRACE_SECONDS = 24 * 60 * 60
 PACE_ESTIMATE_BASE_BUFFER_SECONDS = 3 * 60
 PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS = 25
 PACE_ESTIMATE_PERCENT_BUFFER = 0.08
@@ -5259,6 +5260,8 @@ def _between_trucks_timer_script(card_selector: str, last_finish_ts: float | Non
 def _render_guest_live_status_pace_card():
     if not PACE_CARDS_ENABLED:
         return
+    if _is_mobile_client():
+        return
 
     completion = current_load_day_completion()
     scheduled_total = int(completion.get("scheduled_total", 0) or 0)
@@ -5366,6 +5369,8 @@ def _render_guest_live_status_pace_card():
 
 def _render_inprog_mini_pace_card():
     if not PACE_CARDS_ENABLED:
+        return
+    if _is_mobile_client():
         return
 
     completion = current_load_day_completion()
@@ -7548,7 +7553,10 @@ def _apply_auth_gate():
         st.session_state.auth_request_portal_pending = False
     else:
         last_verified_ts = float(st.session_state.get("auth_last_verified_ts") or 0.0)
-        if existing_signed_in and (now_ts - last_verified_ts) <= AUTH_RESTORE_GRACE_SECONDS:
+        restore_grace_seconds = int(AUTH_RESTORE_GRACE_SECONDS)
+        if _is_mobile_client():
+            restore_grace_seconds = max(restore_grace_seconds, int(AUTH_RESTORE_MOBILE_GRACE_SECONDS))
+        if existing_signed_in and (now_ts - last_verified_ts) <= restore_grace_seconds:
             st.session_state.auth_login_portal_auto_prompted = False
             return authenticator
         st.session_state.auth_name = "Guest"
@@ -9490,6 +9498,11 @@ st.markdown(
             }
         }
         @media (max-width: 980px) {
+            [data-mini-pace-card],
+            [data-load-pace-card="1"],
+            .load-pace-wrap {
+                display: none !important;
+            }
             /* Keep mobile button spacing stable across reruns and conditional sections. */
             [data-testid="stAppViewContainer"] .main [data-testid="stButton"] {
                 display: block !important;
@@ -24978,9 +24991,9 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         st.rerun()
                 else:
                     st.caption("Short sheet access is restricted for your role.")
-                if st.button("Go to Unloaded", width='stretch'):
+                if st.button("Go to Unloaded", width='stretch', key="status_loaded_go_to_unloaded"):
                     st.session_state.shorts_pending_next_up_confirm_for_truck = None
-                    st.session_state.active_screen = "STATUS_UNLOADED"
+                    st.session_state.active_screen = STATUS_UNLOADED_PAGE
                     _mark_and_save()
                     st.rerun()
 

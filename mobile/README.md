@@ -40,8 +40,46 @@ See `mobile/capacitor/package.json` scripts for all commands.
 
 Detailed setup instructions are in `mobile/capacitor/SETUP.md`.
 
+API integration targets for native Android are in `mobile/ANDROID_REST_TARGETS.md`.
+
 ## Notes
 
 - iOS builds require macOS + Xcode.
 - Android builds work from Windows with Android Studio.
 - This is an initial scaffold. Native signing, push notifications, camera APIs, and store deployment are separate follow-up steps.
+
+## Android + Rust API Integration
+
+If you already have a Gradle Android app, connect it to the Rust API service instead of parsing app files directly.
+
+Base URL (local dev):
+
+- `http://10.0.2.2:8787` (Android Emulator)
+- `http://<your-lan-ip>:8787` (physical device)
+
+Suggested Retrofit interface:
+
+```kotlin
+interface TruckApi {
+   @GET("/health")
+   suspend fun health(): HealthResponse
+
+   @GET("/api/v1/state")
+   suspend fun state(): JsonObject
+
+   @GET("/api/v1/fleet")
+   suspend fun fleet(): JsonObject
+
+   @PUT("/api/v1/state")
+   suspend fun saveState(@Body payload: JsonObject): SaveResponse
+
+   @PUT("/api/v1/fleet")
+   suspend fun saveFleet(@Body payload: JsonObject): SaveResponse
+}
+```
+
+High-level flow:
+
+1. Start TruckApp + Rust API with Docker Compose.
+2. Android app calls Rust API endpoints.
+3. Keep Streamlit as UI/admin surface; use API for mobile workflow data and actions.

@@ -550,7 +550,14 @@ fn require_api_key(app: &AppState, headers: &HeaderMap, level: AccessLevel) -> R
     let bearer_key = headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|raw| raw.strip_prefix("Bearer "))
+        .and_then(|raw| raw.split_once(char::is_whitespace))
+        .and_then(|(scheme, token)| {
+            if scheme.eq_ignore_ascii_case("Bearer") {
+                Some(token)
+            } else {
+                None
+            }
+        })
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
 

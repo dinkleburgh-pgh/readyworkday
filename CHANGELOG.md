@@ -7,6 +7,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 64 - 2026-05-18
+
+1. Bumped build to **64**.
+2. Corrected app metadata build sequencing so repository build is ahead of production build 63.
+
 ## v1.7.5 build 61 - 2026-05-17
 
 1. Bumped build to **61**.

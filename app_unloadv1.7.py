@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 69
+_APP_BUILD = 70
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -670,8 +670,8 @@ BLANK_PAGE_WATCHDOG_ENABLED = True
 BLANK_PAGE_WATCHDOG_MAX_RELOADS = 5
 AUTH_SILENT_COOKIE_MAX_ATTEMPTS = 4
 AUTH_SILENT_RETRY_INTERVAL_SECONDS = 1.25
-AUTH_RESTORE_GRACE_SECONDS = 10 * 60
-AUTH_RESTORE_MOBILE_GRACE_SECONDS = 24 * 60 * 60
+AUTH_RESTORE_GRACE_SECONDS = 6 * 60 * 60
+AUTH_RESTORE_MOBILE_GRACE_SECONDS = 7 * 24 * 60 * 60
 PACE_ESTIMATE_BASE_BUFFER_SECONDS = 3 * 60
 PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS = 25
 PACE_ESTIMATE_PERCENT_BUFFER = 0.08
@@ -7296,8 +7296,17 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
 
                     if login_ok:
                         # Explicitly set authentication state to ensure proper session sync
+                        login_ts = time.time()
+                        user_record = users.get(canonical_username) if isinstance(users, dict) else None
+                        login_role = _normalize_auth_role((user_record or {}).get("role") or AUTH_ROLE_ADMIN)
                         st.session_state.authentication_status = True
                         st.session_state.username = canonical_username
+                        st.session_state.auth_username = canonical_username
+                        st.session_state.auth_name = canonical_username
+                        st.session_state.auth_role = login_role
+                        st.session_state.auth_last_verified_ts = login_ts
+                        st.session_state.auth_last_verified_username = canonical_username
+                        st.session_state.auth_last_verified_role = login_role
                         if hasattr(authenticator, "cookie_controller"):
                             authenticator.cookie_controller.set_cookie()
                         st.session_state.auth_silent_cookie_attempts = 0
@@ -7471,9 +7480,13 @@ def _apply_auth_gate():
     auth_status = st.session_state.get("authentication_status")
     request_portal_pending = bool(st.session_state.get("auth_request_portal_pending", False))
     now_ts = time.time()
-    existing_username = str(st.session_state.get("auth_username") or "").strip().lower()
+    existing_username = str(st.session_state.get("auth_username") or st.session_state.get("username") or "").strip().lower()
     existing_role = _normalize_auth_role(st.session_state.get("auth_role"))
-    existing_signed_in = bool(existing_username and existing_username != "guest" and existing_role != AUTH_ROLE_GUEST)
+    last_verified_username = str(st.session_state.get("auth_last_verified_username") or "").strip().lower()
+    existing_signed_in = bool(
+        (existing_username and existing_username != "guest" and existing_role != AUTH_ROLE_GUEST)
+        or (last_verified_username and last_verified_username != "guest")
+    )
 
     # streamlit-authenticator may transiently report False/None during reruns even when
     # a valid auth cookie exists; retry cookie reads before falling back to Guest.
@@ -7547,6 +7560,8 @@ def _apply_auth_gate():
         st.session_state.auth_silent_cookie_attempts = 0
         st.session_state.auth_silent_cookie_last_try_ts = 0.0
         st.session_state.auth_last_verified_ts = now_ts
+        st.session_state.auth_last_verified_username = st.session_state.auth_username
+        st.session_state.auth_last_verified_role = st.session_state.auth_role
         st.session_state.auth_login_portal_auto_prompted = False
         st.session_state.auth_login_portal_pending = False
         st.session_state.auth_login_portal_requested_at = 0.0
@@ -7557,6 +7572,20 @@ def _apply_auth_gate():
         if _is_mobile_client():
             restore_grace_seconds = max(restore_grace_seconds, int(AUTH_RESTORE_MOBILE_GRACE_SECONDS))
         if existing_signed_in and (now_ts - last_verified_ts) <= restore_grace_seconds:
+            sticky_username = str(
+                st.session_state.get("auth_username")
+                or st.session_state.get("username")
+                or st.session_state.get("auth_last_verified_username")
+                or ""
+            ).strip()
+            if sticky_username and sticky_username.lower() != "guest":
+                st.session_state.auth_username = sticky_username
+                st.session_state.auth_name = sticky_username
+                sticky_role = _normalize_auth_role(
+                    st.session_state.get("auth_last_verified_role") or st.session_state.get("auth_role")
+                )
+                if sticky_role != AUTH_ROLE_GUEST:
+                    st.session_state.auth_role = sticky_role
             st.session_state.auth_login_portal_auto_prompted = False
             return authenticator
         st.session_state.auth_name = "Guest"
@@ -23269,6 +23298,9 @@ if (
         st.session_state.auth_name = "Guest"
         st.session_state.auth_username = "guest"
         st.session_state.auth_role = AUTH_ROLE_GUEST
+        st.session_state.auth_last_verified_ts = 0.0
+        st.session_state.auth_last_verified_username = ""
+        st.session_state.auth_last_verified_role = AUTH_ROLE_GUEST
         st.session_state.auth_login_portal_auto_prompted = False
         st.session_state.auth_login_portal_pending = False
         st.session_state.auth_login_portal_requested_at = 0.0

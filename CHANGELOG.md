@@ -7,6 +7,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 70 - 2026-05-19
+
+1. Bumped build to **70**.
+2. **AUTH STABILITY**: Hardened session persistence to prevent random sign-outs by preserving last verified identity through transient cookie/authenticator misses.
+3. **AUTH STABILITY**: Extended restore grace windows (desktop and mobile), stamped verification metadata immediately after successful portal login, and reset sticky metadata on explicit logout.
+
 ## v1.7.5 build 69 - 2026-05-18
 
 1. Bumped build to **69**.

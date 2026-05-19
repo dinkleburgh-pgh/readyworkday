@@ -1,11 +1,77 @@
 # Changelog
 
-## v1.7.5 build 51 - 2026-05-14
+## Unreleased
+
+## v1.7.5 build 81 - 2026-05-19
+
+1. Bumped build to **81**.
+2. **UI / SIDEBAR**: Rewrote `_render_sidebar_load_unload_progress_card()` to derive counts directly from the same session-state sets used by the Live Status buttons, removing all prior-day run-mapping and route-inference fallback logic. **Unload** bar = (unloaded + in-progress + loaded + shop) / (dirty + unloaded + in-progress + loaded + shop). **Load** bar = loaded / (unloaded + in-progress + loaded). All counts exclude OOS/spare trucks, mirroring the Live Status display.
+
+## v1.7.5 build 80 - 2026-05-19
+
+1. Bumped build to **80**.
+2. **UI / UNLOAD**: Applied updated button styling to the Unload Management mobile matrix. Buttons now match the Build 77 desktop/mobile unified look: gradient fill (`linear-gradient(170deg, ...)`), `1.5px` border, stronger box-shadow (`0 3px 10px rgba(0,0,0,0.45), inset 0 1.5px 0 rgba(255,255,255,0.13)`), `0.75px` text-stroke, `1.75rem` font-size, and stronger text-shadow (`0 1px 3px rgba(0,0,0,0.92), 0 0 6px rgba(0,0,0,0.6)`).
+
+## v1.7.5 build 79 - 2026-05-19
+
+1. Bumped build to **79**.
+2. **UI / MOBILE — STATUS_UNLOADED button grid malformation**: Fixed a layout defect on mobile where the first two truck buttons in the Unloaded status list appeared staggered: truck 51 alone on the left with an empty right slot, then truck 52 alone on the right with an empty left slot, before the remaining trucks paired up correctly.
+
+   **Root cause**: `_compress_mobile_fleet_like_status_heading_gap("unloaded")` runs JS to collapse the large visual gap between the "Unloaded" heading chip and the first truck button row (gap inflated by the route card rendered above on mobile). The JS measured the gap (~200–300 px when a route card is present) and applied `margin-top: -Npx` to `firstButtonHost` — the `element-container` wrapping truck 51's button, which lives **inside column 0** of the first `stHorizontalBlock` CSS grid row. That pulled only column 0 upward while column 1 (truck 52) stayed at its original DOM position, creating the empty-slot stagger.
+
+   **Fix**: Changed the margin target from `firstButtonHost` (individual grid cell) to `rowHost || firstButtonHost` — where `rowHost` is resolved via `firstButtonHost.closest('[data-testid="stHorizontalBlock"]')`. Applying the negative margin to the row container shifts both columns as a unit, preserving the 2-column grid layout. See [`.github/fixes/build-79-mobile-unloaded-grid.md`](.github/fixes/build-79-mobile-unloaded-grid.md) for the full analysis.
+
+## v1.7.5 build 78 - 2026-05-19
+
+1. Bumped build to **78**.
+2. **UI / UNLOAD**: "Select a truck to batch" bottom-pill is now cleared from the DOM immediately when navigating to any page other than STATUS_DIRTY, UNLOAD, or BATCH. Previously the pill lingered for up to 8 seconds after leaving those pages.
+
+## v1.7.5 build 77 - 2026-05-19
+
+1. Bumped build to **77**.
+2. **UI / MOBILE BUTTONS**: Unified truck button text styling across all viewport sizes — mobile now uses the same font size (28px), text-stroke (0.75px), and text-shadow strength as desktop. Also applies gradient fill, `box-shadow`, and `1.5px` border to dialog/confirmation buttons on mobile (previously those only had a flat solid colour).
+
+## v1.7.5 build 76 - 2026-05-19
+
+1. Bumped build to **76**.
+2. **UI / STATUS_UNLOADED**: Fixed ghost-click regression where mobile browsers fire synthetic `mousedown`/`click` events ~300 ms after a navigation touchend, causing a truck to start unintentionally. Added a 520 ms CSS `pointer-events: none` guard on all primary buttons when STATUS_UNLOADED renders so phantom events are absorbed before user interaction is enabled.
+3. **UI**: Cleaned up any leftover `#truckapp-start-overlay` DOM elements from older builds still lingering in the browser.
+4. **UI**: Added `display: none !important` to `[data-testid="stSkeleton"]` / `.stSkeleton` inside `[class*="_auto_refresh"]` containers to prevent skeleton flash on IN_PROGRESS and other auto-refresh pages.
+
+
 
 1. Bumped build to **51**.
 2. **MANAGEMENT / RUN DAY**: Fixed Run Day dialog stepper so all 4 steps (Dust Clothes, Spares/Swaps, Specials, Daily Notes) now complete in sequence before ending the flow. Dialog no longer stalls after step 1/4.
 
 ## Unreleased
+
+## v1.7.5 build 75 - 2026-05-19
+
+1. Bumped build to **75**.
+2. **UI / BUTTONS**: Increased truck number font size (28px desktop / 1.48rem mobile for uniform pages, proportionally larger for non-uniform), added proper drop-shadow (`0 1px 3px rgba(0,0,0,0.92), 0 0 6px rgba(0,0,0,0.6)`), and slightly thickened `-webkit-text-stroke` (0.75px desktop / 0.48px mobile) for bold bright-white numerals that are highly readable on the gradient backgrounds.
+
+## v1.7.5 build 74 - 2026-05-19
+
+1. Bumped build to **74**.
+2. **UI / MOBILE**: Removed spammy trend-page toasts ("Load pace trend is live", "Unload throughput trends", "Status mix trends") that fired on every render of the Trends page due to the global `st.info`/`st.success` toast override.
+3. **UI / BUTTONS**: Polished truck button appearance — gradient fill (lighter top → base → darker bottom), `box-shadow` depth layer, `1.5px` border, `14px` border-radius, and smooth `filter: brightness` hover/active transitions via global CSS.
+
+## v1.7.5 build 73 - 2026-05-20
+
+1. Bumped build to **73**.
+2. **PERFORMANCE / LOAD START**: Starting a load from Load Management (Status: Unloaded) now starts immediately for normal trucks, skipping the "Load truck X?" confirmation dialog. Edge cases (shop return, off-day override, spare route assignment, holiday multi-day) still show their confirmation prompts. This eliminates one full rerun cycle (~2–3s saved per load start).
+
+## v1.7.5 build 72 - 2026-05-19
+
+1. Bumped build to **72**.
+2. **UNLOAD UI**: Replaced "Select a truck to begin unloading." top-right toast with a fixed center-bottom pill reading "Select a truck to batch" on the Unload Management page.
+3. **UI**: Suppressed skeleton loader bars from `streamlit_autorefresh` timer components via global CSS targeting `[class*="_auto_refresh"]`, covering all pages including Communications.
+4. **UI / NOTICES**: Added 2.75rem top margin to the pill page heading so it clears the collapsed Notices bar and does not overlap.
+
+## v1.7.5 build 71 - 2026-05-19
+
+1. Bumped build to **71**.
+2. **NAVIGATION**: Fixed "Go to Unloaded" button on the STATUS LOADED page not navigating — the STATUS_* guard was snapping active_screen back to STATUS_LOADED on every stale-URL rerun. Guard now requires `url_nav_triggered` so it only fires on intentional URL-based navigation (status badges, direct URL), not on button-based STATUS→STATUS transitions.
 
 ## v1.7.5 build 70 - 2026-05-19
 

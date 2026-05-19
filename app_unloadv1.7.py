@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 70
+_APP_BUILD = 82
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -347,6 +347,42 @@ st.markdown(
                 right: calc(0.55rem + env(safe-area-inset-right)) !important;
             }
         }
+    }
+    /* Hide skeleton loaders from auto-refresh timer components */
+    [class*="_auto_refresh"] {
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+    [class*="_auto_refresh"] > div,
+    [class*="_auto_refresh"] iframe {
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        border: 0 !important;
+    }
+    [class*="_auto_refresh"] [data-testid="stSkeleton"],
+    [class*="_auto_refresh"] .stSkeleton {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+    }
+    /* Truck button base polish */
+    button[kind="primary"] {
+        border-radius: 14px !important;
+        transition: filter 0.10s ease, transform 0.10s ease !important;
+    }
+    button[kind="primary"]:hover {
+        filter: brightness(1.13) !important;
+        transform: translateY(-1px) !important;
+    }
+    button[kind="primary"]:active {
+        filter: brightness(0.88) !important;
+        transform: translateY(1px) !important;
     }
     </style>
     """,
@@ -5482,56 +5518,22 @@ def _render_inprog_mini_pace_card():
 
 
 def _render_sidebar_load_unload_progress_card():
+    # Load: scheduled route count for today's load day.
     load_completion = current_load_day_completion()
     load_total = int(load_completion.get("scheduled_total", 0) or 0)
-    load_done = int(load_completion.get("loaded_count", 0) or 0)
-    load_done = max(0, min(load_total, load_done))
-    load_percent = int(round((load_done / load_total) * 100)) if load_total > 0 else 0
+    load_done  = min(load_total, int(load_completion.get("loaded_count", 0) or 0))
+    load_percent = int(round(load_done / load_total * 100)) if load_total > 0 else 0
 
-    # Unload progress should be based on trucks that actually ran the prior load day.
-    unload_trucks = {int(t) for t in unload_trucks_for_current_day()}
-    unload_total = len(unload_trucks)
-
+    # Unload: trucks that ran the previous load day.
+    unload_trucks = unload_trucks_for_current_day()
+    unload_total  = len(unload_trucks)
     cleaned_set = {int(t) for t in (st.session_state.get("cleaned_set") or set())}
-    loaded_set = {int(t) for t in (st.session_state.get("loaded_set") or set())}
-    inprog_set = {int(t) for t in (st.session_state.get("inprog_set") or set())}
-    shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
-    off_set = {int(t) for t in (st.session_state.get("off_set") or set())}
-    spare_set = {int(t) for t in (st.session_state.get("spare_set") or set())}
-
-    dirty_from_unload_day = (
-        unload_trucks
-        - cleaned_set
-        - loaded_set
-        - inprog_set
-        - shop_set
-        - off_set
-        - spare_set
-    )
-    unload_done = max(0, int(unload_total) - len(dirty_from_unload_day))
-
-    # Fallback: if prior-day run mapping is empty, infer cohort from dirty trucks + completed unload records.
-    if unload_total == 0:
-        dirty_candidates = (
-            {int(t) for t in FLEET}
-            - cleaned_set
-            - loaded_set
-            - inprog_set
-            - shop_set
-            - off_set
-            - spare_set
-        )
-        route_targets = _truck_route_targets()
-        dirty_routes = {
-            int(route_targets.get(int(truck_num), int(truck_num)))
-            for truck_num in dirty_candidates
-        }
-        completed_routes = {int(r) for r in (_current_unload_completed_routes_for_day() or set())}
-        inferred_routes = dirty_routes | completed_routes
-        unload_total = len(inferred_routes)
-        unload_done = len(inferred_routes - dirty_routes)
-
-    unload_percent = int(round((unload_done / unload_total) * 100)) if unload_total > 0 else 0
+    loaded_set  = {int(t) for t in (st.session_state.get("loaded_set")  or set())}
+    inprog_set  = {int(t) for t in (st.session_state.get("inprog_set")  or set())}
+    shop_set    = {int(t) for t in (st.session_state.get("shop_set")    or set())}
+    still_dirty = unload_trucks - cleaned_set - loaded_set - inprog_set - shop_set
+    unload_done = max(0, unload_total - len(still_dirty))
+    unload_percent = int(round(unload_done / unload_total * 100)) if unload_total > 0 else 0
 
     st.sidebar.markdown(
         (
@@ -12214,12 +12216,10 @@ def _apply_primary_button_color_map_for_labels(label_color_map: dict[str, dict[s
                     const mobile = isMobileViewport();
                     const buttons = Array.from(root.querySelectorAll('button[kind="primary"]'));
                     const uniformTruckButton = ['LOAD', 'UNLOAD', 'FLEET'].includes(String(activeScreen || '').toUpperCase());
-                    const textStrokeWidth = mobile ? '0.35px' : '0.55px';
-                    const textStrokeColor = mobile ? 'rgba(0,0,0,0.92)' : 'rgba(0,0,0,0.98)';
-                    const textShadow = mobile ? '0 0 0.4px rgba(0,0,0,0.9)' : '0 0 0.9px rgba(0,0,0,0.98)';
-                    const fontSize = uniformTruckButton
-                        ? (mobile ? '1.32rem' : '25px')
-                        : ((mobile ? 1.30 : 1.82).toFixed(2) + 'rem');
+                    const textStrokeWidth = '0.75px';
+                    const textStrokeColor = 'rgba(0,0,0,0.98)';
+                    const textShadow = '0 1px 3px rgba(0,0,0,0.92), 0 0 6px rgba(0,0,0,0.6)';
+                    const fontSize = uniformTruckButton ? '28px' : '1.82rem';
                     buttons.forEach((btn) => {{
                         const label = canonical(btn.innerText || btn.textContent || '');
                         const colorSpec = colorMap[label];
@@ -12228,9 +12228,19 @@ def _apply_primary_button_color_map_for_labels(label_color_map: dict[str, dict[s
                         const bg = colorSpec.bg || '#334155';
                         const border = colorSpec.border || '#1e293b';
                         const fg = colorSpec.fg || '#ffffff';
+                        const hexAdj = (hex, f) => {{
+                            try {{
+                                const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+                                const nr=f>1?r+(255-r)*(f-1):r*f, ng=f>1?g+(255-g)*(f-1):g*f, nb=f>1?b+(255-b)*(f-1):b*f;
+                                return '#'+[nr,ng,nb].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+                            }} catch(e) {{ return hex; }}
+                        }};
+                        const bgTop = hexAdj(bg, 1.22);
+                        const bgBot = hexAdj(bg, 0.76);
 
-                        btn.style.setProperty('background', bg, 'important');
-                        btn.style.setProperty('border', `1px solid ${{border}}`, 'important');
+                        btn.style.setProperty('background', `linear-gradient(170deg, ${{bgTop}} 0%, ${{bg}} 52%, ${{bgBot}} 100%)`, 'important');
+                        btn.style.setProperty('border', `1.5px solid ${{border}}`, 'important');
+                        btn.style.setProperty('box-shadow', '0 3px 10px rgba(0,0,0,0.45), inset 0 1.5px 0 rgba(255,255,255,0.13)', 'important');
                         btn.style.setProperty('color', fg, 'important');
                         btn.style.setProperty('font-weight', '900', 'important');
                         btn.style.setProperty('display', 'flex', 'important');
@@ -12239,7 +12249,7 @@ def _apply_primary_button_color_map_for_labels(label_color_map: dict[str, dict[s
                         btn.style.setProperty('text-align', 'center', 'important');
                         btn.style.setProperty('font-size', fontSize, 'important');
                         btn.style.setProperty('line-height', '1', 'important');
-                        if (uniformTruckButton && !mobile) {{
+                        if (uniformTruckButton) {{
                             btn.style.setProperty('min-height', '58px', 'important');
                         }}
 
@@ -12635,12 +12645,23 @@ def render_numeric_truck_buttons(
             <script>
             (function() {{
                 const root = window.parent.document;
+                // Remove bottom-hint pill when we are not on a page that owns it
+                if (!['STATUS_DIRTY', 'UNLOAD', 'BATCH'].includes({json.dumps(active_screen_key)})) {{
+                    try {{ const h = root.getElementById('truckapp-bottom-hint'); if (h) h.remove(); }} catch (e) {{}}
+                }}
                 const colorMap = {color_map_json};
                 const trailingLabels = new Set({trailing_labels_json});
                 const disabledLabels = new Set({disabled_labels_json});
                 const forceTextColor = {force_text_color_json};
                 const retryDelays = {button_style_retry_delays_json};
                 const useResizeListener = {button_style_use_resize_listener_json};
+                const hexAdjust = (hex, f) => {{
+                    try {{
+                        const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+                        const nr=f>1?r+(255-r)*(f-1):r*f, ng=f>1?g+(255-g)*(f-1):g*f, nb=f>1?b+(255-b)*(f-1):b*f;
+                        return '#'+[nr,ng,nb].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+                    }} catch(e) {{ return hex; }}
+                }};
                 const applyTruckColors = () => {{
                     try {{
                         const buttons = root.querySelectorAll('button[kind="primary"]');
@@ -12685,8 +12706,11 @@ def render_numeric_truck_buttons(
                             if (!colors) return;
                             const fg = forceTextColor || colors.fg || '#000000';
                             const isDisabledTruck = disabledLabels.has(truckLabel);
-                            btn.style.setProperty('background', colors.bg, 'important');
-                            btn.style.setProperty('border', `1px solid ${{colors.border}}`, 'important');
+                            const bgTop = hexAdjust(colors.bg, 1.22);
+                            const bgBot = hexAdjust(colors.bg, 0.76);
+                            btn.style.setProperty('background', `linear-gradient(170deg, ${{bgTop}} 0%, ${{colors.bg}} 52%, ${{bgBot}} 100%)`, 'important');
+                            btn.style.setProperty('border', `1.5px solid ${{colors.border}}`, 'important');
+                            btn.style.setProperty('box-shadow', '0 3px 10px rgba(0,0,0,0.45), inset 0 1.5px 0 rgba(255,255,255,0.13)', 'important');
                             btn.style.setProperty('color', fg, 'important');
                             btn.style.setProperty('font-weight', '900', 'important');
                             btn.style.setProperty('display', 'flex', 'important');
@@ -12710,15 +12734,15 @@ def render_numeric_truck_buttons(
                                     }}
                                 }})();
                                 const uniformTruckButton = ['LOAD', 'UNLOAD', 'FLEET'].includes({json.dumps(active_screen_key)});
-                                const textStrokeWidth = mobileViewport ? '0.35px' : '0.55px';
-                                const textStrokeColor = mobileViewport ? 'rgba(0,0,0,0.92)' : 'rgba(0,0,0,0.98)';
-                                const textShadow = mobileViewport ? '0 0 0.4px rgba(0,0,0,0.9)' : '0 0 0.9px rgba(0,0,0,0.98)';
-                                const scaledSize = uniformTruckButton ? (mobileViewport ? '1.32rem' : '25px') : (() => {{
+                                const textStrokeWidth = '0.75px';
+                                const textStrokeColor = 'rgba(0,0,0,0.98)';
+                                const textShadow = '0 1px 3px rgba(0,0,0,0.92), 0 0 6px rgba(0,0,0,0.6)';
+                                const scaledSize = uniformTruckButton ? '28px' : (() => {{
                                     const charCount = Math.max(1, truckLabel.length);
                                     const compact = btn.clientWidth < 56;
                                     return charCount >= 3
-                                        ? (compact ? '17px' : '21px')
-                                        : (compact ? '19px' : '25px');
+                                        ? (compact ? '19px' : '23px')
+                                        : (compact ? '21px' : '28px');
                                 }})();
                                 if (uniformTruckButton) {{
                                     btn.style.setProperty('min-height', '58px', 'important');
@@ -12811,6 +12835,28 @@ def render_numeric_truck_buttons(
                     window.parent.__truckColorResizeBound = true;
                 }} else {{
                     window.parent.__truckColorResizeBound = false;
+                }}
+
+                // Clean up any leftover start-overlay from older builds still in the DOM
+                try {{
+                    const staleOverlay = root.getElementById('truckapp-start-overlay');
+                    if (staleOverlay) staleOverlay.remove();
+                }} catch (e) {{}}
+
+                if ({json.dumps(active_screen_key)} === 'STATUS_UNLOADED') {{
+                    // Ghost-click guard: mobile browsers fire synthetic mousedown/click ~300 ms
+                    // after a navigation touchend at the same screen coordinates. Inject a brief
+                    // pointer-events:none CSS rule so those phantom events cannot start a truck.
+                    const guardStyleId = 'truckapp-ghost-click-guard';
+                    if (!root.getElementById(guardStyleId)) {{
+                        const guardStyle = root.createElement('style');
+                        guardStyle.id = guardStyleId;
+                        guardStyle.textContent = 'button[kind="primary"] {{ pointer-events: none !important; }}';
+                        root.head.appendChild(guardStyle);
+                        window.parent.setTimeout(() => {{
+                            try {{ const el = root.getElementById(guardStyleId); if (el) el.remove(); }} catch (e) {{}}
+                        }}, 520);
+                    }}
                 }}
             }})();
             </script>
@@ -16116,7 +16162,8 @@ def _assign_truck_to_swap_route(route_num: int, selected_truck: int) -> tuple[bo
     shop_set = {int(t) for t in (st.session_state.get("shop_set") or set())}
     loaded_set = {int(t) for t in (st.session_state.get("loaded_set") or set())}
 
-    if route not in set(_unassigned_route_swap_routes()):
+    active_swaps = _active_route_swap_assignments()
+    if route not in set(_unassigned_route_swap_routes()) and route not in set(active_swaps.keys()):
         return False, f"Route {route} does not currently need assignment."
     if route in off_set:
         return False, f"Route {route} is Out Of Service and uses OOS assignment flow."
@@ -16193,12 +16240,20 @@ def _render_route_card_assign_dialog_if_needed():
         and route_num not in potential_crossload_shop_routes
     )
     is_swap_unassigned_route = route_num in unassigned_swap_routes
-    if not is_oos_unassigned_route and not is_shop_unassigned_route and not is_swap_unassigned_route:
+    is_shop_assigned_route = route_num in shop_set and route_num in assigned_shop_routes
+    is_swap_assigned_route = route_num in set(active_swaps.keys()) and route_num not in shop_set and route_num not in off_set
+    if (
+        not is_oos_unassigned_route
+        and not is_shop_unassigned_route
+        and not is_swap_unassigned_route
+        and not is_shop_assigned_route
+        and not is_swap_assigned_route
+    ):
         st.session_state.pop("route_card_assign_route", None)
         return
     if is_oos_unassigned_route:
         assignment_source = "oos"
-    elif is_shop_unassigned_route:
+    elif is_shop_unassigned_route or is_shop_assigned_route:
         assignment_source = "shop"
     else:
         assignment_source = "swap"
@@ -16388,6 +16443,7 @@ def _render_route_card(
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
     pending_return_spares = {int(t) for t in _spares_needing_return_set()}
     can_open_route_assignment = _screen_allowed_for_current_user("STATUS_UNLOADED")
+    can_edit_swap_card_assignment = _is_fleet_equivalent_role(_current_auth_role())
     docked_content_align = "center" if bool(mobile_docked) else "flex-start"
     docked_text_align = "center" if bool(mobile_docked) else "left"
     route_assign_click_targets: set[int] = set()
@@ -16605,10 +16661,19 @@ def _render_route_card(
                         "</div>"
                     )
                 )
+                pair_row_wrapped_html = pair_row_html
+                if can_edit_swap_card_assignment:
+                    pair_row_wrapped_html = (
+                        f"<div data-route-assign='{int(first_route)}' role='button' tabindex='0' "
+                        "style='display:block; text-decoration:none; color:inherit; cursor:pointer;'>"
+                        f"{pair_row_html}"
+                        "</div>"
+                    )
+                    route_assign_click_targets.add(int(first_route))
                 if first_live_status == "Loaded" and second_live_status == "Loaded":
-                    loaded_row_blocks.append(pair_row_html)
+                    loaded_row_blocks.append(pair_row_wrapped_html)
                 else:
-                    assignment_row_blocks.append(pair_row_html)
+                    assignment_row_blocks.append(pair_row_wrapped_html)
                 continue
 
             truck_value = int(detail_values[0])
@@ -16643,10 +16708,19 @@ def _render_route_card(
                     "</div>"
                 )
             )
+            row_wrapped_html = row_html
+            if assignment_kind == "swap_single" and can_edit_swap_card_assignment:
+                row_wrapped_html = (
+                    f"<div data-route-assign='{int(route_value)}' role='button' tabindex='0' "
+                    "style='display:block; text-decoration:none; color:inherit; cursor:pointer;'>"
+                    f"{row_html}"
+                    "</div>"
+                )
+                route_assign_click_targets.add(int(route_value))
             if truck_live_status == "Loaded":
-                loaded_row_blocks.append(row_html)
+                loaded_row_blocks.append(row_wrapped_html)
             else:
-                assignment_row_blocks.append(row_html)
+                assignment_row_blocks.append(row_wrapped_html)
         assignment_rows = "".join(assignment_row_blocks + loaded_row_blocks)
     else:
         assignment_rows = (
@@ -18803,7 +18877,7 @@ def render_page_heading(title: str):
             chip_border = _color_lighten(chip_bg, factor=0.36)
         heading_style = (
             "display:flex; align-items:center; justify-content:center; width:max-content; max-width:calc(100vw - 28px); "
-            "margin:0.24rem auto 0.44rem auto; padding:0.42rem 1.12rem; border-radius:999px; "
+            "margin:2.75rem auto 0.44rem auto; padding:0.42rem 1.12rem; border-radius:999px; "
             f"border:2px solid {chip_border}; background:linear-gradient(90deg, {chip_bg}, {chip_bg_dark}); "
             "box-shadow:0 10px 22px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.08); "
             f"text-align:center; color:{heading_text_color}; font-size:30px; font-weight:800; line-height:1.02; letter-spacing:0.02em;"
@@ -20126,7 +20200,11 @@ def _compress_mobile_fleet_like_status_heading_gap(heading_slug: str) -> None:
                         if (currentGap > 10 && currentGap < 700) {
                             const desiredGapUnderHeader = 10;
                             const reduceBy = Math.min(Math.max(0, currentGap - desiredGapUnderHeader), 420);
-                            firstButtonHost.style.setProperty('margin-top', `${-reduceBy}px`, 'important');
+                            // Apply to rowHost (the stHorizontalBlock) so both grid columns move
+                            // together. Applying to firstButtonHost alone (inside column 0) was
+                            // pulling only the first button up, leaving column 1 in place and
+                            // creating a staggered / empty-slot visual on mobile.
+                            (rowHost || firstButtonHost).style.setProperty('margin-top', `${-reduceBy}px`, 'important');
                         }
                     }
 
@@ -20896,7 +20974,18 @@ def render_truck_bubbles(
             if int(t) in st.session_state.off_set:
                 st.session_state.pending_oos_route = int(t)
                 st.session_state.pending_start_truck = None
+            elif (
+                int(t) not in st.session_state.shop_set
+                and int(t) not in off_trucks_for_today()
+                and not _spare_needs_route_assignment_before_loading(int(t))
+                and not _holiday_start_day_suggestions()
+            ):
+                # Common case: normal unloaded truck — start immediately, skip confirmation
+                _start_loading_from_status_unloaded(int(t))
+                _mark_and_save()
+                st.rerun()
             else:
+                # Edge cases (shop return, off-day override, spare assignment, holiday) need confirmation
                 st.session_state.pending_start_truck = int(t)
                 st.session_state.pending_oos_route = None
         elif from_page == "STATUS_LOADED":
@@ -20951,7 +21040,23 @@ def _start_batch_flow_for_dirty_truck(truck: int, *, set_unload_url_when_disable
 
 def _render_batching_information_panel(*, include_info_text: bool = False) -> None:
     if bool(include_info_text):
-        st.info("Select a truck to begin unloading.")
+        components.html(
+            """<script>
+            (function() {
+                try {
+                    var root = window.parent.document;
+                    var id = 'truckapp-bottom-hint';
+                    var el = root.getElementById(id);
+                    if (!el) { el = root.createElement('div'); el.id = id; root.body.appendChild(el); }
+                    el.textContent = 'Select a truck to batch';
+                    el.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:linear-gradient(180deg,rgba(15,23,42,0.96),rgba(30,41,59,0.93));color:#e2e8f0;padding:0.5rem 1.4rem;border-radius:999px;border:1px solid rgba(125,211,252,0.45);font-size:0.92rem;font-weight:600;z-index:900;backdrop-filter:blur(8px);white-space:nowrap;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,0.35);display:block;';
+                    clearTimeout(el._rt);
+                    el._rt = setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 8000);
+                } catch(e) {}
+            })();
+            </script>""",
+            height=0,
+        )
 
     st.divider()
     batch_cols = _truck_grid_columns(3)
@@ -22339,8 +22444,11 @@ if (
 
 # Guard against Fleet UI state lingering after a status-badge click.
 # If URL explicitly targets a STATUS_* page, always honor it.
+# Requires url_nav_triggered so stale URLs after button-based STATUS→STATUS
+# navigation don't snap the page back before the URL update propagates.
 if (
-    isinstance(requested, str)
+    url_nav_triggered
+    and isinstance(requested, str)
     and requested.startswith("STATUS_")
     and requested in APP_VALID_PAGES
     and st.session_state.active_screen != requested
@@ -24108,37 +24216,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
     if st.session_state.active_screen == "STATUS_OFF":
         title = "OFF"
 
-    if st.session_state.active_screen == "STATUS_OOS":
-        st.markdown(
-            """
-            <style>
-            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS {
-                margin: 0 !important;
-                padding: 0 !important;
-                min-height: 0 !important;
-                height: 0 !important;
-                overflow: hidden !important;
-            }
-            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS > div {
-                margin: 0 !important;
-                padding: 0 !important;
-                min-height: 0 !important;
-                height: 0 !important;
-                overflow: hidden !important;
-            }
-            div[data-testid="stElementContainer"].st-key-auto_refresh_STATUS_OOS iframe {
-                margin: 0 !important;
-                padding: 0 !important;
-                min-height: 0 !important;
-                height: 0 !important;
-                border: 0 !important;
-                display: block !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
     if st.session_state.active_screen != "STATUS_OOS":
         render_page_heading(title)
     if st.session_state.active_screen == "STATUS_UNLOADED":
@@ -25026,6 +25103,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 if st.button("Go to Unloaded", width='stretch', key="status_loaded_go_to_unloaded"):
                     st.session_state.shorts_pending_next_up_confirm_for_truck = None
                     st.session_state.active_screen = STATUS_UNLOADED_PAGE
+                    _set_query_params(page=_page_param_for_screen(STATUS_UNLOADED_PAGE), truck=None, start=None)
                     _mark_and_save()
                     st.rerun()
 
@@ -26298,7 +26376,8 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                 if true_available and can_start_from_inprog:
                     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
                     if st.button("View Unloaded Trucks", width='stretch', key="start_inprog_suggested"):
-                        st.session_state.active_screen = "STATUS_UNLOADED"
+                        st.session_state.active_screen = STATUS_UNLOADED_PAGE
+                        _set_query_params(page=_page_param_for_screen(STATUS_UNLOADED_PAGE), truck=None, start=None)
                         _mark_and_save()
                         st.rerun()
                 elif next_up_candidate is None:
@@ -31624,15 +31703,6 @@ elif st.session_state.active_screen == "TRENDS":
     if is_mobile_trends:
         _render_audit_trends_selection_details_dialog_if_needed()
 
-    st.markdown("#### Coming Soon")
-    future_cols = st.columns(3)
-    with future_cols[0]:
-        st.success("Load pace trend is live")
-    with future_cols[1]:
-        st.info("Unload throughput trends")
-    with future_cols[2]:
-        st.info("Status mix trends")
-
 # --------------------------
 # Communications
 # --------------------------
@@ -32087,12 +32157,12 @@ elif st.session_state.active_screen == "UNLOAD":
                     border-radius: 12px;
                     min-height: 64px;
                     font-weight: 900;
-                    font-size: 1.5rem;
-                    line-height: 1.02;
+                    font-size: 1.75rem;
+                    line-height: 1.0;
                     color: #ffffff !important;
                     -webkit-text-fill-color: #ffffff !important;
-                    -webkit-text-stroke-width: 0.6px;
-                    -webkit-text-stroke-color: rgba(0, 0, 0, 0.95);
+                    -webkit-text-stroke-width: 0.75px;
+                    -webkit-text-stroke-color: rgba(0,0,0,0.98);
                     paint-order: stroke fill;
                     display: flex;
                     align-items: center;
@@ -32102,8 +32172,8 @@ elif st.session_state.active_screen == "UNLOAD":
                     padding: 0.34rem 0.4rem;
                     width: 100%;
                     box-sizing: border-box;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.22);
-                    text-shadow: 0 0 0.35px rgba(0, 0, 0, 0.9);
+                    box-shadow: 0 3px 10px rgba(0,0,0,0.45), inset 0 1.5px 0 rgba(255,255,255,0.13);
+                    text-shadow: 0 1px 3px rgba(0,0,0,0.92), 0 0 6px rgba(0,0,0,0.6);
                     transition: filter 120ms ease, transform 80ms ease;
                 }
                 .unload-mobile-matrix-btn:active {
@@ -32121,9 +32191,12 @@ elif st.session_state.active_screen == "UNLOAD":
             if mobile_rows:
                 grid_cards: list[str] = []
                 for row in mobile_rows:
+                    bg_top = _color_lighten(row['bg'], 0.22)
+                    bg_bot = _color_darken(row['bg'], 0.76)
                     card_style = (
-                        f"background:{row['bg']}; border:1px solid {row['border']}; color:{row['fg']};"
-                        "text-shadow:0 0 0.45px rgba(0,0,0,0.75);"
+                        f"background:linear-gradient(170deg,{bg_top} 0%,{row['bg']} 52%,{bg_bot} 100%); "
+                        f"border:1.5px solid {row['border']}; color:{row['fg']};"
+                        "text-shadow:0 1px 3px rgba(0,0,0,0.92),0 0 6px rgba(0,0,0,0.6);"
                     )
                     grid_cards.append(
                         (
@@ -32234,7 +32307,7 @@ elif st.session_state.active_screen == "UNLOAD":
                 info_text = "Select a truck to mark unloaded."
             show_desktop_unload_save = (not is_mobile_now) and bool(sent_set)
         else:
-            info_text = "Select a truck to begin unloading."
+            info_text = "Select a truck to batch"
 
         if show_desktop_unload_save:
             save_left, save_col, save_right = st.columns([1, 4, 1])
@@ -32249,7 +32322,23 @@ elif st.session_state.active_screen == "UNLOAD":
                     st.session_state.pop("unload_mobile_undo_state", None)
                     st.rerun()
 
-        st.info(info_text)
+        components.html(
+            "<script>"
+            "(function() {"
+            "  try {"
+            "    var root = window.parent.document;"
+            "    var id = 'truckapp-bottom-hint';"
+            "    var el = root.getElementById(id);"
+            "    if (!el) { el = root.createElement('div'); el.id = id; root.body.appendChild(el); }"
+            f"    el.textContent = {json.dumps(info_text)};"
+            "    el.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:linear-gradient(180deg,rgba(15,23,42,0.96),rgba(30,41,59,0.93));color:#e2e8f0;padding:0.5rem 1.4rem;border-radius:999px;border:1px solid rgba(125,211,252,0.45);font-size:0.92rem;font-weight:600;z-index:900;backdrop-filter:blur(8px);white-space:nowrap;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,0.35);display:block;';"
+            "    clearTimeout(el._rt);"
+            "    el._rt = setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 8000);"
+            "  } catch(e) {}"
+            "})();"
+            "</script>",
+            height=0,
+        )
 
         # Restore visually awesome batch cards at the bottom
         st.divider()

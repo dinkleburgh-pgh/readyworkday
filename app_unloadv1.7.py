@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 82
+_APP_BUILD = 84
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -5524,8 +5524,14 @@ def _render_sidebar_load_unload_progress_card():
     load_done  = min(load_total, int(load_completion.get("loaded_count", 0) or 0))
     load_percent = int(round(load_done / load_total * 100)) if load_total > 0 else 0
 
-    # Unload: trucks that ran the previous load day.
-    unload_trucks = unload_trucks_for_current_day()
+    # Unload: trucks scheduled for the previous load day via the Day-Of Mapping.
+    _ub_prev_day = _previous_ship_day_num(_current_ship_day_num())
+    if _ub_prev_day is not None:
+        _ub_off = {int(t) for t in off_trucks_for_day(_ub_prev_day)}
+        _ub_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
+        unload_trucks = {int(t) for t in FLEET if int(t) not in _ub_off and int(t) not in _ub_spares}
+    else:
+        unload_trucks = unload_trucks_for_current_day()
     unload_total  = len(unload_trucks)
     cleaned_set = {int(t) for t in (st.session_state.get("cleaned_set") or set())}
     loaded_set  = {int(t) for t in (st.session_state.get("loaded_set")  or set())}
@@ -33117,6 +33123,53 @@ elif st.session_state.active_screen == "LOAD":
         else:
             load_left_col, load_main_col, load_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
 
+    # Trucks Left dialog — must be called at screen level (before columns) for modal to appear
+    _bd_dlg_key = st.session_state.get("load_bd_dialog")
+    if _bd_dlg_key in ("dusts", "uniforms", "spares", "total"):
+        _bd_dlg_comp = current_load_day_completion()
+        _bd_dlg_remaining = sorted(int(r) for r in (_bd_dlg_comp.get("remaining") or []))
+        _bd_dlg_ra: dict[int, int] = {r: r for r in _bd_dlg_remaining}
+        for _bd_rt, _bd_sp in _active_oos_spare_assignments().items():
+            _bd_rv = int(_bd_rt)
+            if _bd_rv in set(_bd_dlg_remaining):
+                _bd_dlg_ra[_bd_rv] = int(_bd_sp)
+        for _bd_rt, _bd_tk in _active_route_swap_assignments().items():
+            _bd_rv = int(_bd_rt)
+            if _bd_rv in set(_bd_dlg_remaining):
+                _bd_dlg_ra[_bd_rv] = int(_bd_tk)
+        _bd_dlg_dust  = sorted(r for r, t in _bd_dlg_ra.items() if _get_truck_type(t) == TRUCK_TYPE_DUST)
+        _bd_dlg_spare = sorted(r for r, t in _bd_dlg_ra.items() if _get_truck_type(t) == TRUCK_TYPE_SPARE)
+        _bd_dlg_unif  = sorted(r for r, t in _bd_dlg_ra.items() if _get_truck_type(t) not in (TRUCK_TYPE_DUST, TRUCK_TYPE_SPARE))
+        _bd_dlg_lookup = {
+            "dusts":    ("Dusts Left",    _bd_dlg_dust),
+            "uniforms": ("Uniforms Left", _bd_dlg_unif),
+            "spares":   ("Spares Left",   _bd_dlg_spare),
+            "total":    ("Total Left",    _bd_dlg_remaining),
+        }
+        _bd_dlg_title, _bd_dlg_trucks = _bd_dlg_lookup[_bd_dlg_key]
+
+        def _dismiss_load_bd_dialog():
+            st.session_state["load_bd_dialog"] = None
+
+        @st.dialog(_bd_dlg_title, width="small", on_dismiss=_dismiss_load_bd_dialog)
+        def _render_load_bd_dialog():
+            if _bd_dlg_trucks:
+                st.markdown(
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 8px 0;'>"
+                    + "".join(
+                        f"<span style='min-width:44px;text-align:center;padding:4px 10px;"
+                        f"border-radius:999px;border:1px solid rgba(148,163,184,0.45);"
+                        f"background:rgba(30,41,59,0.78);font-weight:800;font-size:0.95rem;'>{r}</span>"
+                        for r in _bd_dlg_trucks
+                    )
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("None remaining in this category.")
+
+        _render_load_bd_dialog()
+
     with load_left_col:
         components.html(
             """
@@ -33719,311 +33772,62 @@ elif st.session_state.active_screen == "LOAD":
                     st.session_state.active_screen = "IN_PROGRESS"
                     st.rerun()
 
-        if is_mobile_load:
-            _load_bd = _current_load_day_remaining_breakdown()
-            if _load_bd["total_left"] > 0:
-                _load_mobile_cards = [
-                    ("Dusts Left", _load_bd["dusts_left"], "rgba(190,24,93,0.34)", "rgba(244,114,182,0.58)", "#fbcfe8"),
-                    ("Uniforms Left", _load_bd["uniforms_left"], "rgba(30,64,175,0.30)", "rgba(96,165,250,0.52)", "#dbeafe"),
-                    ("Spares Left", _load_bd["spares_left"], "rgba(21,128,61,0.28)", "rgba(74,222,128,0.48)", "#dcfce7"),
-                    ("Total Left", _load_bd["total_left"], "rgba(15,23,42,0.62)", "rgba(148,163,184,0.42)", "#f8fafc"),
-                ]
-                _load_mobile_summary_markup = "".join(
-                    (
-                        "<div class='status-loaded-mobile-summary-card' "
-                        f"style='background:{bg}; border-color:{bd};'>"
-                        f"<div class='status-loaded-mobile-summary-label'>{html.escape(lbl)}</div>"
-                        f"<div class='status-loaded-mobile-summary-value' style='color:{vc};'>{int(val)}</div>"
-                        "</div>"
-                    )
-                    for lbl, val, bg, bd, vc in _load_mobile_cards
-                )
-                st.markdown(
-                    (
-                        "<style>"
-                        ".status-loaded-mobile-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.65rem;margin:0.6rem 0 0.55rem 0;}"
-                        ".status-loaded-mobile-summary-card{min-height:88px;padding:0.8rem 0.7rem;border:1px solid;border-radius:14px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 10px 24px rgba(0,0,0,0.18);text-align:center;}"
-                        ".status-loaded-mobile-summary-label{font-size:0.74rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;opacity:0.82;line-height:1.2;}"
-                        ".status-loaded-mobile-summary-value{font-size:1.9rem;font-weight:900;line-height:1.0;margin-top:0.35rem;}"
-                        "</style>"
-                        f"<div class='status-loaded-mobile-summary-grid'>{_load_mobile_summary_markup}</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-            st.markdown("<div style='height:80px;'></div>", unsafe_allow_html=True)
-        st.divider()
-        now_local = _now_local()
-        shift_name, shift_start, shift_end, shift_window_label, load_day_started = _load_pace_shift_window(now_local)
-        st.session_state[_scoped_shift_pref_key("load_pace_shift_view")] = str(shift_name)
-        st.session_state[_scoped_shift_pref_key("load_pace_shift_last_auto")] = str(shift_name)
-        avg_per_truck_seconds = _pace_avg_seconds_for_cards()
-        pace_avg_source_name = _pace_avg_source_label()
-        pace_loader_baseline_count, pace_loader_active_count, pace_loader_multiplier = _pace_loader_settings()
-        pace_loader_effect_text = _pace_loader_multiplier_caption(pace_loader_multiplier)
-        pace_loader_line = _pace_loader_display_line()
-        manual_pace_override_active = _manual_pace_avg_override_seconds() is not None
-        shift_tz = now_local.tzinfo
-        shift_total_seconds = int((shift_end - shift_start).total_seconds())
-        break_duration_seconds = int(st.session_state.get("break_duration") or 1800)
-        effective_shift_seconds = max(0, shift_total_seconds - break_duration_seconds)
-        raw_time_left_seconds = max(0, min(shift_total_seconds, int((shift_end - now_local).total_seconds())))
-        elapsed_wall_seconds = max(0, min(shift_total_seconds, shift_total_seconds - raw_time_left_seconds))
-        shift_time_left_seconds = max(0, effective_shift_seconds - elapsed_wall_seconds)
-        # Display full clock time left in shift window (8:00 -> 0:00),
-        # while pace math still uses lunch-adjusted effective work time.
-        work_time_left_display_seconds = raw_time_left_seconds
-        break_adjustment_remaining_seconds = max(0, raw_time_left_seconds - shift_time_left_seconds)
+        _load_bd = _current_load_day_remaining_breakdown()
+        if _load_bd["total_left"] > 0:
+            _bd_completion = current_load_day_completion()
+            _bd_remaining = sorted(int(r) for r in (_bd_completion.get("remaining") or []))
+            _bd_ra: dict[int, int] = {r: r for r in _bd_remaining}
+            for _bd_route, _bd_spare in _active_oos_spare_assignments().items():
+                _bd_rv = int(_bd_route)
+                if _bd_rv in set(_bd_remaining):
+                    _bd_ra[_bd_rv] = int(_bd_spare)
+            for _bd_route, _bd_truck in _active_route_swap_assignments().items():
+                _bd_rv = int(_bd_route)
+                if _bd_rv in set(_bd_remaining):
+                    _bd_ra[_bd_rv] = int(_bd_truck)
+            _bd_dust_routes  = sorted(r for r, t in _bd_ra.items() if _get_truck_type(t) == TRUCK_TYPE_DUST)
+            _bd_spare_routes = sorted(r for r, t in _bd_ra.items() if _get_truck_type(t) == TRUCK_TYPE_SPARE)
+            _bd_unif_routes  = sorted(r for r, t in _bd_ra.items() if _get_truck_type(t) not in (TRUCK_TYPE_DUST, TRUCK_TYPE_SPARE))
 
-        start_times_raw = st.session_state.get("load_start_times") or {}
-        finish_times_raw = st.session_state.get("load_finish_times") or {}
-        durations_raw = st.session_state.get("load_durations") or {}
+            _bd_configs = [
+                ("dusts",    "Dusts Left",    _load_bd["dusts_left"],    "rgba(190,24,93,0.34)",  "rgba(244,114,182,0.58)", "#fbcfe8", _bd_dust_routes),
+                ("uniforms", "Uniforms Left", _load_bd["uniforms_left"], "rgba(30,64,175,0.30)",  "rgba(96,165,250,0.52)",  "#dbeafe", _bd_unif_routes),
+                ("spares",   "Spares Left",   _load_bd["spares_left"],   "rgba(21,128,61,0.28)",  "rgba(74,222,128,0.48)",  "#dcfce7", _bd_spare_routes),
+                ("total",    "Total Left",    _load_bd["total_left"],    "rgba(15,23,42,0.62)",   "rgba(148,163,184,0.42)", "#f8fafc", _bd_remaining),
+            ]
 
-        start_events: list[tuple[float, int]] = []
-        for truck_raw, start_raw in start_times_raw.items():
-            try:
-                truck_num = int(truck_raw)
-                start_ts = float(start_raw)
-            except Exception:
-                continue
-            if start_ts <= 0:
-                continue
-            try:
-                start_dt = datetime.fromtimestamp(start_ts, tz=shift_tz) if shift_tz else datetime.fromtimestamp(start_ts)
-            except Exception:
-                continue
-            if start_dt < shift_start or start_dt >= shift_end:
-                continue
-            start_events.append((start_ts, truck_num))
-
-        start_events.sort(key=lambda item: (item[0], item[1]))
-        idle_between_starts_seconds = 0
-        idle_between_starts_intervals = 0
-        for idx in range(1, len(start_events)):
-            prev_start_ts, prev_truck = start_events[idx - 1]
-            next_start_ts, _ = start_events[idx]
-
-            finish_raw = finish_times_raw.get(prev_truck)
-            if finish_raw is None:
-                finish_raw = finish_times_raw.get(str(prev_truck))
-
-            prev_finish_ts = None
-            try:
-                if finish_raw is not None:
-                    prev_finish_ts = float(finish_raw)
-            except Exception:
-                prev_finish_ts = None
-
-            if prev_finish_ts is None:
-                duration_raw = durations_raw.get(prev_truck)
-                if duration_raw is None:
-                    duration_raw = durations_raw.get(str(prev_truck))
-                try:
-                    if duration_raw is not None:
-                        prev_finish_ts = float(prev_start_ts) + max(0, int(duration_raw))
-                except Exception:
-                    prev_finish_ts = None
-
-            if prev_finish_ts is None:
-                continue
-
-            idle_gap_seconds = int(max(0, next_start_ts - prev_finish_ts))
-            idle_between_starts_seconds += idle_gap_seconds
-            idle_between_starts_intervals += 1
-
-        total_time_between_text = seconds_to_mmss(idle_between_starts_seconds)
-        avg_time_between_seconds = (
-            int(round(idle_between_starts_seconds / idle_between_starts_intervals))
-            if idle_between_starts_intervals > 0
-            else 0
-        )
-        avg_time_between_text = seconds_to_mmss(avg_time_between_seconds)
-
-        pace_shift_floor_avg_seconds = None
-        if scheduled_total > 0 and effective_shift_seconds > 0:
-            pace_shift_floor_avg_seconds = max(1, int(round(effective_shift_seconds / int(scheduled_total))))
-
-        pace_calc_available = avg_per_truck_seconds is not None
-        pace_mobile_docked = bool(is_mobile_load)
-        pace_mobile_dock_class = " load-pace-mobile-dock" if pace_mobile_docked else ""
-        pace_header_gradient = "linear-gradient(90deg, rgba(59,130,246,0.24), rgba(148,163,184,0.2))"
-        pace_border_style = "1px solid rgba(148,163,184,0.35)"
-        pace_header_value = "N/A"
-        pace_body_html = ""
-
-        if pace_calc_available:
-            pace_used_avg_seconds = max(1, int(avg_per_truck_seconds))
-            pace_used_avg_source = str(pace_avg_source_name)
-            if (
-                (not manual_pace_override_active)
-                and (not load_day_started)
-                and pace_shift_floor_avg_seconds is not None
-                and int(pace_shift_floor_avg_seconds) > int(pace_used_avg_seconds)
-            ):
-                pace_used_avg_seconds = int(pace_shift_floor_avg_seconds)
-                pace_used_avg_source = f"{pace_avg_source_name} + Shift Floor"
-
-            needed_seconds = int(_conservative_needed_load_seconds(remaining_count, pace_used_avg_seconds) or 0)
-            # Compare projected finish time against the selected shift's end time.
-            # This keeps each shift view independent instead of sharing one basis.
-            estimate_base_dt = now_local
-            estimate_break_adjustment_seconds = break_adjustment_remaining_seconds
-            estimated_finish_dt = estimate_base_dt + timedelta(
-                seconds=max(0, needed_seconds + estimate_break_adjustment_seconds)
-            )
-            pace_delta_seconds = int((shift_end - estimated_finish_dt).total_seconds())
-            ahead = pace_delta_seconds >= 0
-            pace_sign = "+" if ahead else "-"
-            pace_color = GREEN if ahead else RED
-            pace_label = "Ahead" if ahead else "Behind"
-            pace_value = seconds_to_mmss(abs(pace_delta_seconds))
-            estimated_finish_text = estimated_finish_dt.strftime("%I:%M %p").lstrip("0")
-            pace_header_gradient = "linear-gradient(90deg, rgba(34,197,94,0.28), rgba(59,130,246,0.26))"
-            pace_border_style = "2px solid rgba(34,197,94,0.42)"
-            pace_header_value = f"{pace_sign}{pace_value}"
-            pace_body_html = (
-                "<div style='padding:8px 12px 12px 12px; text-align:center;'>"
-                f"  <div style='font-size:16px; font-weight:800; opacity:0.84; margin-bottom:2px;'>{pace_label} by</div>"
-                f"  <div style='font-size:clamp(2.8rem, 8vw, 4.2rem); font-weight:900; line-height:1.0; color:{pace_color};'>{pace_sign}{pace_value}</div>"
-                "  <div style='display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:10px;'>"
-                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Trucks this shift</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{scheduled_total}</div></div>"
-                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Remaining</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{remaining_count}</div></div>"
-                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Avg per truck ({html.escape(pace_used_avg_source)})</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(pace_used_avg_seconds)}</div></div>"
-                f"    <div style='min-width:260px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Loader settings</div><div style='font-size:16px; font-weight:800; line-height:1.2;'>{html.escape(pace_loader_line)}</div></div>"
-                f"    <div style='min-width:200px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45); text-align:left;'><div style='display:flex; align-items:center; justify-content:space-between; gap:10px;'><div style='font-size:12px; opacity:0.75;'>Avg. time between</div><div style='font-size:20px; font-weight:900; line-height:1.1;'>{avg_time_between_text}</div></div><div style='height:1px; margin:6px 0; background:rgba(148,163,184,0.26);'></div><div style='display:flex; align-items:center; justify-content:space-between; gap:10px;'><div style='font-size:12px; opacity:0.75;'>Total time between</div><div style='font-size:20px; font-weight:900; line-height:1.1;'>{total_time_between_text}</div></div></div>"
-                f"    <div style='min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Work time left</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{seconds_to_mmss(work_time_left_display_seconds)}</div></div>"
-                "  </div>"
-                "  <div style='display:flex; justify-content:center; margin-top:8px;'>"
-                f"    <div style='min-width:220px; padding:7px 11px; border-radius:10px; border:1px solid rgba(148,163,184,0.35); background:rgba(15,23,42,0.45);'><div style='font-size:12px; opacity:0.75;'>Estimated Finish</div><div style='font-size:22px; font-weight:900; line-height:1.1;'>{html.escape(estimated_finish_text)}</div></div>"
-                "  </div>"
-                "</div>"
-            )
-        else:
-            pace_body_html = (
-                "<div style='padding:12px 12px 14px 12px; text-align:center; opacity:0.85;'>"
-                "  Need completed load-time history to calculate pace delta."
-                "</div>"
-            )
-
-        pace_title_text = f"Pacing: {shift_name} ({shift_window_label})"
-        if not load_day_started:
-            pace_title_text = f"{pace_title_text} - Awaiting first load"
-
-        st.markdown(
-            (
+            # CSS to style each Streamlit button to look like a colored card
+            st.markdown(
                 "<style>"
-                ".load-pace-wrap{margin:8px auto 14px auto;border-radius:18px;overflow:hidden;background:rgba(15,23,42,0.62);box-shadow:0 14px 34px rgba(0,0,0,0.24);}"
-                ".load-pace-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;text-align:left;user-select:none;}"
-                ".load-pace-toggle-hit{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;cursor:pointer;}"
-                ".load-pace-title{font-weight:900;font-size:18px;letter-spacing:0.12em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-                ".load-pace-mini{font-weight:900;font-size:1rem;opacity:0.92;}"
-                ".load-pace-chevron{transition:transform .28s ease;opacity:0.88;}"
-                ".load-pace-body{max-height:860px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
-                ".load-pace-wrap.collapsed .load-pace-chevron{transform:rotate(-90deg);}"
-                ".load-pace-wrap.collapsed .load-pace-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
-                "@media (max-width:980px){.load-pace-wrap.load-pace-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock.collapsed{background:transparent !important;}"
-                ".load-pace-wrap.load-pace-mobile-dock .load-pace-body{max-height:min(56vh,460px);overflow:auto;}"
-                ".load-pace-wrap.load-pace-mobile-dock.collapsed .load-pace-body{max-height:0 !important;overflow:hidden;}}"
-                "</style>"
-                f"<div class='load-pace-wrap{pace_mobile_dock_class}' data-load-pace-card='1' style='border:{pace_border_style};'>"
-                f"  <div class='load-pace-label' data-load-pace-header='1' style='background:{pace_header_gradient};'>"
-                "    <span class='load-pace-toggle-hit' data-load-pace-toggle-hit='1' role='button' tabindex='0'>"
-                f"      <span class='load-pace-title'>{html.escape(pace_title_text)}</span>"
-                f"      <span class='load-pace-mini'>{html.escape(pace_header_value)}</span>"
-                "      <span class='load-pace-chevron'>v</span>"
-                "    </span>"
-                "  </div>"
-                f"  <div class='load-pace-body'>{pace_body_html}</div>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
-        components.html(
-            """
-            <script>
-            (function(){
-                try {
-                    const rootWindow = window.parent || window;
-                    const root = rootWindow.document;
-                    if (!root) return;
+                + "".join(
+                    f".st-key-load_bd_card_{key} button{{"
+                    f"background:{bg} !important;border:1px solid {bd} !important;"
+                    f"min-height:88px !important;border-radius:14px !important;"
+                    f"box-shadow:0 10px 24px rgba(0,0,0,0.18) !important;"
+                    f"display:flex !important;flex-direction:column !important;"
+                    f"align-items:center !important;justify-content:center !important;}}"
+                    f".st-key-load_bd_card_{key} button p{{"
+                    f"color:{vc} !important;-webkit-text-fill-color:{vc} !important;"
+                    f"white-space:pre-line !important;text-align:center !important;line-height:1.15 !important;}}"
+                    for key, _lbl, _val, bg, bd, vc, _trucks in _bd_configs
+                )
+                + "</style>",
+                unsafe_allow_html=True,
+            )
 
-                    const cards = root.querySelectorAll('[data-load-pace-card="1"]');
-                    if (!cards.length) return;
-                    const card = cards[cards.length - 1];
-                    const header = card.querySelector('[data-load-pace-toggle-hit="1"]') || card.querySelector('[data-load-pace-header="1"]');
-                    if (!header) return;
+            _bd_c1, _bd_c2 = st.columns(2, gap="small")
+            for _bd_i, (_bd_key, _bd_lbl, _bd_val, _bd_bg, _bd_bd, _bd_vc, _bd_trucks) in enumerate(_bd_configs):
+                with (_bd_c1 if _bd_i % 2 == 0 else _bd_c2):
+                    if st.button(
+                        f"{_bd_lbl.upper()}\n{int(_bd_val)}",
+                        key=f"load_bd_card_{_bd_key}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["load_bd_dialog"] = _bd_key
+                        st.rerun()
 
-                    const storageKey = 'loadPaceCollapsed';
-                    const isMobileViewport = () => {
-                        try {
-                            const viewportWidth = Math.max(
-                                0,
-                                rootWindow.innerWidth || 0,
-                                root.documentElement ? root.documentElement.clientWidth || 0 : 0,
-                            );
-                            return viewportWidth <= 980;
-                        } catch (e) {
-                            return false;
-                        }
-                    };
-
-                    const storage = (() => {
-                        try { return rootWindow.localStorage; } catch (e) { return null; }
-                    })();
-
-                    const getCollapsed = () => {
-                        const defaultCollapsed = isMobileViewport();
-                        try {
-                            if (!storage) return defaultCollapsed;
-                            const raw = storage.getItem(storageKey);
-                            if (raw === null) return defaultCollapsed;
-                            return raw === '1';
-                        } catch (e) {
-                            return defaultCollapsed;
-                        }
-                    };
-
-                    const setCollapsed = (collapsed) => {
-                        try {
-                            if (storage) storage.setItem(storageKey, collapsed ? '1' : '0');
-                        } catch (e) {}
-                    };
-
-                    const applyCollapsed = () => {
-                        card.classList.toggle('collapsed', getCollapsed());
-                    };
-
-                    applyCollapsed();
-
-                    if (!header.dataset.boundLoadPaceToggle) {
-                        const toggle = () => {
-                            const willCollapse = !card.classList.contains('collapsed');
-                            card.classList.toggle('collapsed', willCollapse);
-                            setCollapsed(willCollapse);
-                        };
-
-                        header.addEventListener('click', function(ev) {
-                            ev.preventDefault();
-                            ev.stopPropagation();
-                            toggle();
-                        });
-                        header.addEventListener('keydown', function(ev) {
-                            if (ev.key === 'Enter' || ev.key === ' ') {
-                                ev.preventDefault();
-                                ev.stopPropagation();
-                                toggle();
-                            }
-                        });
-                        header.dataset.boundLoadPaceToggle = '1';
-                    }
-                } catch (e) {}
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+        if is_mobile_load:
+            st.markdown("<div style='height:80px;'></div>", unsafe_allow_html=True)
 
     with load_right_col:
         if not is_mobile_load:

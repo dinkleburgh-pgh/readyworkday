@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.7.5 build 83 - 2026-05-20
+
+1. Bumped build to **83**.
+2. **UI / LOAD**: Replaced the large collapsible pace card on Load Management desktop with a unified 2×2 "Trucks Left" card grid shown on both desktop and mobile. Cards show Dusts Left, Uniforms Left, Spares Left, and Total Left counts. Clicking any card opens a modal dialog listing the route numbers in that category.
+3. **UI / SIDEBAR**: Unload progress bar total now derived from the Day-Of Mapping (`off_schedule`) for the previous load day, instead of the `truck_load_day_by_truck` assignment map. Load and Unload totals now both reflect the scheduled truck count based on the Day 1–5 off-schedule.
+
+## v1.7.5 build 82 - 2026-05-19
+
+1. Bumped build to **82**.
+2. **UI / SIDEBAR**: Fixed Load/Unload progress bar to use schedule-driven counts. Load total and remaining list now come from `current_load_day_completion()` (scheduled routes = fleet minus off-today minus persistent spares). Unload total and done count use `unload_trucks_for_current_day()` with set-arithmetic against cleaned/loaded/inprog/shop sets.
+
 ## v1.7.5 build 81 - 2026-05-19
 
 1. Bumped build to **81**.

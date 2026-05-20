@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 100 - 2026-05-20
+
+1. Bumped build to **100**.
+2. **IMPROVEMENT**: IN_PROGRESS page now loads immediately after starting a load from Unloaded status. Previously, starting a load triggered two Streamlit reruns (one to update the screen, a second for the URL to catch up). All start-load paths now call `_push_nav_history(force=True)` inline before the final `st.rerun()`, so the URL and screen update atomically in a single rerun. Affects: normal truck click (no dialog), confirm dialog, shop return confirm, off-day override, next-up queue auto-start, break return auto-start, and fleet admin start-load.
+
 ## v1.7.5 build 99 - 2026-05-20
 
 1. Bumped build to **99**.

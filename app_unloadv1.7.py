@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 99
+_APP_BUILD = 100
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -17956,6 +17956,7 @@ def _start_loading_from_status_unloaded(truck: int, load_day_num: int | None = N
     if not st.session_state.inprog_set:
         start_loading_truck(int(t), load_day_num=load_day_num)
         st.session_state.active_screen = "IN_PROGRESS"
+        _push_nav_history(force=True)
     else:
         st.session_state.start_blocked = True
         st.session_state.start_blocking_truck = next(iter(st.session_state.inprog_set))
@@ -18044,6 +18045,7 @@ def _start_next_up_from_queue_if_possible() -> bool:
 
     start_loading_truck(n)
     st.session_state.active_screen = "IN_PROGRESS"
+    _push_nav_history(force=True)
     _mark_and_save()
     return True
 
@@ -25489,6 +25491,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         if not st.session_state.inprog_set:
                             start_loading_truck(pending_t)
                             st.session_state.active_screen = "IN_PROGRESS"
+                            _push_nav_history(force=True)
                         else:
                             st.session_state.start_blocked = True
                             st.session_state.start_blocking_truck = next(iter(st.session_state.inprog_set))
@@ -25509,6 +25512,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                         if not st.session_state.inprog_set:
                             start_loading_truck(pending_t)
                             st.session_state.active_screen = "IN_PROGRESS"
+                            _push_nav_history(force=True)
                         else:
                             st.session_state.start_blocked = True
                             st.session_state.start_blocking_truck = next(iter(st.session_state.inprog_set))
@@ -25816,12 +25820,14 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 if st.button("Set As Next Up", width='stretch', disabled=(attempt_truck is None), key="status_unloaded_start_blocked_set_next"):
                     st.session_state.next_up_truck = int(attempt_truck)
                     st.session_state.active_screen = "IN_PROGRESS"
+                    _push_nav_history(force=True)
                     _dismiss_start_blocked_dialog()
                     _mark_and_save()
                     st.rerun()
             with c2:
                 if st.button("Finish Loading", width='stretch', key="status_unloaded_start_blocked_finish_loading"):
                     st.session_state.active_screen = "IN_PROGRESS"
+                    _push_nav_history(force=True)
                     _dismiss_start_blocked_dialog()
                     _mark_and_save()
                     st.rerun()
@@ -27189,6 +27195,7 @@ elif st.session_state.active_screen == "BREAK":
         start_loading_truck(int(next_up))
         st.session_state.break_start_time = None
         st.session_state.active_screen = "IN_PROGRESS"
+        _push_nav_history(force=True)
         _mark_and_save()
         st.rerun()
     # Calculate return time using the app timezone, not browser/system localtime.
@@ -33983,6 +33990,7 @@ elif st.session_state.active_screen == "LOAD":
                     start_loading_truck(int(t))
                     _mark_and_save()
                     st.session_state.active_screen = "IN_PROGRESS"
+                    _push_nav_history(force=True)
                     st.rerun()
 
         _load_bd = _current_load_day_remaining_breakdown()

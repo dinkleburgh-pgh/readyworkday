@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## v1.7.5 build 89 - 2026-05-19
+## v1.7.5 build 90 - 2026-05-19
 
-1. Bumped build to **89**.
+1. Bumped build to **90**.
 2. **BUG FIX / IN_PROGRESS**: `_apply_soft_auto_refresh` had an inverted guard condition for the IN_PROGRESS screen — it was skipping auto-refresh when a truck **was** active, but firing a 5-second rerun when **no truck** was active. This caused the IN_PROGRESS page to visibly flash/rerun every 5 seconds while the user was between trucks ("No truck currently in progress" state), perceived as an auto-redirect. Fixed by skipping auto-refresh on IN_PROGRESS entirely (the elapsed-time timer is client-side JS and does not require server reruns).
 
 ## v1.7.5 build 88 - 2026-05-20

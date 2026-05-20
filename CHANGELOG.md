@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-## v1.7.5 build 92 - 2026-05-19
+## v1.7.5 build 93 - 2026-05-20
+
+1. Bumped build to **93**.
+2. **IMPROVEMENT / Run Day Wizard Step 2/4**: Renamed first dropdown label from "Truck" to "Route". OOS routes (trucks in the off set) now appear at the top of the dropdown list, labeled with `[OOS]`, so operators can quickly identify which routes are out of service when setting up route swaps. - 2026-05-19
 
 1. Bumped build to **92**.
 2. **BUG FIX / IN_PROGRESS**: `_apply_soft_auto_refresh` had an inverted guard condition for the IN_PROGRESS screen — it was skipping auto-refresh when a truck **was** active, but firing a 5-second rerun when **no truck** was active. This caused the IN_PROGRESS page to visibly flash/rerun every 5 seconds while the user was between trucks ("No truck currently in progress" state), perceived as an auto-redirect. Fixed by skipping auto-refresh on IN_PROGRESS entirely (the elapsed-time timer is client-side JS and does not require server reruns).

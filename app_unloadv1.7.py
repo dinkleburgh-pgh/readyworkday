@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 92
+_APP_BUILD = 93
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -27844,11 +27844,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     deduped_swap_routes.add(int(route_num))
                     _seen_swap_routes.add(int(route_num))
 
-                truck_dropdown_options = [
-                    int(t)
-                    for t in fleet_dropdown_options
-                    if int(t) not in off_trucks_now
-                ]
+                oos_trucks_sorted = sorted(int(t) for t in fleet_dropdown_options if int(t) in off_trucks_now)
+                non_oos_trucks_sorted = [int(t) for t in fleet_dropdown_options if int(t) not in off_trucks_now]
+                truck_dropdown_options = oos_trucks_sorted + non_oos_trucks_sorted
 
                 def _coerce_run_day_swap_pick(value) -> int | None:
                     try:
@@ -27942,7 +27940,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 selected_route_pick = None
                 if truck_dropdown_options:
                     selected_route_pick = st.selectbox(
-                        "Truck",
+                        "Route",
                         options=[None, *truck_dropdown_options],
                         key=run_day_swap_route_key,
                         format_func=lambda truck_num: (
@@ -27951,7 +27949,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             else (
                                 f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
                                 if int(truck_num) in deduped_swap_routes
-                                else f"Truck {int(truck_num)}"
+                                else f"Route {int(truck_num)} [OOS]"
+                                if int(truck_num) in off_trucks_now
+                                else f"Route {int(truck_num)}"
                             )
                         ),
                     )

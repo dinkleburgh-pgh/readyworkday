@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 95
+_APP_BUILD = 96
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -24153,6 +24153,13 @@ previous_screen = str(st.session_state.get(prev_screen_key) or "").upper()
 if previous_screen == "TRENDS" and current_screen != "TRENDS":
     _clear_transient_trends_selection_state()
 st.session_state[prev_screen_key] = current_screen
+
+# Remove the bottom-hint pill immediately when navigating away from pages that own it.
+if current_screen not in {"UNLOAD", "BATCH"}:
+    components.html(
+        "<script>(function(){try{var e=window.parent.document.getElementById('truckapp-bottom-hint');if(e)e.remove();}catch(ex){}})();</script>",
+        height=0,
+    )
 
 if current_screen in {"UNLOAD", "BATCH"}:
     nav_active_labels.add("Unload")

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 96 - 2026-05-20
+
+1. Bumped build to **96**.
+2. **BUG FIX**: "Select a truck to batch" hint pill was sticking on other pages after navigating away from UNLOAD/BATCH. Added an unconditional DOM cleanup at the universal page-dispatch point that removes the hint element immediately on every render outside those two pages.
+
 ## v1.7.5 build 95 - 2026-05-20
 
 1. Bumped build to **95**.

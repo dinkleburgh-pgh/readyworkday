@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 86
+_APP_BUILD = 87
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -1321,7 +1321,7 @@ def save_truck_types(types: dict[int, str]) -> None:
 def _get_truck_type(truck_num: int) -> str:
     types = st.session_state.get("truck_types") or {}
     t = int(truck_num)
-    stored = types.get(t)
+    stored = types.get(t) or types.get(str(t))
     if stored in TRUCK_TYPE_OPTIONS:
         return stored
     return _default_truck_type(t)

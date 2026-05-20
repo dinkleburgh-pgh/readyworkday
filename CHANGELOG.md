@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.7.5 build 95 - 2026-05-20
+
+1. Bumped build to **95**.
+2. **IMPROVEMENT / Auth — Random logout prevention (all three layers)**:
+   - **Option 1 — Server-side session store**: After login, a session entry is written to `.truck_sessions.json` and a `truckapp_sid` browser cookie is set (30-day max-age). On every page load, the session store is checked first. Survives server restarts entirely.
+   - **Option 2 — Direct JWT decode**: The `streamlit-authenticator` JWT cookie is now read and validated directly via `PyJWT` before falling back to the library's flaky cookie controller. Eliminates the race condition that caused false logouts on page reload.
+   - **Option 3 — Tuned retry/grace constants**: Cookie expiry default raised from 7 → 30 days, retry attempts raised from 4 → 10, retry interval lowered from 1.25s → 0.75s, desktop grace from 6h → 24h, mobile grace from 7d → 30d.
+
 ## v1.7.5 build 94 - 2026-05-20
 
 1. Bumped build to **94**.

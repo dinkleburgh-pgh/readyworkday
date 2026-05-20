@@ -26,6 +26,10 @@ import socket
 import csv
 from pathlib import Path
 import bcrypt
+try:
+    import jwt as _jwt_module  # PyJWT — transitive dep of streamlit-authenticator
+except Exception:
+    _jwt_module = None  # type: ignore
 # Load quick-select amounts from JSON
 def load_quick_amounts():
     try:
@@ -37,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 94
+_APP_BUILD = 95
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -704,10 +708,14 @@ DROPDOWN_LOCK_GUARD_ENABLED = False
 FORCE_POPSTATE_RELOAD_ENABLED = False
 BLANK_PAGE_WATCHDOG_ENABLED = True
 BLANK_PAGE_WATCHDOG_MAX_RELOADS = 5
-AUTH_SILENT_COOKIE_MAX_ATTEMPTS = 4
-AUTH_SILENT_RETRY_INTERVAL_SECONDS = 1.25
-AUTH_RESTORE_GRACE_SECONDS = 6 * 60 * 60
-AUTH_RESTORE_MOBILE_GRACE_SECONDS = 7 * 24 * 60 * 60
+AUTH_SILENT_COOKIE_MAX_ATTEMPTS = 10
+AUTH_SILENT_RETRY_INTERVAL_SECONDS = 0.75
+AUTH_RESTORE_GRACE_SECONDS = 24 * 60 * 60
+AUTH_RESTORE_MOBILE_GRACE_SECONDS = 30 * 24 * 60 * 60
+# Server-side session store (survives Streamlit server restarts)
+AUTH_SESSION_STORE_FILE = os.getenv("TRUCKAPP_AUTH_SESSION_FILE", ".truck_sessions.json")
+AUTH_SESSION_EXPIRY_DAYS = 30
+AUTH_SESSION_COOKIE_NAME = "truckapp_sid"
 PACE_ESTIMATE_BASE_BUFFER_SECONDS = 3 * 60
 PACE_ESTIMATE_PER_TRUCK_BUFFER_SECONDS = 25
 PACE_ESTIMATE_PERCENT_BUFFER = 0.08
@@ -7091,6 +7099,93 @@ def _auth_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+# ---------------------------------------------------------------------------
+# Server-side session store helpers (Option 1 — survives server restarts)
+# ---------------------------------------------------------------------------
+
+def _sessions_file_path() -> str:
+    return os.path.join(os.getcwd(), AUTH_SESSION_STORE_FILE)
+
+
+def _load_sessions() -> dict:
+    try:
+        with open(_sessions_file_path(), "r", encoding="utf-8") as _f:
+            return json.load(_f)
+    except Exception:
+        return {}
+
+
+def _save_sessions(sessions: dict) -> None:
+    try:
+        with open(_sessions_file_path(), "w", encoding="utf-8") as _f:
+            json.dump(sessions, _f)
+    except Exception:
+        pass
+
+
+def _prune_sessions(sessions: dict, now_ts: float) -> dict:
+    return {
+        sid: data
+        for sid, data in sessions.items()
+        if float(data.get("expires_at") or 0) > now_ts
+    }
+
+
+def _write_auth_session(username: str, role: str) -> str | None:
+    """Persist a server-side session entry and return its ID (or None on failure)."""
+    try:
+        import secrets
+        session_id = secrets.token_hex(32)
+        now_ts = time.time()
+        sessions = _prune_sessions(_load_sessions(), now_ts)
+        sessions[session_id] = {
+            "username": str(username),
+            "role": str(role),
+            "created_at": now_ts,
+            "expires_at": now_ts + AUTH_SESSION_EXPIRY_DAYS * 86400,
+        }
+        _save_sessions(sessions)
+        return session_id
+    except Exception:
+        return None
+
+
+def _restore_from_session_store(meta: dict) -> bool:
+    """
+    Try to restore auth from the server-side session store by reading the
+    truckapp_sid browser cookie via st.context.  Returns True if restored.
+    """
+    try:
+        raw_cookies = getattr(st.context, "cookies", None) or {}
+        session_id = str(raw_cookies.get(AUTH_SESSION_COOKIE_NAME) or "").strip()
+        if not session_id:
+            return False
+        now_ts = time.time()
+        entry = _load_sessions().get(session_id)
+        if not entry:
+            return False
+        if float(entry.get("expires_at") or 0) <= now_ts:
+            return False
+        username = str(entry.get("username") or "").strip()
+        role = str(entry.get("role") or "").strip()
+        if not username or username.lower() == "guest":
+            return False
+        username_lookup = meta.get("username_lookup") if isinstance(meta.get("username_lookup"), dict) else {}
+        canonical_username = username_lookup.get(username.lower(), username)
+        role_map = meta.get("roles") if isinstance(meta.get("roles"), dict) else {}
+        role_map_ci = meta.get("roles_ci") if isinstance(meta.get("roles_ci"), dict) else {}
+        resolved_role = role_map.get(canonical_username) or role_map_ci.get(username.lower()) or role
+        st.session_state.username = canonical_username
+        st.session_state.authentication_status = True
+        st.session_state.auth_username = canonical_username
+        st.session_state.auth_name = canonical_username
+        st.session_state.auth_role = _normalize_auth_role(resolved_role)
+        st.session_state.auth_restored_from_session_store = True
+        return True
+    except Exception:
+        return False
+
+
 def _normalize_auth_cookie_key(raw_key: str) -> str:
     key = str(raw_key or "").strip()
     if not key:
@@ -7121,7 +7216,7 @@ def _build_authenticator():
     if cookie_key != cookie_key_env:
         logging.warning("TRUCKAPP_AUTH_COOKIE_KEY is shorter than 32 bytes; using SHA-256 derived key to satisfy RFC 7518 guidance.")
     try:
-        cookie_days = float(os.getenv("TRUCKAPP_AUTH_COOKIE_DAYS", "7"))
+        cookie_days = float(os.getenv("TRUCKAPP_AUTH_COOKIE_DAYS", "30"))
     except Exception:
         cookie_days = 7.0
 
@@ -7224,6 +7319,8 @@ def _build_authenticator():
         "roles": role_map,
         "roles_ci": role_map_ci,
         "username_lookup": username_lookup,
+        "cookie_name": cookie_name,
+        "cookie_key": cookie_key,
     }
 
 
@@ -7323,6 +7420,9 @@ def _show_login_portal(authenticator, default_password_active: bool = False):
                         st.session_state.auth_login_portal_pending = False
                         st.session_state.auth_login_portal_requested_at = 0.0
                         st.session_state.auth_login_portal_error_message = ""
+                        # Reset session flags so _apply_auth_gate writes a fresh session entry
+                        st.session_state.auth_session_injected = False
+                        st.session_state.auth_restored_from_session_store = False
                         # Immediately rerun to close dialog and refresh with authenticated state
                         st.rerun()
 
@@ -7497,6 +7597,33 @@ def _apply_auth_gate():
         or (last_verified_username and last_verified_username != "guest")
     )
 
+    # --- Option 1: Server-side session store (survives server restarts) --------
+    if auth_status is not True:
+        if _restore_from_session_store(meta):
+            auth_status = True
+
+    # --- Option 2: Direct JWT decode (bypasses streamlit-authenticator race) ---
+    if auth_status is not True and _jwt_module is not None:
+        try:
+            _raw_cookies = getattr(st.context, "cookies", None) or {}
+            _cookie_name = str(meta.get("cookie_name") or "truckapp_auth")
+            _cookie_key = str(meta.get("cookie_key") or "")
+            _raw_jwt = str(_raw_cookies.get(_cookie_name) or "").strip()
+            if _raw_jwt and _cookie_key:
+                _payload = _jwt_module.decode(_raw_jwt, _cookie_key, algorithms=["HS256"])
+                _jwt_username = str(_payload.get("name") or "").strip()
+                if _jwt_username and _jwt_username.lower() != "guest":
+                    _username_lookup = meta.get("username_lookup") if isinstance(meta.get("username_lookup"), dict) else {}
+                    _canonical = _username_lookup.get(_jwt_username.lower(), _jwt_username)
+                    _role_map = meta.get("roles") if isinstance(meta.get("roles"), dict) else {}
+                    _role_map_ci = meta.get("roles_ci") if isinstance(meta.get("roles_ci"), dict) else {}
+                    _resolved_role = _role_map.get(_canonical) or _role_map_ci.get(_jwt_username.lower()) or AUTH_ROLE_LEAD
+                    st.session_state.username = _canonical
+                    st.session_state.authentication_status = True
+                    auth_status = True
+        except Exception:
+            pass
+
     # streamlit-authenticator may transiently report False/None during reruns even when
     # a valid auth cookie exists; retry cookie reads before falling back to Guest.
     needs_cookie_retry_rerun = False
@@ -7575,6 +7702,19 @@ def _apply_auth_gate():
         st.session_state.auth_login_portal_pending = False
         st.session_state.auth_login_portal_requested_at = 0.0
         st.session_state.auth_request_portal_pending = False
+        # Option 1: persist session to disk + inject browser cookie so future loads
+        # can restore auth without needing streamlit-authenticator at all (e.g. after
+        # a server restart).  Skip if this connection already restored via the store.
+        if not st.session_state.get("auth_session_injected") and not st.session_state.get("auth_restored_from_session_store"):
+            _auth_sid = _write_auth_session(st.session_state.auth_username, st.session_state.auth_role)
+            if _auth_sid:
+                _sid_max_age = AUTH_SESSION_EXPIRY_DAYS * 86400
+                components.html(
+                    f'<script>document.cookie="{AUTH_SESSION_COOKIE_NAME}={_auth_sid};path=/;max-age={_sid_max_age};SameSite=Lax";</script>',
+                    height=0,
+                    scrolling=False,
+                )
+            st.session_state.auth_session_injected = True
     else:
         last_verified_ts = float(st.session_state.get("auth_last_verified_ts") or 0.0)
         restore_grace_seconds = int(AUTH_RESTORE_GRACE_SECONDS)

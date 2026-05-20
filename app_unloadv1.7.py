@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 93
+_APP_BUILD = 94
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -27795,9 +27795,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
                 def _apply_run_day_swap_selection(route_pick: int | None, load_on_pick: int | None) -> tuple[bool, str]:
                     if route_pick is None:
-                        return False, "Select a Truck route first."
+                        return False, "Select a Route first."
                     if load_on_pick is None:
                         return False, "Select a Load On truck first."
+                    off_set_now = {int(t) for t in (st.session_state.get("off_set") or set())}
+                    if int(route_pick) in off_set_now:
+                        # OOS route: use spare assignment mechanism (_assign_truck_to_oos_route calls _mark_and_save internally)
+                        ok, msg = _assign_truck_to_oos_route(int(route_pick), int(load_on_pick))
+                        return ok, str(msg or "").strip()
                     ok_swap, swap_message = _apply_manual_route_change(str(route_pick), str(load_on_pick))
                     if ok_swap:
                         _mark_and_save()
@@ -27817,6 +27822,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 shop_trucks_now = {int(t) for t in (st.session_state.get("shop_set") or set())}
                 loaded_trucks_now = {int(t) for t in (st.session_state.get("loaded_set") or set())}
                 active_swaps = _active_route_swap_assignments()
+                active_oos_assignments = _active_oos_spare_assignments()
 
                 deduped_swap_rows: list[tuple[int, int]] = []
                 deduped_swap_routes: set[int] = set()
@@ -27868,14 +27874,24 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     display_swap_rows.append(
                         {
                             "row_key": f"route_{int(route_value)}",
-                            "label": f"Route {int(route_value)} -> Load On {int(truck_value)}",
+                            "label": f"Route {int(route_value)} \u2192 Load On {int(truck_value)}",
                             "remove_route": int(route_value),
+                            "is_oos": False,
+                        }
+                    )
+                for oos_route, oos_spare in sorted(active_oos_assignments.items()):
+                    display_swap_rows.append(
+                        {
+                            "row_key": f"oos_{int(oos_route)}",
+                            "label": f"OOS Route {int(oos_route)} \u2192 Spare {int(oos_spare)}",
+                            "remove_route": int(oos_route),
+                            "is_oos": True,
                         }
                     )
 
                 if display_swap_rows:
                     st.markdown(
-                        "<div style='margin:0 0 0.35rem 0;font-size:0.94rem;font-weight:800;color:#e2e8f0;'>Current Route Swaps</div>",
+                        "<div style='margin:0 0 0.35rem 0;font-size:0.94rem;font-weight:800;color:#e2e8f0;'>Current Assignments</div>",
                         unsafe_allow_html=True,
                     )
                     for row in display_swap_rows:
@@ -27899,32 +27915,65 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                 if st.button(
                                     "X",
                                     key=f"sup_run_day_swap_remove_{row_key}",
-                                    help="Remove this route swap",
+                                    help="Clear OOS assignment" if row.get("is_oos") else "Remove this route swap",
                                 ):
-                                    ok_swap, swap_message = _apply_run_day_swap_selection(int(remove_route), int(remove_route))
-                                    _set_run_day_swap_feedback(ok_swap, swap_message or f"Route {int(remove_route)} reset.")
-                                    if ok_swap:
+                                    if row.get("is_oos"):
+                                        assignments_raw = st.session_state.get("oos_spare_assignments") or {}
+                                        assignments_dict: dict[int, int] = {}
+                                        for k, v in assignments_raw.items():
+                                            try:
+                                                assignments_dict[int(k)] = int(v)
+                                            except Exception:
+                                                continue
+                                        cleared_spare = assignments_dict.pop(int(remove_route), None)
+                                        if cleared_spare is not None:
+                                            if (
+                                                cleared_spare not in st.session_state.off_set
+                                                and cleared_spare not in st.session_state.shop_set
+                                                and cleared_spare not in st.session_state.inprog_set
+                                                and cleared_spare not in st.session_state.loaded_set
+                                            ):
+                                                st.session_state.cleaned_set.discard(cleared_spare)
+                                                st.session_state.spare_set.add(cleared_spare)
+                                            push_shop_notice(
+                                                f"OOS route #{int(remove_route)} Load On cleared (was Truck #{int(cleared_spare)}).",
+                                                kind="shop",
+                                                notice_type="oos_load_on_clear",
+                                                truck=int(remove_route),
+                                            )
+                                        st.session_state.oos_spare_assignments = assignments_dict
                                         _clear_run_day_swap_selection()
+                                        _mark_and_save()
+                                    else:
+                                        ok_swap, swap_message = _apply_run_day_swap_selection(int(remove_route), int(remove_route))
+                                        _set_run_day_swap_feedback(ok_swap, swap_message or f"Route {int(remove_route)} reset.")
+                                        if ok_swap:
+                                            _clear_run_day_swap_selection()
                                     st.rerun()
                 else:
-                    st.caption("No route swaps set yet.")
+                    st.caption("No assignments set yet.")
 
                 current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
                 synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
                 already_covering = set(_active_cover_truck_usage(exclude_route=current_route_pick).keys())
+                is_oos_route_selected = current_route_pick is not None and int(current_route_pick) in off_trucks_now
                 load_on_excluded = off_trucks_now | shop_trucks_now | loaded_trucks_now | already_covering
                 load_on_dropdown_options = [
                     int(t)
                     for t in fleet_dropdown_options
-                    if int(t) not in load_on_excluded or int(t) == (current_route_pick or -1)
+                    if int(t) not in load_on_excluded or (not is_oos_route_selected and int(t) == (current_route_pick or -1))
                 ]
 
                 if current_route_pick is not None and load_on_dropdown_options:
                     preferred_load_pick = None
                     if current_route_pick is not None:
-                        preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
-                        if preferred_load_pick is None:
-                            preferred_load_pick = int(current_route_pick)
+                        if int(current_route_pick) in off_trucks_now:
+                            # OOS route: pre-select any existing spare assignment
+                            preferred_load_pick = _coerce_run_day_swap_pick(active_oos_assignments.get(int(current_route_pick)))
+                        else:
+                            preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
+                            if preferred_load_pick is None:
+                                preferred_load_pick = int(current_route_pick)
                     current_load_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
                     if current_route_pick is not None and synced_route_pick != current_route_pick:
                         fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
@@ -27949,6 +27998,8 @@ elif st.session_state.active_screen == "SUPERVISOR":
                             else (
                                 f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
                                 if int(truck_num) in deduped_swap_routes
+                                else f"Route {int(truck_num)} [OOS] \u2192 Spare {int(active_oos_assignments[int(truck_num)])} (update)"
+                                if int(truck_num) in off_trucks_now and int(truck_num) in active_oos_assignments
                                 else f"Route {int(truck_num)} [OOS]"
                                 if int(truck_num) in off_trucks_now
                                 else f"Route {int(truck_num)}"

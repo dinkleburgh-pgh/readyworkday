@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 94 - 2026-05-20
+
+1. Bumped build to **94**.
+2. **BUG FIX / Run Day Wizard Step 2/4**: OOS routes were blocked from assignment with "Truck is OOS" error, despite that being exactly the scenario requiring spare coverage. Selecting an OOS route now routes through `_assign_truck_to_oos_route` (the spare assignment mechanism) instead of `_apply_manual_route_change` (route swaps). OOS assignments appear in the "Current Assignments" list alongside route swaps and can be cleared with the X button.
+
 ## v1.7.5 build 93 - 2026-05-20
 
 1. Bumped build to **93**.

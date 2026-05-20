@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 97
+_APP_BUILD = 99
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -22726,7 +22726,15 @@ components.html(
             if (!root.__truckNavLastKey) {
                 root.__truckNavLastKey = navKey;
             } else if (root.__truckNavLastKey !== navKey) {
-                if (!root.__truckNavPopstateInFlight) {
+                const prevParts = root.__truckNavLastKey.split('|');
+                const currParts = navKey.split('|');
+                // page=index 0, nav=index 1. If only sub-params (truck, fleet, etc.)
+                // changed while page+nav are the same, this is an in-page selection —
+                // replace the current history entry to prevent a double-back entry.
+                const isSamePageNav = prevParts[0] === currParts[0] && prevParts[1] === currParts[1] && currParts[0] !== '';
+                if (isSamePageNav) {
+                    try { root.history.replaceState({}, '', canonicalHref); } catch (e) {}
+                } else if (!root.__truckNavPopstateInFlight) {
                     try { root.history.pushState({}, '', canonicalHref); } catch (e) {}
                 }
                 root.__truckNavLastKey = navKey;
@@ -22772,7 +22780,8 @@ if FORCE_POPSTATE_RELOAD_ENABLED:
             const root = window.parent;
             if (!root || root.__truckNavListener) return;
             root.__truckNavListener = true;
-            root.addEventListener('popstate', function(){
+            root.addEventListener('popstate', function(event){
+                if (!(event instanceof PopStateEvent)) return;
                 try { root.location.reload(); } catch(e) {}
             });
         })();

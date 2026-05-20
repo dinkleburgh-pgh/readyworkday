@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 88
+_APP_BUILD = 90
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -6569,7 +6569,9 @@ def _apply_soft_auto_refresh(screen: str):
     screen_key = str(screen or "UNKNOWN").upper()
     if screen_key in {"COMMUNICATIONS", "FLEET", "UNLOAD", "BATCH", "SUPERVISOR"}:
         return
-    if screen_key == "IN_PROGRESS" and bool(st.session_state.get("inprog_set")):
+    # Skip auto-refresh on IN_PROGRESS entirely: the elapsed timer is client-side JS
+    # and a periodic server-rerun causes visible page flashing when no truck is active.
+    if screen_key == "IN_PROGRESS":
         return
     interval_ms = max(5_000, int(_auto_refresh_interval_ms_for_screen(screen)))
     st_autorefresh(interval=interval_ms, key=f"auto_refresh_{screen_key}")

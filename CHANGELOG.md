@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 97 - 2026-05-20
+
+1. Bumped build to **97**.
+2. **FEATURE**: Browser Back/Forward navigation now works correctly. Enabled `FORCE_POPSTATE_RELOAD_ENABLED` — when the browser's back or forward button is pressed, the page reloads with the URL that was restored by the browser (e.g. `?page=UNLOAD`), and Streamlit navigates to the correct screen. Auth state is preserved via the server-side session store.
+
 ## v1.7.5 build 96 - 2026-05-20
 
 1. Bumped build to **96**.

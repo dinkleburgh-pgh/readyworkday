@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 87 - 2026-05-20
+
+1. Bumped build to **87**.
+2. **BUG FIX**: `_get_truck_type()` was silently returning the default type for fleet-managed spare trucks because `truck_types` loaded from the JSON state file has string keys (JSON deserializes all keys as strings), while the lookup used `int`. Fixed with `types.get(t) or types.get(str(t))`.
+
 ## v1.7.5 build 86 - 2026-05-20
 
 1. Bumped build to **86**.

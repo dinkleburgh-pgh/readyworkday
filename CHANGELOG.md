@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-## v1.7.5 build 84 - 2026-05-20
+## v1.7.5 build 86 - 2026-05-20
+
+1. Bumped build to **86**.
+2. **BUG FIX / LOAD + UNLOAD**: Trucks with type "Spare" set via fleet management (e.g. truck 1) were incorrectly counted as scheduled route trucks and appeared in the Unload Dirty list. Fixed three locations:
+   - `_persistent_spares_seeded` block now runs after `_sync_next_up_from_state_file()` and includes fleet-managed spare-type trucks (via `load_truck_types()`) in the `spare_set` seed, not just the hardcoded `PERSISTENT_SPARE_TRUCKS = {10-17}`.
+   - `scheduled_trucks_for_current_load_day()` now excludes any truck whose type is `TRUCK_TYPE_SPARE` via `_get_truck_type()`, not just those in the hardcoded set.
+   - Sidebar unload total uses the same `_get_truck_type()` check instead of the hardcoded set.
+
 
 1. Bumped build to **84**.
 2. **UI / LOAD**: Replaced the large collapsible pace card on Load Management desktop with a unified 2×2 "Trucks Left" card grid shown on both desktop and mobile. Cards show Dusts Left, Uniforms Left, Spares Left, and Total Left counts. Clicking any card opens a modal dialog listing the route numbers in that category.

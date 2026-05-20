@@ -37,7 +37,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 85
+_APP_BUILD = 86
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -5528,8 +5528,7 @@ def _render_sidebar_load_unload_progress_card():
     _ub_prev_day = _previous_ship_day_num(_current_ship_day_num())
     if _ub_prev_day is not None:
         _ub_off = {int(t) for t in off_trucks_for_day(_ub_prev_day)}
-        _ub_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
-        unload_trucks = {int(t) for t in FLEET if int(t) not in _ub_off and int(t) not in _ub_spares}
+        unload_trucks = {int(t) for t in FLEET if int(t) not in _ub_off and _get_truck_type(int(t)) != TRUCK_TYPE_SPARE}
     else:
         unload_trucks = unload_trucks_for_current_day()
     unload_total  = len(unload_trucks)
@@ -8740,8 +8739,25 @@ st.session_state["inprog_layout_style"] = _normalize_inprog_layout_style(
     st.session_state.get("inprog_layout_style")
 )
 
+# Auto-mark trucks as off for current load day
+
+# Do not auto-update off_set with off_today. Off trucks should not be automatically sent to Out Of Service.
+
+# Force app theme to dark regardless of device preferences.
+st.session_state.ui_theme = "Dark"
+
+# Keep next-up synced from shared state so updates from another device (e.g., mobile)
+# are reflected on this session without being overwritten by stale local memory.
+_sync_next_up_from_state_file()
+
 if not st.session_state.get("_persistent_spares_seeded"):
     persistent_spares = {int(t) for t in PERSISTENT_SPARE_TRUCKS}
+    # Also include any fleet-managed trucks whose type is "Spare" (e.g. truck 1 added via Fleet UI)
+    try:
+        _fleet_typed_spares = {k for k, v in load_truck_types().items() if v == TRUCK_TYPE_SPARE}
+        persistent_spares = persistent_spares | _fleet_typed_spares
+    except Exception:
+        pass
     pending_spare_return = {
         int(t) for t in (st.session_state.get("spares_needing_return") or set())
     }
@@ -8763,17 +8779,6 @@ if not st.session_state.get("_persistent_spares_seeded"):
         pending_spare_return - set(st.session_state.spare_set)
     )
     st.session_state._persistent_spares_seeded = True
-
-# Auto-mark trucks as off for current load day
-
-# Do not auto-update off_set with off_today. Off trucks should not be automatically sent to Out Of Service.
-
-# Force app theme to dark regardless of device preferences.
-st.session_state.ui_theme = "Dark"
-
-# Keep next-up synced from shared state so updates from another device (e.g., mobile)
-# are reflected on this session without being overwritten by stale local memory.
-_sync_next_up_from_state_file()
 
 # Bootstrap persistence once per session without clobbering every rerun.
 if not st.session_state.get("_initial_state_bootstrap_saved"):
@@ -10535,11 +10540,10 @@ def _get_original_truck_for_route(route_num: int | None) -> int | None:
 
 def scheduled_trucks_for_current_load_day() -> set[int]:
     off_today = {int(t) for t in off_trucks_for_today()}
-    persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
     return {
         int(t)
         for t in FLEET
-        if int(t) not in off_today and int(t) not in persistent_spares
+        if int(t) not in off_today and _get_truck_type(int(t)) != TRUCK_TYPE_SPARE
     }
 
 

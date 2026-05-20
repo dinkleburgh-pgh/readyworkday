@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## v1.7.5 build 98 - 2026-05-20
+## v1.7.5 build 99 - 2026-05-20
 
-1. Bumped build to **98**.
+1. Bumped build to **99**.
 2. **BUG FIX**: Fixed "double-back" regression from build 97 — pressing Back once now navigates to the actual previous page instead of reloading the current page. Root cause: the JS nav block was calling `history.pushState` when in-page sub-params (e.g. truck selection on STATUS_LOADED, fleet sub-mode on FLEET) changed while staying on the same page and nav sequence. These same-page-nav transitions now use `history.replaceState` instead, so they update the URL without creating duplicate history entries.
 3. **BUG FIX**: Route assignment card clicks no longer trigger an unintended full page reload. The synthetic `dispatchEvent(new Event('popstate'))` emitted by route assignment JS was being caught by the FORCE_POPSTATE reload listener. Fixed by filtering to only reload on real browser Back/Forward events (`event instanceof PopStateEvent`).
 

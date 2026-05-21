@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 104
+_APP_BUILD = 105
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -13425,6 +13425,21 @@ def render_numeric_truck_buttons(
                             font-size: 13px !important;
                             line-height: 1 !important;
                             padding: 2px 4px !important;
+                        }}
+                        button[kind="primary"] .truck-route-badge.truck-route-badge-oos-assigned {{
+                            left: 3px !important;
+                            right: auto !important;
+                            top: 3px !important;
+                            bottom: auto !important;
+                            transform: none !important;
+                            border: 1px solid rgba(20,83,45,0.96) !important;
+                            background: rgba(22,163,74,0.96) !important;
+                            color: #ecfdf5 !important;
+                            -webkit-text-fill-color: #ecfdf5 !important;
+                            font-size: 11px !important;
+                            line-height: 1.05 !important;
+                            padding: 2px 5px !important;
+                            border-radius: 999px !important;
                         }}`;
 
                     if (!existingStyleEl) {{
@@ -13475,7 +13490,11 @@ def render_numeric_truck_buttons(
                             }}
                             const badge = root.createElement('span');
                             badge.className = 'truck-route-badge';
-                            badge.textContent = badgeLabel;
+                            const rawBadgeLabel = String(badgeLabel || '').trim();
+                            const isOosAssignedBadge = rawBadgeLabel.startsWith('A:');
+                            badge.textContent = isOosAssignedBadge
+                                ? rawBadgeLabel.slice(2).trim()
+                                : badgeLabel;
                             badge.style.setProperty('position', 'absolute', 'important');
                             badge.style.setProperty('right', '3px', 'important');
                             badge.style.setProperty('top', '3px', 'important');
@@ -13497,7 +13516,10 @@ def render_numeric_truck_buttons(
                                 badge.style.setProperty('color', fg, 'important');
                                 badge.style.setProperty('-webkit-text-fill-color', fg, 'important');
                             }};
-                            if (badgeTextUpper === 'OFF') {{
+                            if (isOosAssignedBadge) {{
+                                badge.classList.add('truck-route-badge-oos-assigned');
+                                applyBadgeFg('#ecfdf5');
+                            }} else if (badgeTextUpper === 'OFF') {{
                                 badge.classList.add('truck-route-badge-off');
                                 applyBadgeFg('#fee2e2');
                             }} else if (badgeTextUpper === 'OOS') {{
@@ -15777,6 +15799,29 @@ def _active_route_swap_assignments() -> dict[int, int]:
     return active
 
 
+def _active_route_cover_assignments() -> dict[int, int]:
+    """Merged active route coverage map (route -> truck), deduped across OOS and swaps."""
+    merged: dict[int, int] = {}
+    used_cover_trucks: set[int] = set()
+
+    for route_num, truck_num in _active_oos_spare_assignments().items():
+        route_value = int(route_num)
+        truck_value = int(truck_num)
+        merged[route_value] = truck_value
+        used_cover_trucks.add(truck_value)
+
+    # Route swaps should not double-book a truck already covering an OOS route.
+    for route_num, truck_num in _active_route_swap_assignments().items():
+        route_value = int(route_num)
+        truck_value = int(truck_num)
+        if truck_value in used_cover_trucks:
+            continue
+        merged[route_value] = truck_value
+        used_cover_trucks.add(truck_value)
+
+    return merged
+
+
 def _active_cover_truck_usage(exclude_route: int | None = None) -> dict[int, int]:
     usage: dict[int, int] = {}
     exclude_num = None
@@ -15786,13 +15831,7 @@ def _active_cover_truck_usage(exclude_route: int | None = None) -> dict[int, int
         except Exception:
             exclude_num = None
 
-    for route_num, spare_num in _active_oos_spare_assignments().items():
-        route_value = int(route_num)
-        if exclude_num is not None and route_value == exclude_num:
-            continue
-        usage[int(spare_num)] = route_value
-
-    for route_num, truck_num in _active_route_swap_assignments().items():
+    for route_num, truck_num in _active_route_cover_assignments().items():
         route_value = int(route_num)
         if exclude_num is not None and route_value == exclude_num:
             continue
@@ -16073,9 +16112,7 @@ def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bo
 
 def _truck_route_targets() -> dict[int, int]:
     targets = {int(t): int(t) for t in FLEET}
-    for route_num, spare_num in _active_oos_spare_assignments().items():
-        targets[int(spare_num)] = int(route_num)
-    for route_num, truck_num in _active_route_swap_assignments().items():
+    for route_num, truck_num in _active_route_cover_assignments().items():
         targets[int(truck_num)] = int(route_num)
     return targets
 
@@ -16175,7 +16212,7 @@ def _spare_needs_route_assignment_before_loading(truck: int) -> bool:
 
 def _active_swap_route_badges() -> dict[int, str]:
     badges: dict[int, str] = {}
-    for route_num, truck_num in _active_route_swap_assignments().items():
+    for route_num, truck_num in _active_route_cover_assignments().items():
         badges[int(truck_num)] = f"R{int(route_num)}"
     return badges
 
@@ -21238,10 +21275,6 @@ def render_truck_bubbles(
     from_page_key = str(from_page or "").strip().upper()
     unloaded_mobile_off_mode = from_page_key == "STATUS_UNLOADED" and _is_mobile_client()
     swap_badges_all = _active_swap_route_badges()
-    if from_page_key == "STATUS_UNLOADED" and not unloaded_mobile_off_mode:
-        # Include OFF-route spare assignments so Unloaded cover trucks show a route clip.
-        for route_num, truck_num in _active_oos_spare_assignments().items():
-            swap_badges_all[int(truck_num)] = f"R{int(route_num)}"
     bubble_badges = {
         int(truck_num): str(swap_badges_all[int(truck_num)])
         for truck_num in (trucks or [])
@@ -23469,27 +23502,37 @@ inprog_truck_no_oos = inprog_truck if inprog_truck not in oos_spare_set else Non
 badge_colors = _get_status_badge_colors()
 guest_live_status_read_only = _current_auth_role() == AUTH_ROLE_GUEST
 
+route_targets_for_live_status = _truck_route_targets()
+
+def _live_status_route_unique_count(trucks: list[int] | set[int] | tuple[int, ...]) -> int:
+    return len({
+        int(route_targets_for_live_status.get(int(t), int(t)))
+        for t in (trucks or [])
+    })
+
 sidebar_dot_map: dict[str, str] = {}
 if guest_live_status_read_only or _screen_allowed_for_current_user("STATUS_DIRTY"):
+    dirty_count = _live_status_route_unique_count(dirty_trucks_no_oos)
     sidebar_badge_link(
         "Dirty",
-        len(dirty_trucks_no_oos),
+        dirty_count,
         badge_colors["dirty"],
         "STATUS_DIRTY",
         force_show=guest_live_status_read_only,
         disabled=guest_live_status_read_only,
     )
-    sidebar_dot_map[f"{badge_label('Dirty')}  -  {len(dirty_trucks_no_oos)}"] = badge_colors["dirty"]
+    sidebar_dot_map[f"{badge_label('Dirty')}  -  {dirty_count}"] = badge_colors["dirty"]
 if guest_live_status_read_only or _screen_allowed_for_current_user("STATUS_SHOP"):
+    shop_count = _live_status_route_unique_count(shop_list_no_oos)
     sidebar_badge_link(
         "Shop",
-        len(shop_list_no_oos),
+        shop_count,
         badge_colors["shop"],
         "STATUS_SHOP",
         force_show=guest_live_status_read_only,
         disabled=guest_live_status_read_only,
     )
-    sidebar_dot_map[f"{badge_label('Shop')}  -  {len(shop_list_no_oos)}"] = badge_colors["shop"]
+    sidebar_dot_map[f"{badge_label('Shop')}  -  {shop_count}"] = badge_colors["shop"]
 if guest_live_status_read_only or _screen_allowed_for_current_user("IN_PROGRESS"):
     inprog_badge_value = str(inprog_truck_no_oos) if inprog_truck_no_oos is not None else "None"
     sidebar_badge_link(
@@ -23502,25 +23545,27 @@ if guest_live_status_read_only or _screen_allowed_for_current_user("IN_PROGRESS"
     )
     sidebar_dot_map[f"{badge_label('In Progress')}  -  {inprog_badge_value}"] = badge_colors["in_progress"]
 if guest_live_status_read_only or _screen_allowed_for_current_user("STATUS_UNLOADED"):
+    unloaded_count = _live_status_route_unique_count(cleaned_list_no_oos)
     sidebar_badge_link(
         "Unloaded",
-        len(cleaned_list_no_oos),
+        unloaded_count,
         badge_colors["unloaded"],
         "STATUS_UNLOADED",
         force_show=guest_live_status_read_only,
         disabled=guest_live_status_read_only,
     )
-    sidebar_dot_map[f"{badge_label('Unloaded')}  -  {len(cleaned_list_no_oos)}"] = badge_colors["unloaded"]
+    sidebar_dot_map[f"{badge_label('Unloaded')}  -  {unloaded_count}"] = badge_colors["unloaded"]
 if guest_live_status_read_only or _screen_allowed_for_current_user("STATUS_LOADED"):
+    loaded_count = _live_status_route_unique_count(loaded_list_no_oos)
     sidebar_badge_link(
         "Loaded",
-        len(loaded_list_no_oos),
+        loaded_count,
         badge_colors["loaded"],
         "STATUS_LOADED",
         force_show=guest_live_status_read_only,
         disabled=guest_live_status_read_only,
     )
-    sidebar_dot_map[f"{badge_label('Loaded')}  -  {len(loaded_list_no_oos)}"] = badge_colors["loaded"]
+    sidebar_dot_map[f"{badge_label('Loaded')}  -  {loaded_count}"] = badge_colors["loaded"]
 if guest_live_status_read_only or _screen_allowed_for_current_user("STATUS_OFF"):
     off_count = len(sorted(list(off_today)))
     sidebar_badge_link(
@@ -25069,6 +25114,12 @@ if st.session_state.active_screen.startswith("STATUS_"):
             )
             oos_only = sorted(list(st.session_state.off_set))
             spare_only = sorted(list(st.session_state.get("spare_set", set())))
+            oos_active_assignments = _active_oos_spare_assignments()
+            oos_assigned_badges = {
+                int(route_num): f"A:{int(truck_num)}"
+                for route_num, truck_num in (oos_active_assignments or {}).items()
+                if int(route_num) in set(oos_only)
+            }
             st.markdown("<div class='status-oos-chip-stack'>", unsafe_allow_html=True)
             st.markdown("<div class='status-oos-chip status-oos-chip-spare'>SPARE</div>", unsafe_allow_html=True)
             render_truck_bubbles(spare_only, st.session_state.active_screen)
@@ -25081,6 +25132,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 oos_only,
                 "status_oos_grid",
                 default_cols=8,
+                button_badges=oos_assigned_badges if oos_assigned_badges else None,
                 trailing_button_label="Add" if oos_add_options else None,
                 trailing_button_value="__ADD_OOS__" if oos_add_options else None,
             )

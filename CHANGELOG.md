@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.7.5 build 105 - 2026-05-21
+
+1. Bumped build to **105**.
+2. **UI / STATUS_OOS**: Added a top-left assignment chip on OOS truck buttons showing the assigned cover truck number when an OOS route has an active spare assignment.
+3. **ROUTE COVERAGE LOGIC**: Route swap + OOS cover mappings are now merged through a shared active-coverage helper to avoid double-coverage interpretation and keep route-target/badge behavior consistent.
+
 ## v1.7.5 build 104 - 2026-05-21
 
 1. Bumped build to **104**.

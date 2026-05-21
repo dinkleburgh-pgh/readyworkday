@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 101 - 2026-05-21
+
+1. Bumped build to **101**.
+2. **FEATURE**: Smart spare suggestion when assigning a spare to an OOS route. The app now tracks the last 3 trucks used for each route on each load day in `spare_assignment_history.json`. When an OOS route needs a spare, the most frequently used truck for that route/day is presented first with a "Yes, use Truck X / No, choose different" prompt. If no history exists for that specific day, it falls back to the most recently used truck for that route on any day. Declining the suggestion drops through to the regular truck picker.
+
 ## v1.7.5 build 100 - 2026-05-20
 
 1. Bumped build to **100**.

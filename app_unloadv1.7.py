@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 100
+_APP_BUILD = 101
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -956,6 +956,7 @@ COMMUNICATIONS_FILE = os.getenv("TRUCKAPP_COMMUNICATIONS_FILE", "communications_
 CHAT_CENSOR_WORDS_FILE = "chat_censor_words.json"
 AUDIT_HISTORY_FILE = os.getenv("TRUCKAPP_AUDIT_HISTORY_FILE", "audit_requests.json")
 BATCH_HISTORY_FILE = os.getenv("TRUCKAPP_BATCH_HISTORY_FILE", "batch_history.json")
+SPARE_HISTORY_FILE = os.getenv("TRUCKAPP_SPARE_HISTORY_FILE", "spare_assignment_history.json")
 AUDIT_PHOTO_ARCHIVE_DIR = os.getenv("TRUCKAPP_AUDIT_PHOTO_ARCHIVE_DIR", "audit_photo_archive")
 AUDIT_PHOTO_MAX_DIMENSION = int(os.getenv("TRUCKAPP_AUDIT_PHOTO_MAX_DIMENSION", "1920") or 1920)
 AUDIT_PHOTO_JPEG_QUALITY = int(os.getenv("TRUCKAPP_AUDIT_PHOTO_JPEG_QUALITY", "72") or 72)
@@ -10680,6 +10681,90 @@ def _get_original_truck_for_route(route_num: int | None) -> int | None:
 
 
 
+# ==========================================================
+# SPARE ASSIGNMENT HISTORY (AI suggestion)
+# Schema: {str(route): {str(day_num): [truck, truck, truck]}} — newest first, max 3
+# ==========================================================
+
+def _spare_history_path() -> str:
+    return os.path.join(os.getcwd(), SPARE_HISTORY_FILE)
+
+
+def _load_spare_assignment_history() -> dict:
+    path = _spare_history_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_spare_assignment_history(history: dict) -> None:
+    path = _spare_history_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+    except Exception:
+        pass
+
+
+def _record_spare_assignment(route_num: int, spare_num: int, day_num: int | None) -> None:
+    if day_num is None:
+        return
+    history = _load_spare_assignment_history()
+    route_key = str(int(route_num))
+    day_key = str(int(day_num))
+    if route_key not in history:
+        history[route_key] = {}
+    existing: list = history[route_key].get(day_key) or []
+    if not isinstance(existing, list):
+        existing = []
+    # Prepend; keep last 3 unique-by-recency (allow duplicates for frequency counting)
+    updated = [int(spare_num)] + existing
+    history[route_key][day_key] = updated[:3]
+    _save_spare_assignment_history(history)
+
+
+def _suggest_spare_for_route(
+    route_num: int,
+    day_num: int | None,
+    spare_candidates: list[int],
+) -> tuple[int | None, str | None]:
+    """Return (suggested_truck, reason_label) or (None, None) if no suggestion."""
+    if not spare_candidates:
+        return None, None
+    history = _load_spare_assignment_history()
+    route_key = str(int(route_num))
+    route_history: dict = history.get(route_key) or {}
+
+    candidate_set = set(spare_candidates)
+
+    # Phase 1: same load day — most common truck used for this route on this day
+    if day_num is not None:
+        day_key = str(int(day_num))
+        day_list: list = route_history.get(day_key) or []
+        available = [t for t in day_list if int(t) in candidate_set]
+        if available:
+            from collections import Counter
+            counts = Counter(available)
+            best, freq = counts.most_common(1)[0]
+            total = len(day_list)
+            label = f"Used {freq}/{total}x on Day {day_num} for this route"
+            return int(best), label
+
+    # Phase 2: fallback — most recently used truck for this route on any day
+    if route_history:
+        for dk in sorted(route_history.keys(), key=lambda x: int(x) if x.isdigit() else 0, reverse=True):
+            for t in (route_history.get(dk) or []):
+                if int(t) in candidate_set:
+                    return int(t), "Previously used for this route"
+
+    return None, None
+
+
 def scheduled_trucks_for_current_load_day() -> set[int]:
     off_today = {int(t) for t in off_trucks_for_today()}
     return {
@@ -13101,16 +13186,16 @@ def render_numeric_truck_buttons(
                             z-index: 9 !important;
                             background-image:
                                 linear-gradient(33deg,
-                                    transparent calc(50% - 1.4px),
-                                    rgba(220, 38, 38, 0.95) calc(50% - 1.4px),
-                                    rgba(220, 38, 38, 0.95) calc(50% + 1.4px),
-                                    transparent calc(50% + 1.4px)
+                                    transparent calc(50% - 0.7px),
+                                    rgba(220, 38, 38, 0.85) calc(50% - 0.7px),
+                                    rgba(220, 38, 38, 0.85) calc(50% + 0.7px),
+                                    transparent calc(50% + 0.7px)
                                 ),
                                 linear-gradient(-33deg,
-                                    transparent calc(50% - 1.4px),
-                                    rgba(220, 38, 38, 0.95) calc(50% - 1.4px),
-                                    rgba(220, 38, 38, 0.95) calc(50% + 1.4px),
-                                    transparent calc(50% + 1.4px)
+                                    transparent calc(50% - 0.7px),
+                                    rgba(220, 38, 38, 0.85) calc(50% - 0.7px),
+                                    rgba(220, 38, 38, 0.85) calc(50% + 0.7px),
+                                    transparent calc(50% + 0.7px)
                                 );
                             background-repeat: no-repeat !important;
                             filter: drop-shadow(0 0 2px rgba(255,255,255,0.55));
@@ -25065,7 +25150,7 @@ if st.session_state.active_screen.startswith("STATUS_"):
                 .status-loaded-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px;margin:6px 0 10px 0;}
                 .status-loaded-truck-card{border:1px solid rgba(148,163,184,0.35);border-radius:14px;padding:10px 11px;background:rgba(15,23,42,0.5);box-shadow:0 9px 20px rgba(0,0,0,0.2);}
                 .status-loaded-truck-card-selected{border-color:rgba(96,165,250,0.72);box-shadow:0 0 0 1px rgba(96,165,250,0.25),0 10px 22px rgba(0,0,0,0.24);}
-                .status-loaded-truck-head{font-size:0.96rem;font-weight:900;letter-spacing:0.1em;text-transform:uppercase;color:#93c5fd;margin:0 0 8px 0;}
+                .status-loaded-truck-head{font-size:2.88rem;font-weight:900;letter-spacing:0.1em;text-transform:uppercase;color:#93c5fd;margin:0 0 8px 0;text-align:center;}
                 .status-loaded-overview-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
                 .status-loaded-stat-card{border:1px solid rgba(148,163,184,0.32);border-radius:10px;padding:7px 8px;background:rgba(15,23,42,0.42);}
                 .status-loaded-stat-label{font-size:0.66rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;opacity:0.74;margin-bottom:3px;}
@@ -25355,20 +25440,13 @@ if st.session_state.active_screen.startswith("STATUS_"):
 
                     st.warning(f"Truck {int(selected_route)} is OOS. Which spare should load route {int(selected_route)}?")
                     if spare_candidates:
-                        spare_pick = render_numeric_truck_buttons(
-                            spare_candidates,
-                            f"status_unloaded_pick_spare_{int(route_to_cover)}_{int(selected_route)}",
-                            default_cols=8,
-                        )
-                        if spare_pick is not None:
-                            chosen_spare = int(spare_pick)
+                        def _do_oos_assign(chosen_spare: int) -> None:
                             prior_spare = assignments.get(int(selected_route))
                             if prior_spare is not None:
                                 try:
                                     prior_spare = int(prior_spare)
                                 except Exception:
                                     prior_spare = None
-
                             if prior_spare is not None and prior_spare != chosen_spare:
                                 if (
                                     prior_spare not in st.session_state.off_set
@@ -25378,7 +25456,6 @@ if st.session_state.active_screen.startswith("STATUS_"):
                                 ):
                                     st.session_state.cleaned_set.discard(prior_spare)
                                     st.session_state.spare_set.add(prior_spare)
-
                             st.session_state.spare_set.discard(chosen_spare)
                             pending_return = _spares_needing_return_set()
                             if chosen_spare in pending_return:
@@ -25389,9 +25466,12 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             st.session_state.loaded_set.discard(chosen_spare)
                             st.session_state.inprog_set.discard(chosen_spare)
                             st.session_state.special_set.discard(chosen_spare)
-
                             assignments[int(selected_route)] = chosen_spare
                             st.session_state.oos_spare_assignments = assignments
+                            _record_spare_assignment(
+                                int(selected_route), chosen_spare,
+                                _normalize_load_day_num(_current_ship_day_num()),
+                            )
                             if existing_spare is None:
                                 push_shop_notice(
                                     f"OOS route #{int(selected_route)} Load On set to Truck #{int(chosen_spare)}.",
@@ -25409,11 +25489,59 @@ if st.session_state.active_screen.startswith("STATUS_"):
                             st.session_state.pending_oos_route = None
                             st.session_state.pending_start_truck = None
                             st.session_state.selected_truck = chosen_spare
+                            st.session_state.oos_suggestion_declined_for = None
                             _mark_and_save()
-                            st.success(
-                                f"Spare {chosen_spare} assigned to route {int(selected_route)} and moved to Unloaded."
+
+                        suggestion, suggestion_label = _suggest_spare_for_route(
+                            int(selected_route),
+                            _normalize_load_day_num(_current_ship_day_num()),
+                            spare_candidates,
+                        )
+                        suggestion_declined = (
+                            st.session_state.get("oos_suggestion_declined_for")
+                            == (int(route_to_cover), int(selected_route))
+                        )
+
+                        if suggestion is not None and not suggestion_declined:
+                            st.markdown(
+                                f"<div style='background:rgba(30,58,138,0.25);border:1px solid rgba(96,165,250,0.4);"
+                                f"border-radius:8px;padding:10px 14px;margin-bottom:8px;'>"
+                                f"<div style='font-size:0.75rem;font-weight:700;letter-spacing:0.1em;color:#93c5fd;"
+                                f"text-transform:uppercase;margin-bottom:4px;'>Suggested Spare</div>"
+                                f"<div style='font-size:2rem;font-weight:900;color:#e0f2fe;line-height:1.1;'>"
+                                f"Truck {suggestion}</div>"
+                                f"<div style='font-size:0.82rem;color:#94a3b8;margin-top:3px;'>{suggestion_label}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
                             )
-                            st.rerun()
+                            c_yes, c_no = st.columns([1, 1])
+                            with c_yes:
+                                if st.button(
+                                    f"Yes, use Truck {suggestion}",
+                                    width='stretch',
+                                    key=f"oos_suggest_yes_{int(route_to_cover)}_{int(selected_route)}",
+                                ):
+                                    _do_oos_assign(suggestion)
+                                    st.success(f"Spare {suggestion} assigned to route {int(selected_route)} and moved to Unloaded.")
+                                    st.rerun()
+                            with c_no:
+                                if st.button(
+                                    "No, choose different",
+                                    width='stretch',
+                                    key=f"oos_suggest_no_{int(route_to_cover)}_{int(selected_route)}",
+                                ):
+                                    st.session_state.oos_suggestion_declined_for = (int(route_to_cover), int(selected_route))
+                                    st.rerun()
+                        else:
+                            spare_pick = render_numeric_truck_buttons(
+                                spare_candidates,
+                                f"status_unloaded_pick_spare_{int(route_to_cover)}_{int(selected_route)}",
+                                default_cols=8,
+                            )
+                            if spare_pick is not None:
+                                _do_oos_assign(int(spare_pick))
+                                st.success(f"Spare {int(spare_pick)} assigned to route {int(selected_route)} and moved to Unloaded.")
+                                st.rerun()
                     else:
                         st.info("No spare trucks are currently available for assignment.")
 

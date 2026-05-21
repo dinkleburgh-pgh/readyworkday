@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 102
+_APP_BUILD = 103
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -12703,7 +12703,10 @@ def render_numeric_truck_buttons(
     if active_screen_key == "AUDIT_FLEET":
         button_style_retry_delays_json = json.dumps([70, 220, 450, 800, 1300])
     elif active_screen_key == "FLEET":
-        button_style_retry_delays_json = json.dumps([70, 220, 450, 900])
+        if bool(st.session_state.get("sup_manage_multi_mode")):
+            button_style_retry_delays_json = json.dumps([70, 200])
+        else:
+            button_style_retry_delays_json = json.dumps([70, 220, 450, 900])
     else:
         button_style_retry_delays_json = json.dumps([70] if heavy_button_page_mode else [50, 250])
     button_decoration_retry_delays_json = json.dumps([] if heavy_button_page_mode else [80, 240, 520])
@@ -14459,6 +14462,76 @@ def _return_truck_from_shop(truck: int) -> tuple[bool, str | None]:
     log_action(f"Truck {t} returned from Shop")
     return True, prev_label
 
+
+@st.fragment
+def _fleet_truck_grid_fragment(
+    swap_dialog_open_key: str,
+    swap_route_input_key: str,
+    swap_load_input_key: str,
+) -> None:
+    """Renders the fleet truck grid. In multi-select mode each truck click
+    triggers a fragment-scoped rerun (fast). Normal-mode clicks do a full
+    app rerun so navigation works correctly."""
+    selected_trucks_key = "sup_manage_multi_selected_trucks"
+    if selected_trucks_key not in st.session_state:
+        st.session_state[selected_trucks_key] = []
+
+    flash_trucks = {int(t) for t in (st.session_state.get("inprog_set") or set())}
+    swap_badges = _active_swap_route_badges()
+    fleet_badges: dict = dict(swap_badges)
+    fleet_garment_badges = _dust_garment_corner_badges_for_trucks(FLEET, required_status=None)
+    for truck_num in sorted(fleet_garment_badges):
+        fleet_badges.setdefault(int(truck_num), "\U0001f455")
+    fleet_set = {int(t) for t in FLEET}
+    scheduled_off_today = {int(t) for t in (off_trucks_for_today() or []) if int(t) in fleet_set}
+    current_off_set = {int(t) for t in (st.session_state.get("off_set") or set()) if int(t) in fleet_set}
+    off_badges: dict[int, str] = {}
+    for truck_num in sorted(scheduled_off_today - current_off_set):
+        off_badges[int(truck_num)] = "OFF"
+    for truck_num in sorted(current_off_set):
+        off_badges[int(truck_num)] = "OOS"
+    fleet_badges.update(off_badges)
+
+    multi_mode_active = bool(st.session_state.get("sup_manage_multi_mode"))
+    multi_selected = sorted({
+        int(t) for t in (st.session_state.get(selected_trucks_key) or []) if int(t) in fleet_set
+    })
+    st.session_state[selected_trucks_key] = multi_selected
+
+    clicked_truck = render_numeric_truck_buttons(
+        FLEET,
+        "sup_manage_pick",
+        default_cols=(2 if _is_mobile_client() else 8),
+        flash_trucks=flash_trucks,
+        button_badges=fleet_badges if fleet_badges else None,
+        outlined_trucks=set(multi_selected) if multi_mode_active else None,
+    )
+    if clicked_truck is not None:
+        clicked_num = int(clicked_truck)
+        if multi_mode_active:
+            currently_selected = set(int(t) for t in (st.session_state.get(selected_trucks_key) or []))
+            if clicked_num in currently_selected:
+                currently_selected.discard(clicked_num)
+            else:
+                currently_selected.add(clicked_num)
+            st.session_state[selected_trucks_key] = sorted(currently_selected)
+            st.rerun()  # fragment-scoped: only the truck grid re-renders
+        else:
+            st.session_state.sup_manage_new_mode = False
+            st.session_state.sup_manage_multi_mode = False
+            st.session_state.sup_manage_multi_selected_trucks = []
+            st.session_state.sup_manage_truck = int(clicked_num)
+            st.session_state.sup_manage_action = None
+            st.session_state["sup_manage_option_dialog_open"] = False
+            st.session_state["sup_manage_option_dialog_action"] = None
+            st.session_state["sup_manage_option_dialog_truck"] = None
+            st.session_state.sup_manage_pref_action = None
+            st.session_state[swap_dialog_open_key] = False
+            st.session_state.pop(swap_route_input_key, None)
+            st.session_state.pop(swap_load_input_key, None)
+            st.rerun(scope="app")  # full rerun needed for truck-detail navigation
+
+
 def render_fleet_management():
     selected = st.session_state.get("sup_manage_truck")
     selected_trucks_key = "sup_manage_multi_selected_trucks"
@@ -14466,28 +14539,10 @@ def render_fleet_management():
         st.session_state[selected_trucks_key] = []
 
     if selected is None:
-        flash_trucks = {int(t) for t in (st.session_state.get("inprog_set") or set())}
         swap_feedback_key = "sup_manage_swap_feedback"
         swap_dialog_open_key = "sup_manage_swap_dialog_open"
         swap_route_input_key = "sup_manage_swap_dialog_truck"
         swap_load_input_key = "sup_manage_swap_dialog_load_on"
-        swap_badges = _active_swap_route_badges()
-        fleet_badges = dict(swap_badges)
-        fleet_garment_badges = _dust_garment_corner_badges_for_trucks(
-            FLEET,
-            required_status=None,
-        )
-        for truck_num in sorted(fleet_garment_badges):
-            fleet_badges.setdefault(int(truck_num), "\ud83d\udc55")
-        fleet_set = {int(t) for t in FLEET}
-        scheduled_off_today = {int(t) for t in (off_trucks_for_today() or []) if int(t) in fleet_set}
-        current_off_set = {int(t) for t in (st.session_state.get("off_set") or set()) if int(t) in fleet_set}
-        off_badges: dict[int, str] = {}
-        for truck_num in sorted(scheduled_off_today - current_off_set):
-            off_badges[int(truck_num)] = "OFF"
-        for truck_num in sorted(current_off_set):
-            off_badges[int(truck_num)] = "OOS"
-        fleet_badges.update(off_badges)
         pending_swap_feedback = st.session_state.pop(swap_feedback_key, None)
         if isinstance(pending_swap_feedback, dict):
             feedback_msg = str(pending_swap_feedback.get("message") or "").strip()
@@ -14581,47 +14636,11 @@ def render_fleet_management():
                     st.session_state["sup_manage_new_dialog_open"] = False
                     st.rerun()
 
-        multi_mode_active = bool(st.session_state.get("sup_manage_multi_mode"))
-        multi_selected = sorted({
-            int(t) for t in (st.session_state.get(selected_trucks_key) or []) if int(t) in set(FLEET)
-        })
-        st.session_state[selected_trucks_key] = multi_selected
-
-        clicked_truck = render_numeric_truck_buttons(
-            FLEET,
-            "sup_manage_pick",
-            default_cols=(2 if _is_mobile_client() else 8),
-            flash_trucks=flash_trucks,
-            button_badges=fleet_badges if fleet_badges else None,
-            outlined_trucks=(
-                set(st.session_state.get(selected_trucks_key) or [])
-                if multi_mode_active
-                else None
-            ),
+        _fleet_truck_grid_fragment(
+            swap_dialog_open_key=swap_dialog_open_key,
+            swap_route_input_key=swap_route_input_key,
+            swap_load_input_key=swap_load_input_key,
         )
-        if clicked_truck is not None:
-            clicked_num = int(clicked_truck)
-            if multi_mode_active:
-                currently_selected = set(int(t) for t in (st.session_state.get(selected_trucks_key) or []))
-                if clicked_num in currently_selected:
-                    currently_selected.discard(clicked_num)
-                else:
-                    currently_selected.add(clicked_num)
-                st.session_state[selected_trucks_key] = sorted(currently_selected)
-            else:
-                st.session_state.sup_manage_new_mode = False
-                st.session_state.sup_manage_multi_mode = False
-                st.session_state.sup_manage_multi_selected_trucks = []
-                st.session_state.sup_manage_truck = int(clicked_num)
-                st.session_state.sup_manage_action = None
-                st.session_state["sup_manage_option_dialog_open"] = False
-                st.session_state["sup_manage_option_dialog_action"] = None
-                st.session_state["sup_manage_option_dialog_truck"] = None
-                st.session_state.sup_manage_pref_action = None
-                st.session_state[swap_dialog_open_key] = False
-                st.session_state.pop(swap_route_input_key, None)
-                st.session_state.pop(swap_load_input_key, None)
-            st.rerun()
 
         if st.session_state.get(swap_dialog_open_key, False):
             fleet_dropdown_options = sorted({int(t) for t in FLEET})

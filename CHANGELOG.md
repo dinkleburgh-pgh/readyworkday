@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 103 - 2026-05-21
+
+1. Bumped build to **103**.
+2. **PERF**: Fleet Management multi-select is now significantly more responsive. Truck button clicks in multi-select mode now use a Streamlit `@st.fragment` scoped rerun — only the truck grid re-renders per click instead of the full page, cutting per-click latency. JS button-style retry delays are also reduced from four passes (70/220/450/900 ms) to two (70/200 ms) while in multi-select mode, eliminating unnecessary re-styling since truck colors do not change during selection.
+
 ## v1.7.5 build 102 - 2026-05-21
 
 1. Bumped build to **102**.

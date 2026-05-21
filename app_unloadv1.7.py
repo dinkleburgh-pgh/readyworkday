@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 103
+_APP_BUILD = 104
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -6348,6 +6348,7 @@ def _deserialize_state_payload(data: dict) -> dict:
             "off_set",
             "spare_set",
             "special_set",
+            "unfinished_set",
             "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
@@ -6424,7 +6425,11 @@ def load_state() -> dict:
     except Exception as e:
         logging.error(f"Failed to load state from {path}: {e}")
         return {}
-    return _deserialize_state_payload(data)
+    data = _deserialize_state_payload(data)
+    # Migration: added unfinished_set in v1.7.5 build 104
+    if "unfinished_set" not in data:
+        data["unfinished_set"] = set()
+    return data
 
 
 def _run_date_key(d: date | None) -> str | None:
@@ -6448,6 +6453,7 @@ def _serialize_state() -> dict:
             "off_set",
             "spare_set",
             "special_set",
+            "unfinished_set",
             "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
@@ -6548,6 +6554,7 @@ def _sync_next_up_from_state_file(force: bool = False):
         "inprog_layout_style",
         "previous_route_covers",
         "spare_origin_route",
+        "unfinished_set",
     )
     changed = False
     for key in sync_keys:
@@ -8664,6 +8671,7 @@ defaults = {
     "shop_prev_status": {},          # {truck: status}
     "shop_notice_log": [],
     "special_set": set(),
+    "unfinished_set": set(),          # trucks marked Unfinished during batching
     "unload_request_set": set(),     # explicit unload requests from Fleet
     "unload_request_meta": {},       # {truck: {mark_shop: bool, load_on: str}}
     "dust_garment_trucks": set(),
@@ -12596,6 +12604,9 @@ def _truck_status_colors(truck_num: int, badge_colors: dict[str, str] | None = N
     elif status == "Special":
         bg = "#7c3aed"
         text_color = "#000000"
+    elif status == "Unfinished":
+        bg = "#16a34a"
+        text_color = "#ffffff"
     else:
         bg = "#334155"
         text_color = "#000000"
@@ -12697,6 +12708,10 @@ def render_numeric_truck_buttons(
         oos_labels_json = json.dumps(sorted({str(int(t)) for t in (st.session_state.get("off_set") or set())}))
     except Exception:
         oos_labels_json = "[]"
+    try:
+        unfinished_labels_json = json.dumps(sorted({str(int(t)) for t in (st.session_state.get("unfinished_set") or set())}))
+    except Exception:
+        unfinished_labels_json = "[]"
 
     active_screen_key = str(st.session_state.get("active_screen") or "").upper()
     heavy_button_page_mode = active_screen_key in {"FLEET", "UNLOAD", "BATCH", "AUDIT_FLEET"}
@@ -12892,6 +12907,7 @@ def render_numeric_truck_buttons(
                 const colorMap = {color_map_json};
                 const trailingLabels = new Set({trailing_labels_json});
                 const disabledLabels = new Set({disabled_labels_json});
+                const unfinishedLabels = new Set({unfinished_labels_json});
                 const forceTextColor = {force_text_color_json};
                 const retryDelays = {button_style_retry_delays_json};
                 const useResizeListener = {button_style_use_resize_listener_json};
@@ -12948,7 +12964,11 @@ def render_numeric_truck_buttons(
                             const isDisabledTruck = disabledLabels.has(truckLabel);
                             const bgTop = hexAdjust(colors.bg, 1.22);
                             const bgBot = hexAdjust(colors.bg, 0.76);
-                            btn.style.setProperty('background', `linear-gradient(170deg, ${{bgTop}} 0%, ${{colors.bg}} 52%, ${{bgBot}} 100%)`, 'important');
+                            if (unfinishedLabels.has(truckLabel)) {{
+                                btn.style.setProperty('background', 'linear-gradient(135deg, #16a34a 50%, #dc2626 50%)', 'important');
+                            }} else {{
+                                btn.style.setProperty('background', `linear-gradient(170deg, ${{bgTop}} 0%, ${{colors.bg}} 52%, ${{bgBot}} 100%)`, 'important');
+                            }}
                             btn.style.setProperty('border', `1.5px solid ${{colors.border}}`, 'important');
                             btn.style.setProperty('box-shadow', '0 3px 10px rgba(0,0,0,0.45), inset 0 1.5px 0 rgba(255,255,255,0.13)', 'important');
                             btn.style.setProperty('color', fg, 'important');
@@ -14423,6 +14443,7 @@ def _send_truck_to_shop(truck: int, reason: str = "", load_on: str = ""):
     st.session_state.off_set.discard(t)
     st.session_state.spare_set.discard(t)
     st.session_state.special_set.discard(t)
+    st.session_state.unfinished_set.discard(t)
     remove_truck_from_batches(t)
 
 
@@ -14453,6 +14474,8 @@ def _return_truck_from_shop(truck: int) -> tuple[bool, str | None]:
         st.session_state.spare_set.add(t)
     elif prev == "Special":
         st.session_state.special_set.add(t)
+    elif prev == "Unfinished":
+        st.session_state.unfinished_set.add(t)
 
     prev_label = "Dirty" if prev in ("Unloaded", "Off", "Shop", None) else prev
     push_shop_notice(
@@ -16105,6 +16128,7 @@ def _ensure_cover_truck_ready_for_loading(truck: int):
     st.session_state.loaded_set.discard(t)
     st.session_state.inprog_set.discard(t)
     st.session_state.special_set.discard(t)
+    st.session_state.unfinished_set.discard(t)
 
 
 def _unassigned_route_swap_routes() -> list[int]:
@@ -17609,6 +17633,7 @@ def _mark_truck_unloaded_after_batch(truck: int) -> str:
         st.session_state.shop_set.discard(t)
         st.session_state.off_set.discard(t)
         st.session_state.special_set.discard(t)
+        st.session_state.unfinished_set.discard(t)
         base_status = "Spare"
         if request_meta and bool(request_meta.get("mark_shop")):
             _send_truck_to_shop(int(t), reason="", load_on=str(request_meta.get("load_on") or ""))
@@ -17616,12 +17641,27 @@ def _mark_truck_unloaded_after_batch(truck: int) -> str:
         return base_status
 
     st.session_state.special_set.discard(t)
+    st.session_state.unfinished_set.discard(t)
     st.session_state.cleaned_set.add(t)
     _record_unload_completed_route_for_current_day(t)
     if request_meta and bool(request_meta.get("mark_shop")):
         _send_truck_to_shop(int(t), reason="", load_on=str(request_meta.get("load_on") or ""))
         return "Shop"
     return "Unloaded"
+
+
+def _mark_truck_unfinished_after_batch(truck: int) -> None:
+    """Mark a truck Unfinished after batching: clears working sets, adds to unfinished_set."""
+    t = int(truck)
+    # Clear from all working sets
+    st.session_state.inprog_set.discard(t)
+    st.session_state.loaded_set.discard(t)
+    st.session_state.cleaned_set.discard(t)
+    st.session_state.special_set.discard(t)
+    # Add to unfinished
+    if "unfinished_set" not in st.session_state:
+        st.session_state.unfinished_set = set()
+    st.session_state.unfinished_set.add(t)
 
 
 def _complete_unload_with_batching_disabled(truck: int, *, redirect_screen: str | None = None) -> str:
@@ -17674,6 +17714,7 @@ def _capture_mobile_unload_undo_state(truck: int):
         "off": bool(t in (st.session_state.get("off_set") or set())),
         "spare": bool(t in (st.session_state.get("spare_set") or set())),
         "special": bool(t in (st.session_state.get("special_set") or set())),
+        "unfinished": bool(t in (st.session_state.get("unfinished_set") or set())),
         "pending_return": bool(t in pending_return),
         "used_spare_today": bool(t in used_today),
         "batch_id": batch_id,
@@ -17710,6 +17751,7 @@ def _undo_mobile_unload_state(truck: int) -> bool:
         "off_set",
         "spare_set",
         "special_set",
+        "unfinished_set",
     ):
         try:
             st.session_state[state_name].discard(t)
@@ -17732,6 +17774,8 @@ def _undo_mobile_unload_state(truck: int) -> bool:
         st.session_state.spare_set.add(t)
     if bool(snapshot.get("special")):
         st.session_state.special_set.add(t)
+    if bool(snapshot.get("unfinished")):
+        st.session_state.unfinished_set.add(t)
 
     pending_return = _spares_needing_return_set()
     if bool(snapshot.get("pending_return")):
@@ -17950,6 +17994,8 @@ def current_status_label(truck: int) -> str:
         return "Loaded"
     if t in st.session_state.cleaned_set:
         return "Unloaded"
+    if t in st.session_state.get("unfinished_set", set()):
+        return "Unfinished"
     if t in st.session_state.special_set:
         return "Special"
     return "Dirty"
@@ -18074,6 +18120,7 @@ def start_loading_truck(truck: int, load_day_num: int | None = None):
     t = int(truck)
     if t in st.session_state.cleaned_set:
         st.session_state.cleaned_set.discard(t)
+    st.session_state.unfinished_set.discard(t)
     st.session_state.spare_set.discard(t)
 
     assigned_oos_route = None
@@ -33277,7 +33324,7 @@ elif st.session_state.active_screen == "BATCH":
                 )
 
             skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
-            c1, c2, c3 = st.columns([1, 1, 1])
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
             with c1:
                 if st.button("Assign to batch", width='stretch', key=f"batch_dialog_assign_{truck_num}"):
                     if not allowed:
@@ -33319,6 +33366,13 @@ elif st.session_state.active_screen == "BATCH":
                     _exit_batch_to_unload()
                     st.rerun()
             with c3:
+                if st.button("Unfinished", width='stretch', key=f"batch_dialog_unfinished_{truck_num}"):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    _mark_truck_unfinished_after_batch(truck_num)
+                    _exit_batch_to_unload()
+                    st.success(f"Truck {truck_num} marked Unfinished.")
+                    st.rerun()
+            with c4:
                 if st.button(
                     "Skip batching",
                     width='stretch',
@@ -33529,7 +33583,7 @@ elif st.session_state.active_screen == "BATCH":
                 format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})",
                 key="batch_assign_select",
             )
-            c1, c2 = st.columns([1, 1])
+            c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
                 if st.button("Assign to batch", width='stretch'):
                     if w <= 0:
@@ -33575,6 +33629,21 @@ elif st.session_state.active_screen == "BATCH":
                     except Exception:
                         pass
                     st.session_state.active_screen = "UNLOAD"
+                    st.rerun()
+            with c3:
+                if st.button("Unfinished", width='stretch'):
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    _mark_truck_unfinished_after_batch(int(t))
+                    st.session_state.unload_inprog_truck = None
+                    st.session_state.unload_inprog_start_time = None
+                    st.session_state.unload_inprog_wearers = 0
+                    try:
+                        st.session_state["unload_truck_select"] = None
+                    except Exception:
+                        pass
+                    st.session_state.active_screen = "UNLOAD"
+                    _mark_and_save()
+                    st.success(f"Truck {int(t)} marked Unfinished.")
                     st.rerun()
 
         st.divider()

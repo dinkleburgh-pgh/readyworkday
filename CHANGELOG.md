@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.5 build 104 - 2026-05-21
+
+1. Bumped build to **104**.
+2. **FEATURE / BATCH + FLEET + UNLOAD + DIRTY**: Added an **Unfinished** outcome when batching a truck. In Batch Assignment (dialog and fallback flows), operators now have an `Unfinished` action that marks the truck with a dedicated `unfinished_set` status and returns to Unload.
+3. **UI**: Unfinished trucks now render with a diagonal split red/green button style in the shared numeric truck button renderer, so the visual appears consistently on Fleet, Unload Management, and Dirty screens.
+4. **STATE / MIGRATION**: Added backward-compatible persisted state support for `unfinished_set` (deserialize/serialize/defaults/load migration/sync), and updated related status transitions so unfinished state is cleared when trucks move to Shop, Unloaded, Spare, or In Progress.
+
 ## v1.7.5 build 103 - 2026-05-21
 
 1. Bumped build to **103**.

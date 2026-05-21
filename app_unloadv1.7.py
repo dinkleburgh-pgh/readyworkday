@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 101
+_APP_BUILD = 102
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -28059,6 +28059,31 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         font-weight: 800 !important;
                         min-height: 48px !important;
                     }
+                    [class*="st-key-sup_run_day_wizard_launch"] button {
+                        background: linear-gradient(135deg,#1e3a8a,#1d4ed8) !important;
+                        border: 1px solid #3b82f6 !important;
+                        color: #eff6ff !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 900 !important;
+                        min-height: 52px !important;
+                        letter-spacing: 0.03em !important;
+                    }
+                    [class*="st-key-sup_wiz_yes_"] button {
+                        background: #166534 !important;
+                        border: 1px solid #15803d !important;
+                        color: #ecfdf5 !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                        min-height: 48px !important;
+                    }
+                    [class*="st-key-sup_wiz_no_"] button,
+                    [class*="st-key-sup_wiz_skip_"] button,
+                    [class*="st-key-sup_wiz_exit"] button,
+                    [class*="st-key-sup_run_day_wizard_done"] button {
+                        font-size: 0.97rem !important;
+                        font-weight: 700 !important;
+                        min-height: 44px !important;
+                    }
                     </style>
                     """,
                     unsafe_allow_html=True,
@@ -28244,118 +28269,248 @@ elif st.session_state.active_screen == "SUPERVISOR":
                 else:
                     st.caption("No assignments set yet.")
 
-                current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
-                synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
-                already_covering = set(_active_cover_truck_usage(exclude_route=current_route_pick).keys())
-                is_oos_route_selected = current_route_pick is not None and int(current_route_pick) in off_trucks_now
-                load_on_excluded = off_trucks_now | shop_trucks_now | loaded_trucks_now | already_covering
-                load_on_dropdown_options = [
-                    int(t)
-                    for t in fleet_dropdown_options
-                    if int(t) not in load_on_excluded or (not is_oos_route_selected and int(t) == (current_route_pick or -1))
-                ]
+                # --- Route Swap Wizard ---
+                wiz_active_key = "sup_run_day_wizard_active"
+                wiz_routes_key = "sup_run_day_wizard_routes"
+                wiz_idx_key = "sup_run_day_wizard_idx"
+                wiz_picker_key = "sup_run_day_wizard_picker"
 
-                if current_route_pick is not None and load_on_dropdown_options:
-                    preferred_load_pick = None
-                    if current_route_pick is not None:
-                        if int(current_route_pick) in off_trucks_now:
-                            # OOS route: pre-select any existing spare assignment
-                            preferred_load_pick = _coerce_run_day_swap_pick(active_oos_assignments.get(int(current_route_pick)))
-                        else:
-                            preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
-                            if preferred_load_pick is None:
-                                preferred_load_pick = int(current_route_pick)
-                    current_load_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
-                    if current_route_pick is not None and synced_route_pick != current_route_pick:
-                        fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
-                        st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
-                        st.session_state[run_day_swap_synced_route_key] = int(current_route_pick)
-                    elif current_load_pick not in load_on_dropdown_options:
-                        fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
-                        st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
-                else:
-                    st.session_state.pop(run_day_swap_load_key, None)
-                    st.session_state.pop(run_day_swap_synced_route_key, None)
+                wiz_active = bool(st.session_state.get(wiz_active_key, False))
+                unassigned_oos_for_wiz = sorted(
+                    {int(t) for t in off_trucks_now}
+                    - {int(t) for t in (off_trucks_for_today() or [])}
+                    - {int(r) for r in active_oos_assignments.keys()}
+                )
 
-                selected_route_pick = None
-                if truck_dropdown_options:
-                    selected_route_pick = st.selectbox(
-                        "Route",
-                        options=[None, *truck_dropdown_options],
-                        key=run_day_swap_route_key,
-                        format_func=lambda truck_num: (
-                            "Select route truck..."
-                            if truck_num is None
-                            else (
-                                f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
-                                if int(truck_num) in deduped_swap_routes
-                                else f"Route {int(truck_num)} [OOS] \u2192 Spare {int(active_oos_assignments[int(truck_num)])} (update)"
-                                if int(truck_num) in off_trucks_now and int(truck_num) in active_oos_assignments
-                                else f"Route {int(truck_num)} [OOS]"
-                                if int(truck_num) in off_trucks_now
-                                else f"Route {int(truck_num)}"
+                if wiz_active:
+                    wiz_routes: list[int] = st.session_state.get(wiz_routes_key) or []
+                    wiz_idx = int(st.session_state.get(wiz_idx_key) or 0)
+
+                    if wiz_idx >= len(wiz_routes):
+                        st.success("All OOS routes assigned!")
+                        if st.button("Done", width='stretch', key="sup_run_day_wizard_done"):
+                            st.session_state[wiz_active_key] = False
+                            st.rerun()
+                    else:
+                        wiz_route = int(wiz_routes[wiz_idx])
+                        st.markdown(
+                            f"<div style='text-align:center;font-size:0.76rem;font-weight:700;letter-spacing:0.1em;"
+                            f"color:#93c5fd;text-transform:uppercase;margin-bottom:2px;'>"
+                            f"Route Swap Wizard \u2014 {wiz_idx + 1} of {len(wiz_routes)}</div>"
+                            f"<div style='text-align:center;font-size:1.6rem;font-weight:900;color:#e0f2fe;"
+                            f"margin-bottom:8px;'>OOS Route {wiz_route}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        spare_pool_wiz = {int(t) for t in (st.session_state.get("spare_set") or set())}
+                        used_spares_wiz = {
+                            int(v) for k, v in _active_oos_spare_assignments().items()
+                            if int(k) != wiz_route
+                        }
+                        wiz_candidates = sorted(
+                            spare_pool_wiz
+                            - set(st.session_state.shop_set)
+                            - off_trucks_now
+                            - set(st.session_state.inprog_set)
+                            - set(st.session_state.loaded_set)
+                            - used_spares_wiz
+                        )
+
+                        picker_mode = bool(st.session_state.get(wiz_picker_key, False))
+                        wiz_suggestion, wiz_suggestion_label = _suggest_spare_for_route(
+                            wiz_route,
+                            _normalize_load_day_num(_current_ship_day_num()),
+                            wiz_candidates,
+                        )
+
+                        def _wiz_assign_route(chosen: int) -> None:
+                            ok, _msg = _assign_truck_to_oos_route(wiz_route, chosen)
+                            if ok:
+                                _record_spare_assignment(
+                                    wiz_route, chosen,
+                                    _normalize_load_day_num(_current_ship_day_num()),
+                                )
+
+                        if wiz_suggestion is not None and not picker_mode:
+                            st.markdown(
+                                f"<div style='background:rgba(30,58,138,0.25);border:1px solid rgba(96,165,250,0.4);"
+                                f"border-radius:8px;padding:10px 14px;margin-bottom:8px;'>"
+                                f"<div style='font-size:0.75rem;font-weight:700;letter-spacing:0.1em;color:#93c5fd;"
+                                f"text-transform:uppercase;margin-bottom:4px;'>Suggested Spare</div>"
+                                f"<div style='font-size:1.9rem;font-weight:900;color:#e0f2fe;line-height:1.1;'>"
+                                f"Truck {wiz_suggestion}</div>"
+                                f"<div style='font-size:0.82rem;color:#94a3b8;margin-top:3px;'>{wiz_suggestion_label}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
                             )
-                        ),
-                    )
-                else:
-                    st.caption("No eligible routes available.")
+                            cw_yes, cw_no = st.columns([1, 1])
+                            with cw_yes:
+                                if st.button(
+                                    f"Yes, use Truck {wiz_suggestion}",
+                                    width='stretch',
+                                    key=f"sup_wiz_yes_{wiz_route}",
+                                ):
+                                    _wiz_assign_route(wiz_suggestion)
+                                    st.session_state[wiz_idx_key] = wiz_idx + 1
+                                    st.session_state[wiz_picker_key] = False
+                                    st.rerun()
+                            with cw_no:
+                                if st.button(
+                                    "No, choose different",
+                                    width='stretch',
+                                    key=f"sup_wiz_no_{wiz_route}",
+                                ):
+                                    st.session_state[wiz_picker_key] = True
+                                    st.rerun()
+                        else:
+                            if wiz_candidates:
+                                wiz_pick = render_numeric_truck_buttons(
+                                    wiz_candidates,
+                                    f"sup_wiz_pick_{wiz_route}",
+                                    default_cols=6,
+                                )
+                                if wiz_pick is not None:
+                                    _wiz_assign_route(int(wiz_pick))
+                                    st.session_state[wiz_idx_key] = wiz_idx + 1
+                                    st.session_state[wiz_picker_key] = False
+                                    st.rerun()
+                            else:
+                                st.info("No spare trucks available for this route.")
 
-                current_route_pick = _coerce_run_day_swap_pick(selected_route_pick)
-
-                selected_load_pick = None
-                if current_route_pick is not None and load_on_dropdown_options:
-                    selected_load_pick = st.selectbox(
-                        "Load On",
-                        options=load_on_dropdown_options,
-                        key=run_day_swap_load_key,
-                        format_func=lambda truck_num: (
-                            f"Truck {int(truck_num)} (reset)"
-                            if int(truck_num) == (current_route_pick or -1)
-                            else f"Truck {int(truck_num)}"
-                        ),
-                    )
-                elif current_route_pick is None:
-                    st.caption("Select a route truck to add or update a route swap.")
-                else:
-                    st.caption("No eligible trucks available for Load On.")
-
-                add_swap_col, continue_swap_col = st.columns(2, gap="small")
-                with add_swap_col:
-                    if st.button("Add / Update Swap", width='stretch', key="sup_run_day_spares_add"):
-                        route_pick = _coerce_run_day_swap_pick(selected_route_pick)
-                        load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
-                        ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
-                        _set_run_day_swap_feedback(ok_swap, swap_message)
-                        if ok_swap:
-                            _clear_run_day_swap_selection()
-                        st.rerun()
-
-                with continue_swap_col:
-                    if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
-                        route_pick = _coerce_run_day_swap_pick(selected_route_pick)
-                        load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
-                        if route_pick is not None:
-                            ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
-                            if not ok_swap:
-                                _set_run_day_swap_feedback(False, swap_message)
+                        cw_skip, cw_exit = st.columns([1, 1])
+                        with cw_skip:
+                            if st.button("Skip route", width='stretch', key=f"sup_wiz_skip_{wiz_route}"):
+                                st.session_state[wiz_idx_key] = wiz_idx + 1
+                                st.session_state[wiz_picker_key] = False
                                 st.rerun()
-                            if swap_message:
-                                _queue_management_confirmation(str(swap_message))
-                        _clear_run_day_swap_selection()
-                        _set_run_day_flow_step(3)
-                        st.rerun()
+                        with cw_exit:
+                            if st.button("Exit wizard", width='stretch', key="sup_wiz_exit"):
+                                st.session_state[wiz_active_key] = False
+                                st.rerun()
+
+                else:
+                    if unassigned_oos_for_wiz:
+                        if st.button("\u2728 Route Swap Wizard", width='stretch', key="sup_run_day_wizard_launch"):
+                            st.session_state[wiz_active_key] = True
+                            st.session_state[wiz_routes_key] = unassigned_oos_for_wiz
+                            st.session_state[wiz_idx_key] = 0
+                            st.session_state[wiz_picker_key] = False
+                            st.rerun()
+
+                    current_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_route_key))
+                    synced_route_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_synced_route_key))
+                    already_covering = set(_active_cover_truck_usage(exclude_route=current_route_pick).keys())
+                    is_oos_route_selected = current_route_pick is not None and int(current_route_pick) in off_trucks_now
+                    load_on_excluded = off_trucks_now | shop_trucks_now | loaded_trucks_now | already_covering
+                    load_on_dropdown_options = [
+                        int(t)
+                        for t in fleet_dropdown_options
+                        if int(t) not in load_on_excluded or (not is_oos_route_selected and int(t) == (current_route_pick or -1))
+                    ]
+
+                    if current_route_pick is not None and load_on_dropdown_options:
+                        preferred_load_pick = None
+                        if current_route_pick is not None:
+                            if int(current_route_pick) in off_trucks_now:
+                                preferred_load_pick = _coerce_run_day_swap_pick(active_oos_assignments.get(int(current_route_pick)))
+                            else:
+                                preferred_load_pick = _coerce_run_day_swap_pick(active_swaps.get(int(current_route_pick)))
+                                if preferred_load_pick is None:
+                                    preferred_load_pick = int(current_route_pick)
+                        current_load_pick = _coerce_run_day_swap_pick(st.session_state.get(run_day_swap_load_key))
+                        if current_route_pick is not None and synced_route_pick != current_route_pick:
+                            fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
+                            st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
+                            st.session_state[run_day_swap_synced_route_key] = int(current_route_pick)
+                        elif current_load_pick not in load_on_dropdown_options:
+                            fallback_load_pick = preferred_load_pick if preferred_load_pick in load_on_dropdown_options else int(load_on_dropdown_options[0])
+                            st.session_state[run_day_swap_load_key] = int(fallback_load_pick)
+                    else:
+                        st.session_state.pop(run_day_swap_load_key, None)
+                        st.session_state.pop(run_day_swap_synced_route_key, None)
+
+                    selected_route_pick = None
+                    if truck_dropdown_options:
+                        selected_route_pick = st.selectbox(
+                            "Route",
+                            options=[None, *truck_dropdown_options],
+                            key=run_day_swap_route_key,
+                            format_func=lambda truck_num: (
+                                "Select route truck..."
+                                if truck_num is None
+                                else (
+                                    f"Route {int(truck_num)} \u2192 Load On {int(active_swaps[int(truck_num)])} (update)"
+                                    if int(truck_num) in deduped_swap_routes
+                                    else f"Route {int(truck_num)} [OOS] \u2192 Spare {int(active_oos_assignments[int(truck_num)])} (update)"
+                                    if int(truck_num) in off_trucks_now and int(truck_num) in active_oos_assignments
+                                    else f"Route {int(truck_num)} [OOS]"
+                                    if int(truck_num) in off_trucks_now
+                                    else f"Route {int(truck_num)}"
+                                )
+                            ),
+                        )
+                    else:
+                        st.caption("No eligible routes available.")
+
+                    current_route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+
+                    selected_load_pick = None
+                    if current_route_pick is not None and load_on_dropdown_options:
+                        selected_load_pick = st.selectbox(
+                            "Load On",
+                            options=load_on_dropdown_options,
+                            key=run_day_swap_load_key,
+                            format_func=lambda truck_num: (
+                                f"Truck {int(truck_num)} (reset)"
+                                if int(truck_num) == (current_route_pick or -1)
+                                else f"Truck {int(truck_num)}"
+                            ),
+                        )
+                    elif current_route_pick is None:
+                        st.caption("Select a route truck to add or update a route swap.")
+                    else:
+                        st.caption("No eligible trucks available for Load On.")
+
+                    add_swap_col, continue_swap_col = st.columns(2, gap="small")
+                    with add_swap_col:
+                        if st.button("Add / Update Swap", width='stretch', key="sup_run_day_spares_add"):
+                            route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+                            load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
+                            ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
+                            _set_run_day_swap_feedback(ok_swap, swap_message)
+                            if ok_swap:
+                                _clear_run_day_swap_selection()
+                            st.rerun()
+
+                    with continue_swap_col:
+                        if st.button("Save and Continue", width='stretch', key="sup_run_day_spares_finish"):
+                            route_pick = _coerce_run_day_swap_pick(selected_route_pick)
+                            load_on_pick = _coerce_run_day_swap_pick(selected_load_pick)
+                            if route_pick is not None:
+                                ok_swap, swap_message = _apply_run_day_swap_selection(route_pick, load_on_pick)
+                                if not ok_swap:
+                                    _set_run_day_swap_feedback(False, swap_message)
+                                    st.rerun()
+                                if swap_message:
+                                    _queue_management_confirmation(str(swap_message))
+                            _clear_run_day_swap_selection()
+                            _set_run_day_flow_step(3)
+                            st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
+                    st.session_state[wiz_active_key] = False
                     _clear_run_day_swap_selection()
                     _set_run_day_flow_step(3)
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
+                    st.session_state[wiz_active_key] = False
                     _clear_run_day_swap_selection()
                     _set_run_day_flow_step(1)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
+                    st.session_state[wiz_active_key] = False
                     _clear_run_day_swap_selection()
                     _set_run_day_flow_step(0)
                     st.rerun()

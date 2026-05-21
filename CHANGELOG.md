@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.7.5 build 102 - 2026-05-21
+
+1. Bumped build to **102**.
+2. **FEATURE**: "Route Swap Wizard" button added to Run Day Wizard Step 2/4. When unassigned OOS routes exist, a "✨ Route Swap Wizard" button appears above the manual form. Clicking it steps through each unassigned OOS route one by one, showing the AI spare suggestion (from build 101) first — "Yes, use Truck X" assigns immediately, "No, choose different" drops into the numeric truck picker for that route. Skip route and Exit wizard controls are available at each step. Skip/Back/Close buttons always remain accessible at the bottom of the dialog.
+
 ## v1.7.5 build 101 - 2026-05-21
 
 1. Bumped build to **101**.

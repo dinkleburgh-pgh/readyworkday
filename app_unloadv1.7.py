@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 107
+_APP_BUILD = 108
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -16791,13 +16791,53 @@ def _render_route_card(
     spare_trucks_now = {int(t) for t in (st.session_state.get("spare_set") or set())}
     persistent_spares = {int(t) for t in (PERSISTENT_SPARE_TRUCKS or set())}
     pending_return_spares = {int(t) for t in _spares_needing_return_set()}
+    loaded_trucks_now = {int(t) for t in (st.session_state.get("loaded_set") or set())}
+    inprog_trucks_now = {int(t) for t in (st.session_state.get("inprog_set") or set())}
+    cleaned_trucks_now = {int(t) for t in (st.session_state.get("cleaned_set") or set())}
+    assigned_cover_trucks = {
+        int(truck_num)
+        for truck_num in [*oos_assignments.values(), *swap_assignments.values()]
+    }
     can_open_route_assignment = _screen_allowed_for_current_user("STATUS_UNLOADED")
     can_edit_swap_card_assignment = _is_fleet_equivalent_role(_current_auth_role())
     docked_content_align = "center" if bool(mobile_docked) else "flex-start"
     docked_text_align = "center" if bool(mobile_docked) else "left"
     route_assign_click_targets: set[int] = set()
-    def _live_status_chip(truck_num: int) -> tuple[str, str, str]:
+
+    def _status_chip_palette(status_raw: str) -> tuple[str, str]:
+        if status_raw == "Dirty":
+            return badge_colors["dirty"], "#000000"
+        if status_raw == "Unloaded":
+            return badge_colors["unloaded"], "#000000"
+        if status_raw == "In Progress":
+            return badge_colors["in_progress"], "#000000"
+        if status_raw == "Loaded":
+            return badge_colors["loaded"], "#000000"
+        if status_raw == "Shop":
+            return badge_colors["shop"], "#ffffff"
+        if status_raw in {"Out Of Service", "Spare"}:
+            return badge_colors["oos_spare"], "#ffffff"
+        if status_raw == "Special":
+            return "#7c3aed", "#000000"
+        if status_raw == "Unfinished":
+            return "#16a34a", "#ffffff"
+        return "#334155", "#000000"
+
+    def _live_status_chip(truck_num: int, *, prefer_assigned_operational_status: bool = False) -> tuple[str, str, str]:
         status_raw = str(current_status_label(int(truck_num)) or "").strip()
+        if (
+            prefer_assigned_operational_status
+            and int(truck_num) in assigned_cover_trucks
+            and status_raw == "Spare"
+        ):
+            if int(truck_num) in loaded_trucks_now:
+                status_raw = "Loaded"
+            elif int(truck_num) in inprog_trucks_now:
+                status_raw = "In Progress"
+            elif int(truck_num) in cleaned_trucks_now:
+                status_raw = "Unloaded"
+            else:
+                status_raw = "Dirty"
         status_chip = {
             "Dirty": "Dirty",
             "Unloaded": "Unloaded",
@@ -16808,7 +16848,7 @@ def _render_route_card(
             "Shop": "Shop",
             "Special": "Special",
         }.get(status_raw, status_raw if status_raw else "Unknown")
-        chip_bg, _, chip_text = _truck_status_colors(int(truck_num), badge_colors)
+        chip_bg, chip_text = _status_chip_palette(status_raw)
         return status_chip, chip_bg, chip_text
 
     def _status_chip_style(
@@ -16958,11 +16998,17 @@ def _render_route_card(
                 second_truck = int(swap_assignments.get(second_route, second_route))
                 first_route_kind, first_route_bg, first_route_text = _live_status_chip(first_route)
                 first_route_pill_style = _status_chip_style(first_route_bg, first_route_text, first_route_kind)
-                first_truck_kind, first_truck_bg, first_truck_text = _live_status_chip(first_truck)
+                first_truck_kind, first_truck_bg, first_truck_text = _live_status_chip(
+                    first_truck,
+                    prefer_assigned_operational_status=True,
+                )
                 first_truck_pill_style = _status_chip_style(first_truck_bg, first_truck_text, first_truck_kind)
                 second_route_kind, second_route_bg, second_route_text = _live_status_chip(second_route)
                 second_route_pill_style = _status_chip_style(second_route_bg, second_route_text, second_route_kind)
-                second_truck_kind, second_truck_bg, second_truck_text = _live_status_chip(second_truck)
+                second_truck_kind, second_truck_bg, second_truck_text = _live_status_chip(
+                    second_truck,
+                    prefer_assigned_operational_status=True,
+                )
                 second_truck_pill_style = _status_chip_style(second_truck_bg, second_truck_text, second_truck_kind)
                 first_live_status = str(current_status_label(int(first_truck)) or "").strip()
                 second_live_status = str(current_status_label(int(second_truck)) or "").strip()
@@ -17039,7 +17085,10 @@ def _render_route_card(
             truck_value = int(detail_values[0])
             route_kind, route_bg, route_text = _live_status_chip(route_value)
             route_pill_style = _status_chip_style(route_bg, route_text, route_kind)
-            truck_kind, truck_bg, truck_text = _live_status_chip(truck_value)
+            truck_kind, truck_bg, truck_text = _live_status_chip(
+                truck_value,
+                prefer_assigned_operational_status=True,
+            )
             truck_pill_style = _status_chip_style(truck_bg, truck_text, truck_kind)
             truck_live_status = str(current_status_label(int(truck_value)) or "").strip()
             assignment_completed = truck_live_status in completed_statuses

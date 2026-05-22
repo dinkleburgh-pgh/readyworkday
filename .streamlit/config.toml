@@ -2,6 +2,7 @@
 websocketPingInterval = 30
 disconnectedSessionTTL = 43200
 enableStaticServing = true
+enableWebsocketCompression = false
 
 [theme]
 base = "dark"

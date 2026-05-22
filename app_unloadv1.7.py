@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 105
+_APP_BUILD = 106
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -2582,8 +2582,41 @@ def _render_audit_capture_panel(
     audit_category = audit_state.get("category")
     audit_bulk_group = audit_state.get("bulk_group")
     audit_item = audit_state.get("item")
+    _render_truck_like_color_category_button_styles(("audit_cat_", "audit_item_"))
 
     if audit_step == "category":
+        st.markdown(
+            """
+            <style>
+            [class*="st-key-audit_cat_"] .stButton > button {
+                border-radius: 14px !important;
+                border: 1px solid rgba(125, 211, 252, 0.6) !important;
+                background: linear-gradient(145deg, rgba(14, 116, 144, 0.95), rgba(30, 64, 175, 0.92)) !important;
+                color: #f8fafc !important;
+                -webkit-text-fill-color: #f8fafc !important;
+                font-weight: 900 !important;
+                letter-spacing: 0.02em !important;
+                box-shadow: 0 8px 20px rgba(15, 23, 42, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+                transition: transform 120ms ease, filter 120ms ease, box-shadow 140ms ease !important;
+            }
+            [class*="st-key-audit_cat_"] .stButton > button:hover {
+                transform: translateY(-1px) !important;
+                filter: brightness(1.08) !important;
+                box-shadow: 0 11px 24px rgba(15, 23, 42, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+            }
+            [class*="st-key-audit_cat_"] .stButton > button:active {
+                transform: translateY(0) !important;
+                filter: brightness(0.96) !important;
+            }
+            [class*="st-key-audit_cat_"] .stButton > button:focus-visible {
+                outline: none !important;
+                box-shadow: 0 0 0 2px rgba(186, 230, 253, 0.92), 0 0 0 5px rgba(14, 165, 233, 0.45) !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         categories = [str(c) for c in tracked_map.keys()]
         bottom_categories = [c for c in ["Bulk", "Paper"] if c in categories]
         top_categories = [
@@ -4793,61 +4826,6 @@ def _current_actor_name() -> str:
     return "Guest"
 
 
-def _current_shift_user_key() -> str:
-    auth_username = str(st.session_state.get("auth_username") or "").strip().lower()
-    if auth_username:
-        return auth_username
-    actor_name = str(_current_actor_name() or "").strip().lower()
-    if actor_name:
-        return actor_name
-    return "guest"
-
-
-def _get_user_shift_state() -> dict:
-    raw = st.session_state.get("user_shift_state") or {}
-    user_state: dict[str, dict] = raw if isinstance(raw, dict) else {}
-    user_key = _current_shift_user_key()
-    per_user = user_state.get(user_key)
-    if not isinstance(per_user, dict):
-        per_user = {}
-    return per_user
-
-
-def _get_user_shift_value(field_name: str, default_value=None):
-    per_user = _get_user_shift_state()
-    if field_name in per_user:
-        return per_user.get(field_name)
-    return default_value
-
-
-def _set_user_shift_value(field_name: str, value) -> None:
-    raw = st.session_state.get("user_shift_state") or {}
-    user_state: dict[str, dict] = raw if isinstance(raw, dict) else {}
-    user_key = _current_shift_user_key()
-    per_user = user_state.get(user_key)
-    if not isinstance(per_user, dict):
-        per_user = {}
-    per_user[str(field_name)] = value
-    user_state[user_key] = per_user
-    st.session_state.user_shift_state = user_state
-
-
-def _clear_all_users_shift_state() -> None:
-    st.session_state.user_shift_state = {}
-
-
-def _scoped_shift_pref_key(base_key: str) -> str:
-    user_key = re.sub(r"[^a-z0-9_]+", "_", _current_shift_user_key())
-    return f"{str(base_key)}__{user_key}"
-
-
-def _normalize_screen_page(screen: str | None) -> str:
-    screen_value = str(screen or "").strip().upper()
-    if screen_value == LEGACY_STATUS_UNLOADED_PAGE:
-        return STATUS_UNLOADED_PAGE
-    return screen_value
-
-
 def _screen_allowed_for_role(screen: str | None, role_value) -> bool:
     screen_value = _normalize_screen_page(screen)
     if not screen_value:
@@ -4865,7 +4843,7 @@ def _default_screen_for_role(role_value) -> str:
         return "IN_PROGRESS"
     if role == AUTH_ROLE_LOADER:
         return "LOAD"
-    if role in {AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN, AUTH_ROLE_ATL, AUTH_ROLE_LEAD}:
+    if role in {AUTH_ROLE_UNLOADER, AUTH_ROLE_ADMIN, AUTH_ROLE_ATL, AUTH_ROLE_SUPERVISOR, AUTH_ROLE_LEAD}:
         return "UNLOAD"
     return "IN_PROGRESS"
 
@@ -4884,6 +4862,43 @@ def _manual_pace_avg_override_seconds() -> int | None:
     except Exception:
         return None
     return _sanitize_pace_card_avg_seconds(override_seconds)
+
+
+def _scoped_shift_pref_key(key: str) -> str:
+    username = str(st.session_state.get("auth_username") or st.session_state.get("username") or "guest").strip().lower() or "guest"
+    return f"shift::{username}::{str(key)}"
+
+
+def _get_user_shift_value(key: str, default=None):
+    state = st.session_state.get("user_shift_state")
+    if not isinstance(state, dict):
+        state = {}
+    username = str(st.session_state.get("auth_username") or st.session_state.get("username") or "guest").strip().lower() or "guest"
+    user_state = state.get(username)
+    if isinstance(user_state, dict) and key in user_state:
+        return user_state.get(key)
+    return st.session_state.get(key, default)
+
+
+def _set_user_shift_value(key: str, value) -> None:
+    state = st.session_state.get("user_shift_state")
+    if not isinstance(state, dict):
+        state = {}
+    username = str(st.session_state.get("auth_username") or st.session_state.get("username") or "guest").strip().lower() or "guest"
+    user_state = state.get(username)
+    if not isinstance(user_state, dict):
+        user_state = {}
+    user_state[str(key)] = value
+    state[username] = user_state
+    st.session_state["user_shift_state"] = state
+    st.session_state[str(key)] = value
+
+
+def _clear_all_users_shift_state() -> None:
+    st.session_state["user_shift_state"] = {}
+    st.session_state["rollover_prompt_snooze_until"] = 0.0
+    st.session_state["end_of_day_prompt_snooze_until"] = 0.0
+    st.session_state["shift_handoff_last_handled_key"] = ""
 
 
 def _sanitize_pace_card_avg_seconds(value) -> int | None:
@@ -6352,6 +6367,7 @@ def _deserialize_state_payload(data: dict) -> dict:
             "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
+            "prev_day_used_trucks",
             "unload_completed_routes_today",
             "dust_garment_trucks",
         }:
@@ -6429,6 +6445,9 @@ def load_state() -> dict:
     # Migration: added unfinished_set in v1.7.5 build 104
     if "unfinished_set" not in data:
         data["unfinished_set"] = set()
+    # Migration: added prev_day_used_trucks in v1.7.5 build 106
+    if "prev_day_used_trucks" not in data:
+        data["prev_day_used_trucks"] = set()
     return data
 
 
@@ -6457,6 +6476,7 @@ def _serialize_state() -> dict:
             "unload_request_set",
             "used_spares_today",
             "spares_needing_return",
+            "prev_day_used_trucks",
             "unload_completed_routes_today",
             "dust_garment_trucks",
         }:
@@ -6541,6 +6561,7 @@ def _sync_next_up_from_state_file(force: bool = False):
         "route_swap_assignments",
         "used_spares_today",
         "spares_needing_return",
+        "prev_day_used_trucks",
         "unload_progress_day_key",
         "unload_completed_routes_today",
         "truck_load_day_by_truck",
@@ -7783,6 +7804,21 @@ def _enforce_active_screen_role_access():
     st.rerun()
 
 
+def _normalize_screen_page(value) -> str | None:
+    """Normalize page/screen identifiers from URL/session into canonical screen keys."""
+    try:
+        raw = value[0] if isinstance(value, list) and value else value
+    except Exception:
+        raw = value
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    normalized = text.replace("-", "_").replace(" ", "_").strip().upper()
+    return normalized or None
+
+
 def _render_user_management_dropdown():
     with st.expander("User Management", expanded=False):
         # Legacy cleanup for the removed quick-pick widget key.
@@ -8663,6 +8699,7 @@ defaults = {
     "route_swap_assignments": {},    # {route: truck} active route swaps
     "used_spares_today": set(),      # spares that actually loaded an OOS route today
     "spares_needing_return": set(),  # used previous day; start Dirty, return to Spare after unload
+    "prev_day_used_trucks": set(),   # all trucks used for prior-day coverage/specials, forced Dirty next day
     "previous_route_covers": {},     # {spare_truck: {route: 1}} - which routes each spare covered on previous load day
     "spare_origin_route": {},        # {spare_truck: route} - tracks origin route for dirty spares (for audit reconciliation)
     "shop_set": set(),
@@ -13432,14 +13469,8 @@ def render_numeric_truck_buttons(
                             top: 3px !important;
                             bottom: auto !important;
                             transform: none !important;
-                            border: 1px solid rgba(20,83,45,0.96) !important;
-                            background: rgba(22,163,74,0.96) !important;
-                            color: #ecfdf5 !important;
-                            -webkit-text-fill-color: #ecfdf5 !important;
-                            font-size: 11px !important;
-                            line-height: 1.05 !important;
-                            padding: 2px 5px !important;
-                            border-radius: 999px !important;
+                            min-width: 2.35rem !important;
+                            text-align: center !important;
                         }}`;
 
                     if (!existingStyleEl) {{
@@ -13518,7 +13549,7 @@ def render_numeric_truck_buttons(
                             }};
                             if (isOosAssignedBadge) {{
                                 badge.classList.add('truck-route-badge-oos-assigned');
-                                applyBadgeFg('#ecfdf5');
+                                applyBadgeFg('#dbeafe');
                             }} else if (badgeTextUpper === 'OFF') {{
                                 badge.classList.add('truck-route-badge-off');
                                 applyBadgeFg('#fee2e2');
@@ -16942,6 +16973,16 @@ def _render_route_card(
                     if (first_live_status == "Loaded" or second_live_status == "Loaded")
                     else ""
                 )
+                pair_editable = can_edit_swap_card_assignment and (not pair_completed)
+                pair_click_hint_html = (
+                    "<div style='width:100%; text-align:center;'>"
+                    "<span style='display:inline-flex; justify-content:center; font-size:0.72rem; letter-spacing:0.08em; text-transform:uppercase; opacity:0.84; font-weight:800; color:#cbd5e1;'>"
+                    "Click to edit assignment"
+                    "</span>"
+                    "</div>"
+                    if pair_editable
+                    else ""
+                )
 
                 pair_row_html = (
                     (
@@ -16974,12 +17015,13 @@ def _render_route_card(
                         f"<span style='{second_truck_pill_style}'>{second_truck_kind}</span>"
                         "</span>"
                         "</div>"
+                        f"{pair_click_hint_html}"
                         "</div>"
                         "</div>"
                     )
                 )
                 pair_row_wrapped_html = pair_row_html
-                if can_edit_swap_card_assignment:
+                if pair_editable:
                     pair_row_wrapped_html = (
                         f"<div data-route-assign='{int(first_route)}' role='button' tabindex='0' "
                         "style='display:block; text-decoration:none; color:inherit; cursor:pointer;'>"
@@ -17003,6 +17045,20 @@ def _render_route_card(
             single_row_border = completed_row_border if assignment_completed else "1px solid rgba(148,163,184,0.32)"
             single_row_bg = completed_row_bg if assignment_completed else "rgba(15,23,42,0.46)"
             loaded_corner_html = _loaded_corner_check_html() if truck_live_status == "Loaded" else ""
+            single_editable = (
+                can_edit_swap_card_assignment
+                and (not assignment_completed)
+                and assignment_kind in {"swap_single", "oos"}
+            )
+            single_click_hint_html = (
+                "<div style='width:100%; text-align:center;'>"
+                "<span style='display:inline-flex; justify-content:center; font-size:0.72rem; letter-spacing:0.08em; text-transform:uppercase; opacity:0.84; font-weight:800; color:#cbd5e1;'>"
+                "Click to edit assignment"
+                "</span>"
+                "</div>"
+                if single_editable
+                else ""
+            )
             row_html = (
                 (
                     f"<div class='route-card-assignment-row' style='justify-content:{docked_content_align}; border:{single_row_border}; background:{single_row_bg};'>"
@@ -17021,12 +17077,13 @@ def _render_route_card(
                     f"<span style='{truck_pill_style}'>{truck_kind}</span>"
                     "</span>"
                     "</div>"
+                    f"{single_click_hint_html}"
                     "</div>"
                     "</div>"
                 )
             )
             row_wrapped_html = row_html
-            if assignment_kind == "swap_single" and can_edit_swap_card_assignment:
+            if single_editable:
                 row_wrapped_html = (
                     f"<div data-route-assign='{int(route_value)}' role='button' tabindex='0' "
                     "style='display:block; text-decoration:none; color:inherit; cursor:pointer;'>"
@@ -17082,16 +17139,19 @@ def _render_route_card(
         ".route-collapse-body{max-height:1400px;overflow:hidden;transition:max-height .32s ease,padding .32s ease;}"
         ".route-card-shell{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;border-radius:16px;overflow:hidden;}"
         ".route-card-body{padding:7px 8px 10px 8px;display:flex;flex-direction:column;gap:0;width:100%;min-width:0;box-sizing:border-box;}"
+        ".route-card-body > *{width:100%;max-width:100%;min-width:0;align-self:stretch;box-sizing:border-box;}"
+        ".route-card-body [data-route-assign]{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;}"
         ".route-card-assignment-row{display:flex;width:100%;max-width:100%;align-items:center;gap:0;box-sizing:border-box;position:relative;padding:7px 10px;margin-top:6px;border-radius:14px;min-width:0;overflow:hidden;}"
-        ".route-card-single-grid{display:grid;grid-template-columns:minmax(64px,0.62fr) auto minmax(96px,1fr);column-gap:8px;row-gap:5px;width:100%;min-width:0;align-items:center;}"
+        ".route-card-assignment-row{align-self:stretch;}"
+        ".route-card-single-grid{display:grid;grid-template-columns:minmax(90px,1fr) auto minmax(90px,1fr);column-gap:8px;row-gap:5px;width:100%;min-width:0;align-items:center;}"
         ".route-card-pair-grid{display:grid;grid-template-columns:minmax(92px,1fr) auto minmax(92px,1fr);column-gap:8px;row-gap:0;width:100%;min-width:0;align-items:center;}"
         ".route-card-pair-side{display:flex;flex-direction:column;gap:2px;min-width:0;}"
-        ".route-card-meta-label{font-size:0.72rem;letter-spacing:0.05em;text-transform:uppercase;opacity:0.72;font-weight:800;line-height:1.08;white-space:nowrap;}"
+        ".route-card-meta-label{font-size:0.72rem;letter-spacing:0.05em;text-transform:uppercase;opacity:0.72;font-weight:800;line-height:1.08;white-space:nowrap;text-align:center;justify-self:center;}"
         ".route-card-meta-label-gap{margin-top:2px;}"
         ".route-card-meta-number{font-size:clamp(1.08rem,1.2vw,1.42rem);font-weight:900;line-height:1.0;white-space:nowrap;}"
         ".route-card-route-number{color:#93c5fd;}"
-        ".route-card-meta-value,.route-card-badge-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;}"
-        ".route-card-badge-row{align-items:flex-start;overflow:hidden;}"
+        ".route-card-meta-value,.route-card-badge-row{display:flex;align-items:center;justify-content:center;gap:5px;flex-wrap:wrap;min-width:0;}"
+        ".route-card-badge-row{align-items:center;justify-content:center;overflow:hidden;}"
         ".route-card-link-arrow,.route-card-pair-center{display:flex;align-items:center;justify-content:center;min-width:0;}"
         ".route-card-link-arrow{font-size:clamp(1.12rem,1.28vw,1.38rem);font-weight:900;opacity:0.9;line-height:1.0;color:#cbd5e1;justify-self:center;align-self:center;}"
         ".route-card-flow-route-label{grid-column:1;grid-row:1;}"
@@ -17101,9 +17161,11 @@ def _render_route_card(
         ".route-card-flow-truck-value{grid-column:3;grid-row:2;}"
         ".route-card-flow-route-badge{grid-column:1;grid-row:3;}"
         ".route-card-flow-truck-badge{grid-column:3;grid-row:3;}"
+        ".route-card-flow-route-label,.route-card-flow-route-value,.route-card-flow-route-badge{justify-self:center;text-align:center;}"
+        ".route-card-flow-truck-label,.route-card-flow-truck-value,.route-card-flow-truck-badge{justify-self:center;text-align:center;}"
         ".route-collapse-wrap.collapsed .route-collapse-chevron{transform:translateY(-50%) rotate(-90deg);}"
         ".route-collapse-wrap.collapsed .route-collapse-body{max-height:0;padding-top:0 !important;padding-bottom:0 !important;}"
-        "@media (max-width:980px){.route-collapse-wrap{margin:2px 0 4px 0;}.route-collapse-label{padding:8px 26px 7px 26px;}.route-card-assignment-row{padding:7px 8px;}.route-card-single-grid{grid-template-columns:minmax(60px,0.58fr) auto minmax(90px,1fr);column-gap:6px;}.route-card-pair-grid{grid-template-columns:minmax(84px,1fr) auto minmax(84px,1fr);column-gap:6px;}.route-card-meta-number{font-size:clamp(1rem,3.8vw,1.22rem);}}"
+        "@media (max-width:980px){.route-collapse-wrap{margin:2px 0 4px 0;}.route-collapse-label{padding:8px 26px 7px 26px;}.route-card-assignment-row{padding:7px 8px;}.route-card-single-grid{grid-template-columns:minmax(84px,1fr) auto minmax(84px,1fr);column-gap:6px;}.route-card-pair-grid{grid-template-columns:minmax(84px,1fr) auto minmax(84px,1fr);column-gap:6px;}.route-card-meta-number{font-size:clamp(1rem,3.8vw,1.22rem);}}"
         "@media (max-width:980px){.route-collapse-wrap.route-mobile-dock{position:fixed;left:8px;right:8px;bottom:10px;z-index:1600;margin:0 !important;max-width:calc(100vw - 16px);background:transparent !important;}"
         ".route-collapse-wrap.route-mobile-dock:not(.collapsed){background:rgba(15,23,42,0.96) !important;}"
         ".route-collapse-wrap.route-mobile-dock.collapsed{background:transparent !important;}"
@@ -18500,21 +18562,36 @@ def reset_status_for_new_day(day_num: int | None):
     st.session_state.wearers = {}
     st.session_state.batches = {i: {"trucks": [], "total": 0} for i in range(1, BATCH_COUNT + 1)}
 
+    previous_route_covers = st.session_state.get("previous_route_covers") or {}
+    covered_trucks_prev_day: set[int] = set()
+    for truck_raw, covered_routes in previous_route_covers.items():
+        try:
+            truck_num = int(truck_raw)
+        except Exception:
+            continue
+        if isinstance(covered_routes, dict) and covered_routes:
+            covered_trucks_prev_day.add(int(truck_num))
+
+    # Remember previous-day trucks used for route coverage and special workflows.
+    prev_day_used_trucks = (
+        {int(t) for t in used_for_route_oos_coverage}
+        | {int(t) for t in used_spares_prev_day}
+        | {int(t) for t in special_used_prev_day}
+        | {int(t) for t in covered_trucks_prev_day}
+    )
+    st.session_state.prev_day_used_trucks = set(prev_day_used_trucks)
+
     # Holiday mode runs all routes each day, so do not auto-promote previous
     # day's off-schedule trucks to Unloaded.
     if not _holiday_mode_active():
         apply_off_schedule(
             previous_day_num,
-            exclude_trucks=used_for_route_oos_coverage,
+            exclude_trucks=prev_day_used_trucks,
         )
 
     # Force previously used special/coverage trucks to start Dirty on the new day.
     # These trucks should not begin as Unloaded.
-    force_dirty_trucks = (
-        {int(t) for t in used_for_route_oos_coverage}
-        | {int(t) for t in used_spares_prev_day}
-        | {int(t) for t in special_used_prev_day}
-    )
+    force_dirty_trucks = set(prev_day_used_trucks)
     force_dirty_trucks -= {int(t) for t in (st.session_state.get("off_set") or set())}
     force_dirty_trucks -= {int(t) for t in (st.session_state.get("shop_set") or set())}
     st.session_state.cleaned_set -= force_dirty_trucks
@@ -18741,6 +18818,77 @@ def _set_shorts_button_state(truck: int, new_state: dict):
 def _reset_shorts_button_state(truck: int):
     _set_shorts_button_state(truck, _default_shorts_button_state())
 
+
+def _render_truck_like_color_category_button_styles(prefixes: list[str] | tuple[str, ...]) -> None:
+    scoped_prefixes = [str(p or "").strip() for p in (prefixes or []) if str(p or "").strip()]
+    if not scoped_prefixes:
+        return
+
+    color_map = {
+        "Black": "#111111",
+        "Onyx": "#353839",
+        "Copper": "#b87333",
+        "Indigo": "#4b2ca3",
+        "Blue": "#2563eb",
+    }
+
+    all_targets: list[str] = []
+    color_rules: list[str] = []
+    for prefix in scoped_prefixes:
+        for label, bg_color in color_map.items():
+            selector = f'[class*="st-key-{prefix}"][class*="_{label}"] .stButton > button'
+            all_targets.append(selector)
+            color_rules.append(f"{selector} {{ background: {bg_color} !important; }}")
+
+    if not all_targets:
+        return
+
+    shared_targets = ",\n".join(all_targets)
+    p_targets = ",\n".join(f"{sel} p, {sel} span" for sel in all_targets)
+    hover_targets = ",\n".join(f"{sel}:hover" for sel in all_targets)
+    active_targets = ",\n".join(f"{sel}:active" for sel in all_targets)
+    focus_targets = ",\n".join(f"{sel}:focus-visible" for sel in all_targets)
+    color_blocks = "\n".join(color_rules)
+
+    st.markdown(
+        f"""
+        <style>
+        {shared_targets} {{
+            color: #f8fafc !important;
+            -webkit-text-fill-color: #f8fafc !important;
+            font-weight: 900 !important;
+            letter-spacing: 0.02em !important;
+            border-radius: 14px !important;
+            border: 1px solid rgba(255, 255, 255, 0.26) !important;
+            box-shadow: 0 10px 22px rgba(2, 6, 23, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.38) !important;
+            transition: transform 120ms ease, filter 120ms ease, box-shadow 140ms ease !important;
+        }}
+        {p_targets} {{
+            color: #f8fafc !important;
+            -webkit-text-fill-color: #f8fafc !important;
+            font-weight: 900 !important;
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.38) !important;
+        }}
+        {hover_targets} {{
+            transform: translateY(-1px) !important;
+            filter: brightness(1.08) !important;
+            box-shadow: 0 13px 24px rgba(2, 6, 23, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+        }}
+        {active_targets} {{
+            transform: translateY(0) !important;
+            filter: brightness(0.95) !important;
+        }}
+        {focus_targets} {{
+            outline: none !important;
+            box-shadow: 0 0 0 2px rgba(241, 245, 249, 0.94), 0 0 0 5px rgba(59, 130, 246, 0.45) !important;
+        }}
+        {color_blocks}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def _short_row_has_item(row: dict) -> bool:
     if not isinstance(row, dict):
         return False
@@ -18853,6 +19001,7 @@ def render_shorts_button_flow(
     item = state.get("item")
     inprog_safe_mode = str(st.session_state.get("active_screen") or "").upper() == "IN_PROGRESS"
     tracked_map = _tracked_items_map()
+    _render_truck_like_color_category_button_styles(("shorts_cat_", "shorts_item_"))
 
     def _shorts_cols(default_cols: int) -> int:
         if _is_mobile_client():
@@ -23304,9 +23453,12 @@ if st.session_state.setup_done:
         )
         if st.sidebar.button("Run Day", key="sidebar_run_day_alert_btn", width='stretch'):
             st.session_state["sup_run_day_flow_active"] = True
-            st.session_state["sup_dust_clothes_dialog_open"] = True
+            st.session_state["sup_run_day_flow_step"] = 1
+            st.session_state["sup_run_day_mode_dialog_open"] = True
+            st.session_state["sup_dust_clothes_dialog_open"] = False
             st.session_state["sup_run_day_spares_dialog_open"] = False
             st.session_state["sup_run_day_specials_dialog_open"] = False
+            st.session_state["sup_run_day_daily_notes_dialog_open"] = False
             st.session_state["sup_operations_audit_dialog_open"] = False
             st.session_state["sup_operations_view_audits_dialog_open"] = False
             st.session_state["sup_comms_history_dialog_open"] = False
@@ -24371,8 +24523,10 @@ if current_screen not in {"UNLOAD", "BATCH"}:
 if current_screen in {"UNLOAD", "BATCH"}:
     nav_active_labels.add("Unload")
     nav_active_labels.add("Dirty")
-if current_screen in {"LOAD", "SHORTS"}:
+# Keep Load and Unloaded visually linked in sidebar highlights.
+if current_screen in {"LOAD", "SHORTS", "STATUS_UNLOADED"}:
     nav_active_labels.add("Load")
+    nav_active_labels.add("Unloaded")
 if current_screen == "FLEET":
     nav_active_labels.add("Fleet")
 if current_screen == "COMMUNICATIONS":
@@ -24393,8 +24547,6 @@ if current_screen == "STATUS_SHOP":
     nav_active_labels.add("Shop")
 if current_screen == "IN_PROGRESS":
     nav_active_labels.add("In Progress")
-if current_screen == "STATUS_UNLOADED":
-    nav_active_labels.add("Unloaded")
 if current_screen == "STATUS_LOADED":
     nav_active_labels.add("Loaded")
 if current_screen == "STATUS_OFF":
@@ -24547,6 +24699,26 @@ if bool(st.session_state.get("archive_view_mode")):
 # ==========================================================
 # PAGES
 # ==========================================================
+
+# Treat Unloaded as LOAD for normal browsing so both routes share one page.
+# Keep STATUS_UNLOADED only when one of its dedicated confirmation flows is active.
+_status_unloaded_flow_active = any(
+    [
+        st.session_state.get("pending_oos_route") is not None,
+        st.session_state.get("pending_start_truck") is not None,
+        st.session_state.get("pending_holiday_start_truck") is not None,
+        bool(st.session_state.get("start_blocked")),
+    ]
+)
+if (
+    st.session_state.active_screen in {STATUS_UNLOADED_PAGE, LEGACY_STATUS_UNLOADED_PAGE}
+    and (not _status_unloaded_flow_active)
+    and _screen_allowed_for_current_user("LOAD")
+):
+    st.session_state.active_screen = "LOAD"
+    _set_query_params(page=_page_param_for_screen("LOAD"), truck=None, start=None)
+    _mark_and_save()
+    st.rerun()
 
 # --------------------------
 # Status pages (NOW bubbled)
@@ -27734,6 +27906,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
         ship_dates = [run_date + timedelta(days=1)]
 
     supervisor_dialog_keys = [
+        "sup_run_day_mode_dialog_open",
         "sup_dust_clothes_dialog_open",
         "sup_run_day_spares_dialog_open",
         "sup_run_day_specials_dialog_open",
@@ -27760,10 +27933,11 @@ elif st.session_state.active_screen == "SUPERVISOR":
         st.session_state[target_key] = True
 
     run_day_step_dialogs = {
-        1: "sup_dust_clothes_dialog_open",
-        2: "sup_run_day_spares_dialog_open",
-        3: "sup_run_day_specials_dialog_open",
-        4: "sup_run_day_daily_notes_dialog_open",
+        1: "sup_run_day_mode_dialog_open",
+        2: "sup_dust_clothes_dialog_open",
+        3: "sup_run_day_spares_dialog_open",
+        4: "sup_run_day_specials_dialog_open",
+        5: "sup_run_day_daily_notes_dialog_open",
     }
 
     def _set_run_day_flow_step(step_value: int, *, open_dialog: bool = True):
@@ -27771,7 +27945,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             step_num = int(step_value)
         except Exception:
             step_num = 0
-        if step_num < 1 or step_num > 4:
+        if step_num < 1 or step_num > 5:
             step_num = 0
 
         st.session_state["sup_run_day_flow_step"] = int(step_num)
@@ -27790,7 +27964,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             active_step = int(st.session_state.get("sup_run_day_flow_step") or 1)
         except Exception:
             active_step = 1
-        if active_step < 1 or active_step > 4:
+        if active_step < 1 or active_step > 5:
             active_step = 1
             st.session_state["sup_run_day_flow_step"] = 1
 
@@ -27837,13 +28011,77 @@ elif st.session_state.active_screen == "SUPERVISOR":
             _open_supervisor_dialog("sup_dust_clothes_dialog_open")
             st.rerun()
 
+        def _dismiss_sup_run_day_mode_dialog():
+            st.session_state["sup_run_day_mode_dialog_open"] = False
+            _set_run_day_flow_step(0, open_dialog=False)
+
+        if st.session_state.get("sup_run_day_mode_dialog_open"):
+            @st.dialog("Run Day - Step 1/5", on_dismiss=_dismiss_sup_run_day_mode_dialog)
+            def _render_sup_run_day_mode_dialog():
+                st.markdown(
+                    "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>Choose today's run mode.</p>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<p style='text-align:center;color:rgba(148,163,184,0.92);font-size:0.9rem;margin:0 0 1.0rem 0;font-weight:500;line-height:1.3;'>Normal keeps scheduled days off. Holiday runs all non-spare routes with no Day Off trucks.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    """
+                    <style>
+                    [class*="st-key-sup_run_day_mode_normal"] button,
+                    [class*="st-key-sup_run_day_mode_holiday"] button {
+                        min-height: 54px !important;
+                        font-size: 1.1rem !important;
+                        font-weight: 900 !important;
+                        letter-spacing: 0.01em !important;
+                    }
+                    [class*="st-key-sup_run_day_mode_close"] button {
+                        background: #991b1b !important;
+                        border: 1px solid #b91c1c !important;
+                        color: #fef2f2 !important;
+                        min-height: 48px !important;
+                        font-size: 1.05rem !important;
+                        font-weight: 800 !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                with st.container(border=True):
+                    if st.button("Normal", width='stretch', key="sup_run_day_mode_normal"):
+                        apply_run_config(
+                            current_run_date,
+                            [current_run_date + timedelta(days=1)],
+                            restore_archive=False,
+                        )
+                        _set_run_day_flow_step(2)
+                        st.rerun()
+
+                    if st.button("Holiday", width='stretch', key="sup_run_day_mode_holiday"):
+                        apply_run_config(
+                            current_run_date,
+                            _default_holiday_ship_dates_for_run_date(current_run_date),
+                            restore_archive=False,
+                        )
+                        _set_run_day_flow_step(2)
+                        st.rerun()
+
+                if st.button("Close", width='stretch', key="sup_run_day_mode_close"):
+                    _set_run_day_flow_step(0)
+                    st.rerun()
+
+            _render_sup_run_day_mode_dialog()
+
         def _dismiss_sup_dust_clothes_dialog():
             st.session_state["sup_dust_clothes_dialog_open"] = False
             _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_dust_clothes_dialog_open"):
             dust_dialog_title = (
-                "Run Day - Step 1/4"
+                "Run Day - Step 2/5"
                 if bool(st.session_state.get("sup_run_day_flow_active"))
                 else "Select Dust Garments"
             )
@@ -27977,14 +28215,14 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     _mark_and_save()
                     if run_day_flow_active:
                         _queue_management_confirmation("Dust clothes saved.")
-                        _set_run_day_flow_step(2)
+                        _set_run_day_flow_step(3)
                     else:
                         _queue_management_confirmation("Dust clothes updated.")
                     st.rerun()
 
                 if run_day_flow_active:
                     if st.button("Skip", width='stretch', key="sup_dust_clothes_skip"):
-                        _set_run_day_flow_step(2)
+                        _set_run_day_flow_step(3)
                         st.rerun()
                 if st.button("Close", width='stretch', key="sup_dust_clothes_dialog_close"):
                     _set_run_day_flow_step(0)
@@ -28078,7 +28316,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_spares_dialog_open"):
-            @st.dialog("Run Day - Step 2/4", on_dismiss=_dismiss_sup_run_day_spares_dialog)
+            @st.dialog("Run Day - Step 3/5", on_dismiss=_dismiss_sup_run_day_spares_dialog)
             def _render_sup_run_day_spares_dialog():
                 st.markdown(
                     "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>Set any spares or route swaps for this run day.</p>",
@@ -28612,19 +28850,19 @@ elif st.session_state.active_screen == "SUPERVISOR":
                                 if swap_message:
                                     _queue_management_confirmation(str(swap_message))
                             _clear_run_day_swap_selection()
-                            _set_run_day_flow_step(3)
+                            _set_run_day_flow_step(4)
                             st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_spares_skip"):
                     st.session_state[wiz_active_key] = False
                     _clear_run_day_swap_selection()
-                    _set_run_day_flow_step(3)
+                    _set_run_day_flow_step(4)
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_spares_back"):
                     st.session_state[wiz_active_key] = False
                     _clear_run_day_swap_selection()
-                    _set_run_day_flow_step(1)
+                    _set_run_day_flow_step(2)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_spares_close"):
@@ -28640,7 +28878,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_specials_dialog_open"):
-            @st.dialog("Run Day - Step 3/4", on_dismiss=_dismiss_sup_run_day_specials_dialog)
+            @st.dialog("Run Day - Step 4/5", on_dismiss=_dismiss_sup_run_day_specials_dialog)
             def _render_sup_run_day_specials_dialog():
                 st.markdown(
                     "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>What trucks are NOT here to start the day?</p>",
@@ -28807,15 +29045,15 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         _apply_truck_status_change(t, "Dirty")
                     if dirty_picks:
                         _mark_and_save()
-                    _set_run_day_flow_step(4)
+                    _set_run_day_flow_step(5)
                     st.rerun()
 
                 if st.button("Skip", width='stretch', key="sup_run_day_specials_skip"):
-                    _set_run_day_flow_step(4)
+                    _set_run_day_flow_step(5)
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_specials_back"):
-                    _set_run_day_flow_step(2)
+                    _set_run_day_flow_step(3)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_specials_close"):
@@ -28829,7 +29067,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
             _set_run_day_flow_step(0, open_dialog=False)
 
         if st.session_state.get("sup_run_day_daily_notes_dialog_open"):
-            @st.dialog("Run Day - Step 4/4", on_dismiss=_dismiss_sup_run_day_daily_notes_dialog)
+            @st.dialog("Run Day - Step 5/5", on_dismiss=_dismiss_sup_run_day_daily_notes_dialog)
             def _render_sup_run_day_daily_notes_dialog():
                 st.markdown(
                     "<p style='text-align:center;color:rgba(250,250,250,0.78);font-size:1.75rem;margin:0 0 0.75rem 0;font-weight:800;line-height:1.04;'>Add any notes about today's run day.</p>",
@@ -28905,7 +29143,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     st.rerun()
 
                 if st.button("Back", width='stretch', key="sup_run_day_daily_notes_back"):
-                    _set_run_day_flow_step(3)
+                    _set_run_day_flow_step(4)
                     st.rerun()
 
                 if st.button("Close", width='stretch', key="sup_run_day_daily_notes_close"):

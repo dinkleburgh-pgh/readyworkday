@@ -41,7 +41,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 106
+_APP_BUILD = 107
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -16069,7 +16069,7 @@ def _set_shop_load_on_route_assignment(shop_truck: int, load_on_value: str):
     if load_on_truck is not None:
         active_swaps = _active_route_swap_assignments()
         if int(active_swaps.get(route_num, -1)) == int(load_on_truck):
-            _ensure_cover_truck_ready_for_loading(int(load_on_truck))
+            _ensure_cover_truck_ready_for_loading(int(load_on_truck), force_unloaded=False)
 
 
 def _apply_manual_route_change(truck_value: str, load_on_value: str) -> tuple[bool, str]:
@@ -16180,7 +16180,7 @@ def _off_day_trucks_blocked_from_loading() -> set[int]:
     return off_today_set - _off_day_trucks_needed_for_route_coverage()
 
 
-def _ensure_cover_truck_ready_for_loading(truck: int):
+def _ensure_cover_truck_ready_for_loading(truck: int, *, force_unloaded: bool = True):
     t = int(truck)
     spare_set_now = {int(x) for x in (st.session_state.get("spare_set") or set())}
 
@@ -16191,12 +16191,13 @@ def _ensure_cover_truck_ready_for_loading(truck: int):
             pending_return.discard(t)
             st.session_state.spares_needing_return = pending_return
 
-    # Any truck selected to cover an OOS route should be immediately ready in Unloaded.
-    st.session_state.cleaned_set.add(t)
-    st.session_state.loaded_set.discard(t)
-    st.session_state.inprog_set.discard(t)
-    st.session_state.special_set.discard(t)
-    st.session_state.unfinished_set.discard(t)
+    if force_unloaded:
+        # Trucks covering OFF/OOS routes should be ready to load immediately.
+        st.session_state.cleaned_set.add(t)
+        st.session_state.loaded_set.discard(t)
+        st.session_state.inprog_set.discard(t)
+        st.session_state.special_set.discard(t)
+        st.session_state.unfinished_set.discard(t)
 
 
 def _unassigned_route_swap_routes() -> list[int]:

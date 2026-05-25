@@ -27,11 +27,107 @@ import csv
 from pathlib import Path
 import bcrypt
 try:
-    import jwt as _jwt_module  # PyJWT — transitive dep of streamlit-authenticator
+    import jwt as _jwt_module  # PyJWT ? transitive dep of streamlit-authenticator
 except Exception:
     _jwt_module = None  # type: ignore
+# Load persisted DB connection settings from .env (written by the admin DB settings form).
+# override=False means system/Docker env vars take priority over the file.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)
+except ImportError:
+    pass
+# UI injection helpers (PWA bootstrap, global CSS, JS guards)
+from utils.ui_inject import (
+    inject_global_styles,
+    inject_pwa_bootstrap as _inject_pwa_bootstrap,
+    inject_blank_page_watchdog as _inject_blank_page_watchdog_base,
+    inject_inprogress_visibility_guard as _inject_inprogress_visibility_guard,
+)
+# Pure auth utilities (role normalisation, cookie key, user/request normalisation)
+from utils.auth_helpers import (
+    to_bool as _to_bool,
+    is_bcrypt_hash as _is_bcrypt_hash,
+    normalize_auth_cookie_key as _normalize_auth_cookie_key,
+    normalize_auth_role as _normalize_auth_role,
+    normalize_auth_users as _normalize_auth_users,
+    normalize_auth_requests as _normalize_auth_requests,
+)
 # Load quick-select amounts from JSON
+def _pg_is_live() -> bool:
+    """True when the PostgreSQL connection pool is initialized and ready."""
+    try:
+        import db.connection as _db_conn_mod
+        return _db_conn_mod._pool_instance is not None
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Cached DB read wrappers — avoids a round-trip on every Streamlit rerun.
+# Each write/append/delete function calls <wrapper>.clear() to invalidate.
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=300)
+def _cached_quick_amounts_pg():
+    from db.config import load_quick_amounts_pg
+    return load_quick_amounts_pg()
+
+
+@st.cache_data(ttl=300)
+def _cached_censor_words_pg() -> set:
+    from db.config import load_censor_words_pg
+    return load_censor_words_pg()
+
+
+@st.cache_data(ttl=60)
+def _cached_fleet_pg():
+    from db.fleet import load_fleet_pg
+    return load_fleet_pg()
+
+
+@st.cache_data(ttl=60)
+def _cached_truck_types_pg() -> dict:
+    from db.fleet import load_truck_types_pg
+    return load_truck_types_pg()
+
+
+@st.cache_data(ttl=60)
+def _cached_off_schedule_defaults_pg() -> dict:
+    from db.config import load_off_schedule_defaults_pg
+    return load_off_schedule_defaults_pg()
+
+
+@st.cache_data(ttl=30)
+def _cached_auth_users_pg() -> dict:
+    from db.auth import load_auth_users_pg
+    return load_auth_users_pg()
+
+
+@st.cache_data(ttl=30)
+def _cached_audit_entries_pg() -> list:
+    from db.audit import load_audit_entries_pg
+    return load_audit_entries_pg()
+
+
+@st.cache_data(ttl=30)
+def _cached_batch_history_pg() -> list:
+    from db.batch import load_batch_history_pg
+    return load_batch_history_pg()
+
+
+@st.cache_data(ttl=30)
+def _cached_duration_history_pg() -> list:
+    from db.durations import load_duration_history_pg
+    return load_duration_history_pg()
+
+
+@st.cache_data(ttl=300)
 def load_quick_amounts():
+    if _pg_is_live():
+        try:
+            return _cached_quick_amounts_pg()
+        except Exception:
+            pass
     try:
         with open("shortage_quick_amounts.json", "r") as f:
             return json.load(f)
@@ -41,7 +137,7 @@ QUICK_AMOUNTS_MAP = load_quick_amounts()
 # App metadata (do not edit)
 _APP_VERSION = "1.7.5"
 _APP_DATE = "20260512"
-_APP_BUILD = 108
+_APP_BUILD = 114
 _STARTUP_TOTAL_STEPS = 6
 _ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[2m"
@@ -49,6 +145,25 @@ _ANSI_CYAN = "\033[36m"
 _ANSI_BLUE = "\033[94m"
 _ANSI_GREEN = "\033[92m"
 _ANSI_YELLOW = "\033[93m"
+
+# Process-scoped startup state — must survive Streamlit script re-executions,
+# which re-run ALL top-level assignments on every rerun.  Using sys as the
+# persistent backing store (a process-level singleton) gives the same semantics
+# as os.environ had without polluting the process environment.
+import sys as _startup_sys
+_STARTUP_STATE: dict = _startup_sys.__dict__.setdefault(
+    "_truckapp_startup_state",
+    {
+        "timing_owner": None,   # app_key that owns the current timing run
+        "timing_done": None,    # app_key when timing is complete
+        "timing_start": None,   # float: perf_counter at first step
+        "timing_last": None,    # float: perf_counter at previous step
+        "timing_step": 0,       # int: last emitted step number
+        "total_seconds": None,  # float: backend startup duration
+        "urls_printed": None,   # app_key when URL banner was printed
+        "version_printed": None, # app_key when version banner was printed
+    },
+)
 
 
 def _startup_progress_app_key() -> str:
@@ -66,37 +181,22 @@ def _emit_startup_timed_step(step_number: int, label: str) -> None:
     """Emit one startup milestone with per-step and cumulative timing."""
     try:
         app_key = _startup_progress_app_key()
-        if os.environ.get("TRUCKAPP_STARTUP_TIMING_DONE") == app_key:
+        if _STARTUP_STATE["timing_done"] == app_key:
             return
-
-        start_key = "TRUCKAPP_STARTUP_TIMING_START"
-        last_key = "TRUCKAPP_STARTUP_TIMING_LAST"
-        step_key = "TRUCKAPP_STARTUP_TIMING_STEP"
-        owner_key = "TRUCKAPP_STARTUP_TIMING_OWNER"
 
         now = time.perf_counter()
 
-        if os.environ.get(owner_key) != app_key:
-            os.environ[owner_key] = app_key
-            os.environ[start_key] = str(now)
-            os.environ[last_key] = str(now)
-            os.environ[step_key] = "0"
+        if _STARTUP_STATE["timing_owner"] != app_key:
+            _STARTUP_STATE["timing_owner"] = app_key
+            _STARTUP_STATE["timing_start"] = now
+            _STARTUP_STATE["timing_last"] = now
+            _STARTUP_STATE["timing_step"] = 0
 
-        try:
-            current_step = int(os.environ.get(step_key, "0") or "0")
-        except Exception:
-            current_step = 0
-        if int(step_number) <= current_step:
+        if int(step_number) <= _STARTUP_STATE["timing_step"]:
             return
 
-        try:
-            start_ts = float(os.environ.get(start_key, str(now)) or str(now))
-        except Exception:
-            start_ts = now
-        try:
-            last_ts = float(os.environ.get(last_key, str(now)) or str(now))
-        except Exception:
-            last_ts = now
+        start_ts = _STARTUP_STATE["timing_start"] or now
+        last_ts = _STARTUP_STATE["timing_last"] or now
 
         step_seconds = max(0.0, now - last_ts)
         total_seconds = max(0.0, now - start_ts)
@@ -107,8 +207,8 @@ def _emit_startup_timed_step(step_number: int, label: str) -> None:
         print(_colorize_startup_line(log_line, _ANSI_CYAN), flush=True)
         logging.info(log_line)
 
-        os.environ[last_key] = str(now)
-        os.environ[step_key] = str(int(step_number))
+        _STARTUP_STATE["timing_last"] = now
+        _STARTUP_STATE["timing_step"] = int(step_number)
     except Exception:
         pass
 
@@ -117,25 +217,19 @@ def _emit_startup_total_once() -> None:
     """Emit one final startup total timing line."""
     try:
         app_key = _startup_progress_app_key()
-        if os.environ.get("TRUCKAPP_STARTUP_TIMING_DONE") == app_key:
+        if _STARTUP_STATE["timing_done"] == app_key:
             return
-
-        owner_key = "TRUCKAPP_STARTUP_TIMING_OWNER"
-        start_key = "TRUCKAPP_STARTUP_TIMING_START"
-        if os.environ.get(owner_key) != app_key:
+        if _STARTUP_STATE["timing_owner"] != app_key:
             return
 
         now = time.perf_counter()
-        try:
-            start_ts = float(os.environ.get(start_key, str(now)) or str(now))
-        except Exception:
-            start_ts = now
+        start_ts = _STARTUP_STATE["timing_start"] or now
         total_seconds = max(0.0, now - start_ts)
         total_line = f"[TruckApp][startup] Backend startup load time: {total_seconds:.3f}s"
         print(_colorize_startup_line(total_line, _ANSI_GREEN), flush=True)
         logging.info(total_line)
-        os.environ["TRUCKAPP_STARTUP_TOTAL_SECONDS"] = f"{total_seconds:.3f}"
-        os.environ["TRUCKAPP_STARTUP_TIMING_DONE"] = app_key
+        _STARTUP_STATE["total_seconds"] = total_seconds
+        _STARTUP_STATE["timing_done"] = app_key
     except Exception:
         pass
 
@@ -144,9 +238,9 @@ def _emit_startup_urls_banner_once() -> None:
     """Print a final URL banner as the last startup output block."""
     try:
         app_key = _startup_progress_app_key()
-        if os.environ.get("TRUCKAPP_STARTUP_URLS_PRINTED") == app_key:
+        if _STARTUP_STATE["urls_printed"] == app_key:
             return
-        os.environ["TRUCKAPP_STARTUP_URLS_PRINTED"] = app_key
+        _STARTUP_STATE["urls_printed"] = app_key
 
         port_raw = str(os.getenv("STREAMLIT_SERVER_PORT") or "8501").strip()
         try:
@@ -182,9 +276,9 @@ def _emit_startup_version_banner_once():
     """Print the running app version once per server process."""
     try:
         app_key = f"{_APP_VERSION}|{_APP_DATE}|{_APP_BUILD}|{os.path.basename(__file__)}"
-        if os.environ.get("TRUCKAPP_VERSION_BANNER_PRINTED") == app_key:
+        if _STARTUP_STATE["version_printed"] == app_key:
             return
-        os.environ["TRUCKAPP_VERSION_BANNER_PRINTED"] = app_key
+        _STARTUP_STATE["version_printed"] = app_key
         print(
             f"[TruckApp] Running app version v{_APP_VERSION} ({_APP_DATE}) build {_APP_BUILD}",
             flush=True,
@@ -240,14 +334,14 @@ def _emit_message_toast(level: str, body, icon=None):
         return None
 
     default_icons = {
-        "warning": "⚠️",
-        "error": "❌",
-        "success": "✅",
-        "info": "ℹ️",
+        "warning": "??",
+        "error": "?",
+        "success": "?",
+        "info": "??",
     }
     icon_value = str(icon).strip() if icon is not None else ""
     if not icon_value:
-        icon_value = default_icons.get(str(level or "").strip().lower(), "ℹ️")
+        icon_value = default_icons.get(str(level or "").strip().lower(), "??")
 
     try:
         st.toast(text, icon=icon_value)
@@ -305,194 +399,33 @@ def _install_global_toast_message_overrides() -> None:
 
 _install_global_toast_message_overrides()
 
-# Enforce a consistent top-right visual style for all Streamlit toasts.
-st.markdown(
-    """
-    <style>
-    [data-testid="stToastContainer"] {
-        top: 0.85rem !important;
-        right: 0.85rem !important;
-        left: auto !important;
-        bottom: auto !important;
-        width: min(92vw, 430px) !important;
-        max-width: min(92vw, 430px) !important;
-        z-index: 1800 !important;
-    }
-    @supports (padding: max(0px)) {
-        [data-testid="stToastContainer"] {
-            top: calc(0.85rem + env(safe-area-inset-top)) !important;
-            right: calc(0.85rem + env(safe-area-inset-right)) !important;
-        }
-    }
-    [data-testid="stToast"] {
-        border-radius: 12px !important;
-        border: 1px solid rgba(125, 211, 252, 0.45) !important;
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.93)) !important;
-        color: #e2e8f0 !important;
-        box-shadow: 0 14px 32px rgba(2, 6, 23, 0.42) !important;
-        backdrop-filter: blur(6px) !important;
-        -webkit-backdrop-filter: blur(6px) !important;
-    }
-    [data-testid="stToast"] p {
-        color: #e2e8f0 !important;
-        font-weight: 600 !important;
-        line-height: 1.3 !important;
-    }
-    @media (max-width: 980px) {
-        [data-testid="stToastContainer"] {
-            top: 0.55rem !important;
-            right: 0.55rem !important;
-            width: min(96vw, 420px) !important;
-            max-width: min(96vw, 420px) !important;
-        }
-        @supports (padding: max(0px)) {
-            [data-testid="stToastContainer"] {
-                top: calc(0.55rem + env(safe-area-inset-top)) !important;
-                right: calc(0.55rem + env(safe-area-inset-right)) !important;
-            }
-        }
-    }
-    /* Hide skeleton loaders from auto-refresh timer components */
-    [class*="_auto_refresh"] {
-        margin: 0 !important;
-        padding: 0 !important;
-        min-height: 0 !important;
-        height: 0 !important;
-        overflow: hidden !important;
-    }
-    [class*="_auto_refresh"] > div,
-    [class*="_auto_refresh"] iframe {
-        margin: 0 !important;
-        padding: 0 !important;
-        min-height: 0 !important;
-        height: 0 !important;
-        overflow: hidden !important;
-        border: 0 !important;
-    }
-    [class*="_auto_refresh"] [data-testid="stSkeleton"],
-    [class*="_auto_refresh"] .stSkeleton {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-    }
-    /* Truck button base polish */
-    button[kind="primary"] {
-        border-radius: 14px !important;
-        transition: filter 0.10s ease, transform 0.10s ease !important;
-    }
-    button[kind="primary"]:hover {
-        filter: brightness(1.13) !important;
-        transform: translateY(-1px) !important;
-    }
-    button[kind="primary"]:active {
-        filter: brightness(0.88) !important;
-        transform: translateY(1px) !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# -- PostgreSQL connection pool -----------------------------------------------
+import os as _os
+if _os.environ.get("TRUCKAPP_PG_DBNAME"):
+    try:
+        from db.connection import init_pool as _init_pool
 
+        @st.cache_resource
+        def _db_pool():
+            return _init_pool()
 
-def _inject_pwa_bootstrap() -> None:
-    """Inject mobile/PWA metadata and service worker registration into the parent document."""
-    components.html(
-        """
-        <script>
-        (async () => {
-            const parentWin = window.parent;
-            if (!parentWin || !parentWin.document) {
-                return;
-            }
-            const doc = parentWin.document;
-            if (doc.documentElement.dataset.truckappPwaInit === "1") {
-                return;
-            }
-            doc.documentElement.dataset.truckappPwaInit = "1";
+        _db_pool()
+    except Exception as _pg_err:
+        import logging as _logging
+        import traceback as _traceback
+        _logging.error(
+            "PostgreSQL pool init FAILED ? app will fall back to flat-file I/O.\n"
+            "Host: %s  DB: %s  User: %s\nError: %s\n%s",
+            _os.environ.get("TRUCKAPP_PG_HOST", "<unset>"),
+            _os.environ.get("TRUCKAPP_PG_DBNAME", "<unset>"),
+            _os.environ.get("TRUCKAPP_PG_USER", "<unset>"),
+            _pg_err,
+            _traceback.format_exc(),
+        )
+# ----------------------------------------------------------------------------
 
-            const ensureMeta = (name, content, attr = "name") => {
-                const selector = `meta[${attr}="${name}"]`;
-                let el = doc.head.querySelector(selector);
-                if (!el) {
-                    el = doc.createElement("meta");
-                    el.setAttribute(attr, name);
-                    doc.head.appendChild(el);
-                }
-                el.setAttribute("content", content);
-            };
-
-            const ensureLink = (rel, href) => {
-                let el = doc.head.querySelector(`link[rel="${rel}"]`);
-                if (!el) {
-                    el = doc.createElement("link");
-                    el.setAttribute("rel", rel);
-                    doc.head.appendChild(el);
-                }
-                el.setAttribute("href", href);
-                return el;
-            };
-
-            ensureMeta("viewport", "width=device-width, initial-scale=1, viewport-fit=cover");
-            ensureMeta("theme-color", "#0f172a");
-            ensureMeta("color-scheme", "dark");
-            ensureMeta("format-detection", "telephone=no");
-            ensureMeta("apple-mobile-web-app-capable", "yes");
-            ensureMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
-            ensureMeta("apple-mobile-web-app-title", "TruckApp");
-            ensureMeta("mobile-web-app-capable", "yes");
-
-            const staticCandidates = ["/app/static", "/static", "./static"];
-            const assetMatchesType = async (url, expectedTypes) => {
-                try {
-                    const resp = await fetch(url, { method: "GET", cache: "no-store" });
-                    if (!resp.ok) {
-                        return false;
-                    }
-                    const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
-                    return expectedTypes.some((hint) => contentType.includes(String(hint).toLowerCase()));
-                } catch (_) {
-                    return false;
-                }
-            };
-
-            let staticRoot = null;
-            let staticWorkerAvailable = false;
-            for (const candidate of staticCandidates) {
-                const manifestOk = await assetMatchesType(`${candidate}/manifest.webmanifest`, ["manifest", "json"]);
-                const swOk = await assetMatchesType(`${candidate}/sw.js`, ["javascript", "ecmascript"]);
-                if (manifestOk) {
-                    staticRoot = candidate;
-                    staticWorkerAvailable = swOk;
-                    break;
-                }
-            }
-
-            if (!staticRoot) {
-                return;
-            }
-
-            ensureLink("manifest", `${staticRoot}/manifest.webmanifest`);
-            const favicon = ensureLink("icon", `${staticRoot}/icons/truckapp-icon-192.png`);
-            favicon.setAttribute("sizes", "192x192");
-            favicon.setAttribute("type", "image/png");
-            const appleIcon = ensureLink("apple-touch-icon", `${staticRoot}/icons/truckapp-icon-180.png`);
-            appleIcon.setAttribute("sizes", "180x180");
-            appleIcon.setAttribute("type", "image/png");
-
-            if (staticWorkerAvailable && "serviceWorker" in parentWin.navigator) {
-                try {
-                    const swScope = new URL(`${staticRoot.replace(/\\/$/, "")}/`, parentWin.location.origin).pathname;
-                    await parentWin.navigator.serviceWorker.register(`${staticRoot}/sw.js`, { scope: swScope });
-                } catch (_) {
-                    // Non-fatal: app still functions as normal web app without SW.
-                }
-            }
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
+# Inject base global CSS (toast positioning, button polish, caption hiding).
+inject_global_styles()
 
 
 _inject_pwa_bootstrap()
@@ -500,8 +433,9 @@ _inject_pwa_bootstrap()
 
 def _inject_client_startup_timing_probe() -> None:
     """Measure browser-perceived startup timing and detect full render completion."""
-    backend_total_seconds = str(os.environ.get("TRUCKAPP_STARTUP_TOTAL_SECONDS") or "").strip()
-    components.html(
+    _bts = _STARTUP_STATE.get("total_seconds")
+    backend_total_seconds = f"{_bts:.3f}" if _bts is not None else ""
+    st.html(
         f"""
         <script>
         (() => {{
@@ -620,22 +554,9 @@ def _inject_client_startup_timing_probe() -> None:
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
-
-# Hide always-visible helper captions. Keep guidance on field hover via widget `help`.
-st.markdown(
-    """
-    <style>
-    div[data-testid="stCaptionContainer"] {
-        display: none !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # ==========================================================
 # CONFIG
@@ -1106,6 +1027,13 @@ def _normalize_chat_censor_words(raw_words) -> set[str]:
 
 
 def load_chat_censor_words() -> set[str]:
+    if _pg_is_live():
+        try:
+            words = _cached_censor_words_pg()
+            if words:
+                return words
+        except Exception:
+            pass
     path = _chat_censor_words_path()
     loaded_words: set[str] = set()
 
@@ -1131,9 +1059,16 @@ def load_chat_censor_words() -> set[str]:
 
 
 def _save_chat_censor_words(words) -> bool:
-    path = _chat_censor_words_path()
     normalized_words = _normalize_chat_censor_words(words)
-
+    if _pg_is_live():
+        try:
+            from db.config import save_censor_words_pg
+            result = save_censor_words_pg(normalized_words)
+            _cached_censor_words_pg.clear()
+            return result
+        except Exception:
+            pass
+    path = _chat_censor_words_path()
     payload: dict = {}
     if os.path.exists(path):
         try:
@@ -1245,6 +1180,11 @@ def _fleet_path() -> str:
 
 
 def load_fleet_file() -> list[int] | None:
+    if _pg_is_live():
+        try:
+            return _cached_fleet_pg()
+        except Exception:
+            pass
     path = _fleet_path()
     if not os.path.exists(path):
         return None
@@ -1261,6 +1201,14 @@ def load_fleet_file() -> list[int] | None:
 
 
 def save_fleet_file(fleet: list[int]):
+    if _pg_is_live():
+        try:
+            from db.fleet import save_fleet_pg
+            save_fleet_pg(fleet)
+            _cached_fleet_pg.clear()
+            return
+        except Exception:
+            pass
     path = _fleet_path()
     try:
         existing: dict = {}
@@ -1295,6 +1243,11 @@ def _default_truck_type(truck_num: int) -> str:
 
 
 def load_truck_types() -> dict[int, str]:
+    if _pg_is_live():
+        try:
+            return _cached_truck_types_pg()
+        except Exception:
+            pass
     path = _fleet_path()
     if not os.path.exists(path):
         return {}
@@ -1309,6 +1262,14 @@ def load_truck_types() -> dict[int, str]:
 
 
 def save_truck_types(types: dict[int, str]) -> None:
+    if _pg_is_live():
+        try:
+            from db.fleet import save_truck_types_pg
+            save_truck_types_pg(types)
+            _cached_truck_types_pg.clear()
+            return
+        except Exception:
+            pass
     path = _fleet_path()
     try:
         existing: dict = {}
@@ -1412,6 +1373,11 @@ def _batch_history_path() -> str:
 
 
 def _load_audit_history() -> list[dict]:
+    if _pg_is_live():
+        try:
+            return _cached_audit_entries_pg()
+        except Exception:
+            pass
     path = _audit_history_path()
     try:
         mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
@@ -1451,6 +1417,14 @@ def _load_audit_history() -> list[dict]:
 
 
 def _save_audit_history(entries: list[dict]) -> bool:
+    if _pg_is_live():
+        try:
+            from db.audit import save_audit_entries_pg
+            result = save_audit_entries_pg(entries)
+            _cached_audit_entries_pg.clear()
+            return result
+        except Exception:
+            pass
     path = _audit_history_path()
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -1917,6 +1891,11 @@ def _render_mobile_audit_photo_uploader(
 
 
 def _load_batch_history() -> list[dict]:
+    if _pg_is_live():
+        try:
+            return _cached_batch_history_pg()
+        except Exception:
+            pass
     path = _batch_history_path()
     try:
         mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
@@ -1956,6 +1935,14 @@ def _load_batch_history() -> list[dict]:
 
 
 def _save_batch_history(entries: list[dict]) -> bool:
+    if _pg_is_live():
+        try:
+            from db.batch import save_batch_history_pg
+            result = save_batch_history_pg(entries)
+            _cached_batch_history_pg.clear()
+            return result
+        except Exception:
+            pass
     path = _batch_history_path()
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -1995,6 +1982,15 @@ def _append_batch_history_entry(
         "wearers": int(wearers_num),
         "action": str(action or "assign"),
     }
+
+    if _pg_is_live():
+        try:
+            from db.batch import append_batch_entry_pg
+            result = append_batch_entry_pg(entry)
+            _cached_batch_history_pg.clear()
+            return result
+        except Exception:
+            pass
 
     entries = _load_batch_history()
     entries.append(entry)
@@ -2069,6 +2065,16 @@ def _mark_audit_warning_applied(entry_id: str) -> bool:
     if not target_id:
         return False
 
+    if _pg_is_live():
+        try:
+            from db.audit import mark_audit_warning_applied_pg
+            run_date_key = _current_run_date_iso()
+            result = mark_audit_warning_applied_pg(target_id, run_date_key)
+            _cached_audit_entries_pg.clear()
+            return result
+        except Exception:
+            pass
+
     run_date_key = _current_run_date_iso()
     entries = _load_audit_history()
     changed = False
@@ -2088,6 +2094,15 @@ def _delete_audit_history_entry(entry_id: str) -> bool:
     target_id = str(entry_id or "").strip()
     if not target_id:
         return False
+
+    if _pg_is_live():
+        try:
+            from db.audit import delete_audit_entry_pg
+            result = delete_audit_entry_pg(target_id)
+            _cached_audit_entries_pg.clear()
+            return result
+        except Exception:
+            pass
 
     entries = _load_audit_history()
     filtered = [
@@ -2355,7 +2370,7 @@ def _render_mobile_audit_dock_card(*, max_items: int = 6, recent_days: int = 7, 
     )
 
     st.markdown(dock_html, unsafe_allow_html=True)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -2412,8 +2427,7 @@ def _render_mobile_audit_dock_card(*, max_items: int = 6, recent_days: int = 7, 
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -2468,6 +2482,17 @@ def _append_audit_history_entry(
         "warn_next_load": bool(warn_on_next_load),
         "warn_applied_run_date": None,
     }
+
+    if _pg_is_live():
+        try:
+            from db.audit import append_audit_entry_pg
+            saved = append_audit_entry_pg(entry)
+            if saved:
+                st.session_state["audit_last_added_entry_id"] = str(entry.get("entry_id") or "")
+                _cached_audit_entries_pg.clear()
+            return saved
+        except Exception:
+            pass
 
     entries = _load_audit_history()
     entries.append(entry)
@@ -4718,7 +4743,13 @@ def _off_schedule_has_entries(schedule: dict[int, list[int]] | None) -> bool:
 
 
 def load_off_schedule_defaults() -> dict[int, list[int]]:
-    path = _off_schedule_defaults_path()
+    if _pg_is_live():
+        try:
+            result = _cached_off_schedule_defaults_pg()
+            if result and _off_schedule_has_entries(result):
+                return result
+        except Exception:
+            pass
     empty_schedule = {i: [] for i in range(1, 6)}
 
     def _read_schedule_file(candidate_path: str) -> dict[int, list[int]]:
@@ -4729,6 +4760,7 @@ def load_off_schedule_defaults() -> dict[int, list[int]]:
         except Exception:
             return {i: [] for i in range(1, 6)}
 
+    path = _off_schedule_defaults_path()
     if os.path.exists(path):
         primary = _read_schedule_file(path)
         if _off_schedule_has_entries(primary):
@@ -4752,6 +4784,14 @@ def load_off_schedule_defaults() -> dict[int, list[int]]:
 
 
 def save_off_schedule_defaults(schedule):
+    if _pg_is_live():
+        try:
+            from db.config import save_off_schedule_defaults_pg
+            save_off_schedule_defaults_pg(schedule)
+            _cached_off_schedule_defaults_pg.clear()
+            return
+        except Exception:
+            pass
     path = _off_schedule_defaults_path()
     normalized = _normalize_off_schedule(schedule or {})
     payload = {str(day): list(trucks) for day, trucks in normalized.items()}
@@ -4763,26 +4803,6 @@ def save_off_schedule_defaults(schedule):
             json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
-
-
-def _normalize_auth_role(role_value) -> str:
-    role = str(role_value or "").strip().lower()
-    legacy_role_map = {
-        "admin": AUTH_ROLE_ADMIN,
-        "fleet": AUTH_ROLE_ADMIN,
-        "atl": AUTH_ROLE_ATL,
-        "supervisor": AUTH_ROLE_SUPERVISOR,
-        "lead": AUTH_ROLE_LEAD,
-        "management": AUTH_ROLE_ADMIN,
-        "manager": AUTH_ROLE_ADMIN,
-        "load": AUTH_ROLE_LOADER,
-        "loader": AUTH_ROLE_LOADER,
-        "operator": AUTH_ROLE_UNLOADER,
-        "unloader": AUTH_ROLE_UNLOADER,
-        "viewer": AUTH_ROLE_GUEST,
-        "guest": AUTH_ROLE_GUEST,
-    }
-    return legacy_role_map.get(role, AUTH_ROLE_GUEST)
 
 
 def _auth_role_label(role_value) -> str:
@@ -5421,9 +5441,9 @@ def _render_guest_live_status_pace_card():
         unsafe_allow_html=True,
     )
     with st.sidebar:
-        components.html(
+        st.html(
             _between_trucks_timer_script("[data-mini-pace-card='sidebar']", last_finish_ts),
-            height=0,
+            unsafe_allow_javascript=True,
         )
 
 
@@ -5535,9 +5555,9 @@ def _render_inprog_mini_pace_card():
         ),
         unsafe_allow_html=True,
     )
-    components.html(
+    st.html(
         _between_trucks_timer_script("[data-mini-pace-card='inprog']", last_finish_ts),
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -5593,19 +5613,6 @@ def _render_sidebar_load_unload_progress_card():
     )
 
 
-def _to_bool(value, default: bool = True) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    raw = str(value).strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
 def _default_role_workflow_settings() -> dict[str, dict[str, bool]]:
     normalized: dict[str, dict[str, bool]] = {}
     for role_key, role_defaults in ROLE_WORKFLOW_DEFAULTS.items():
@@ -5655,43 +5662,12 @@ def _role_has_short_sheet_access(role_value) -> bool:
     return bool(role_settings.get(ROLE_WORKFLOW_SHORT_SHEET_ACCESS, False))
 
 
-def _is_bcrypt_hash(value: str) -> bool:
-    raw = str(value or "").strip()
-    return raw.startswith("$2a$") or raw.startswith("$2b$") or raw.startswith("$2y$")
-
-
-def _normalize_auth_users(raw_users) -> dict[str, dict]:
-    users_block = raw_users
-    if isinstance(raw_users, dict) and isinstance(raw_users.get("users"), dict):
-        users_block = raw_users.get("users")
-
-    if not isinstance(users_block, dict):
-        return {}
-
-    normalized: dict[str, dict] = {}
-    for username_raw, user_raw in users_block.items():
-        username_original = str(username_raw or "").strip()
-        username = username_original.lower()
-        if not username or not isinstance(user_raw, dict):
-            continue
-
-        password_value = str(user_raw.get("password") or "").strip()
-        if not password_value:
-            continue
-
-        display_name = str(user_raw.get("name") or username_original or username).strip() or username
-
-        normalized[username] = {
-            "name": display_name,
-            "password": password_value,
-            "role": _normalize_auth_role(user_raw.get("role")),
-            "enabled": _to_bool(user_raw.get("enabled"), True),
-        }
-
-    return normalized
-
-
 def _load_auth_users() -> dict[str, dict]:
+    if _pg_is_live():
+        try:
+            return _cached_auth_users_pg()
+        except Exception:
+            pass
     path = _auth_users_path()
     try:
         mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
@@ -5726,6 +5702,14 @@ def _load_auth_users() -> dict[str, dict]:
 
 
 def _save_auth_users(users):
+    if _pg_is_live():
+        try:
+            from db.auth import save_auth_users_pg
+            save_auth_users_pg(_normalize_auth_users(users))
+            _cached_auth_users_pg.clear()
+            return
+        except Exception:
+            pass
     path = _auth_users_path()
     normalized = _normalize_auth_users(users)
     payload = {"users": normalized}
@@ -5738,45 +5722,6 @@ def _save_auth_users(users):
         st.session_state.pop("_auth_users_cache", None)
     except Exception:
         pass
-
-
-def _normalize_auth_requests(raw_requests) -> dict[str, dict]:
-    requests_block = raw_requests
-    if isinstance(raw_requests, dict) and isinstance(raw_requests.get("requests"), dict):
-        requests_block = raw_requests.get("requests")
-
-    if not isinstance(requests_block, dict):
-        return {}
-
-    normalized: dict[str, dict] = {}
-    for username_raw, request_raw in requests_block.items():
-        username = str(username_raw or "").strip()
-        if not username or " " in username or not isinstance(request_raw, dict):
-            continue
-
-        status_value = str(request_raw.get("status") or "pending").strip().lower()
-        if status_value not in {"pending", "approved", "rejected"}:
-            status_value = "pending"
-
-        password_value = str(request_raw.get("password") or "").strip()
-        if status_value == "pending" and not password_value:
-            continue
-
-        normalized[username] = {
-            "username": username,
-            "name": username,
-            "password": password_value,
-            "requested_role": _normalize_auth_role(
-                request_raw.get("requested_role") if request_raw.get("requested_role") is not None else request_raw.get("role")
-            ),
-            "status": status_value,
-            "requested_at": str(request_raw.get("requested_at") or ""),
-            "reviewed_at": str(request_raw.get("reviewed_at") or ""),
-            "reviewed_by": str(request_raw.get("reviewed_by") or ""),
-            "notes": str(request_raw.get("notes") or "").strip(),
-        }
-
-    return normalized
 
 
 def _load_auth_requests() -> dict[str, dict]:
@@ -5891,6 +5836,12 @@ def _normalize_communications_messages(raw_messages) -> list[dict]:
 
 
 def _load_communications_messages() -> list[dict]:
+    if _pg_is_live():
+        try:
+            from db.communications import load_messages_pg
+            return load_messages_pg()
+        except Exception:
+            pass
     path = _communications_path()
     try:
         mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
@@ -5950,6 +5901,17 @@ def _append_communications_message(channel: str, username: str, message: str) ->
         return False, f"Message must be {COMMUNICATIONS_MAX_MESSAGE_LENGTH} characters or less."
     message_text = _censor_chat_message(message_text_raw)
 
+    if _pg_is_live():
+        try:
+            from db.communications import append_message_pg
+            return append_message_pg(
+                _normalize_communications_channel(channel),
+                str(username or "Unknown").strip() or "Unknown",
+                message_text,
+            )
+        except Exception:
+            pass
+
     all_messages = _load_communications_messages()
     message_id = _sanitize_communications_message_id(
         f"m{int(time.time() * 1000)}-{int(time.perf_counter_ns() % 1_000_000)}",
@@ -5983,6 +5945,23 @@ def _delete_communications_message(message_id: str, actor_username: str, actor_r
     target_id = _sanitize_communications_message_id(message_id, "")
     if not target_id:
         return False, "Invalid message id.", None
+
+    if _pg_is_live():
+        try:
+            from db.communications import delete_message_pg, load_messages_pg as _lm_pg
+            msgs = _lm_pg()
+            found_msg: dict | None = next(
+                (m for m in msgs if _sanitize_communications_message_id(m.get("id"), "") == target_id),
+                None,
+            )
+            if found_msg is None:
+                return False, "Message was not found.", None
+            if not _can_delete_communications_message(found_msg, actor_username, actor_role):
+                return False, "You can only delete your own messages.", None
+            ok = delete_message_pg(target_id)
+            return ok, "Message deleted." if ok else "Message was not found.", found_msg if ok else None
+        except Exception:
+            pass
 
     all_messages = _load_communications_messages()
     kept_messages: list[dict] = []
@@ -6020,6 +5999,14 @@ def _refresh_communications_censor_words() -> int:
 
 
 def _prune_communications_messages_by_age(max_age_days: float) -> tuple[int, int]:
+    if _pg_is_live():
+        try:
+            from db.communications import prune_messages_by_age_pg
+            days = max(1.0, float(max_age_days or 0.0))
+            total_before, deleted = prune_messages_by_age_pg(days)
+            return deleted, total_before - deleted
+        except Exception:
+            pass
     all_messages = _load_communications_messages()
     if not all_messages:
         return 0, 0
@@ -6042,6 +6029,13 @@ def _prune_communications_messages_by_age(max_age_days: float) -> tuple[int, int
 
 
 def _keep_latest_communications_messages(keep_count: int) -> tuple[int, int]:
+    if _pg_is_live():
+        try:
+            from db.communications import keep_latest_messages_pg
+            total_before, deleted = keep_latest_messages_pg(max(0, int(keep_count or 0)))
+            return deleted, total_before - deleted
+        except Exception:
+            pass
     all_messages = _load_communications_messages()
     if not all_messages:
         return 0, 0
@@ -6055,6 +6049,12 @@ def _keep_latest_communications_messages(keep_count: int) -> tuple[int, int]:
 
 
 def _clear_communications_messages() -> int:
+    if _pg_is_live():
+        try:
+            from db.communications import clear_all_messages_pg
+            return clear_all_messages_pg()
+        except Exception:
+            pass
     all_messages = _load_communications_messages()
     removed_count = len(all_messages)
     if removed_count > 0:
@@ -6063,6 +6063,12 @@ def _clear_communications_messages() -> int:
 
 
 def _latest_communications_message_ts(messages: list[dict] | None = None) -> float:
+    if messages is None and _pg_is_live():
+        try:
+            from db.communications import latest_message_ts_pg
+            return latest_message_ts_pg(COMMUNICATIONS_CHANNEL)
+        except Exception:
+            pass
     entries = messages if isinstance(messages, list) else _load_communications_messages()
     latest_ts = 0.0
     for entry in entries:
@@ -6232,6 +6238,11 @@ def _normalize_duration_history_record(item: dict) -> dict | None:
 
 
 def load_duration_history() -> list[dict]:
+    if _pg_is_live():
+        try:
+            return _cached_duration_history_pg()
+        except Exception:
+            pass
     path = _durations_path()
     try:
         mtime = float(os.path.getmtime(path)) if os.path.exists(path) else -1.0
@@ -6288,6 +6299,14 @@ def append_load_duration(truck: int, seconds: int):
         "load_day_num": int(resolved_day) if resolved_day is not None else None,
         "seconds": int(seconds),
     }
+    if _pg_is_live():
+        try:
+            from db.durations import append_load_duration_pg
+            append_load_duration_pg(record)
+            _cached_duration_history_pg.clear()
+            return
+        except Exception:
+            pass
     try:
         data = load_duration_history()
         data.append(record)
@@ -6303,26 +6322,38 @@ def remove_abnormal_loadtimes(min_seconds: int = 120, max_seconds: int = 1800) -
     min_secs = max(0, int(min_seconds))
     max_secs = max(min_secs, int(max_seconds))
 
+    _used_pg = False
     removed_history = 0
-    kept_history: list[dict] = []
-    for entry in load_duration_history():
-        sec_val = None
+    if _pg_is_live():
         try:
-            sec_val = int(entry.get("seconds"))
+            from db.durations import remove_abnormal_loadtimes_pg
+            _pg_removed, _pg_kept, _pg_total = remove_abnormal_loadtimes_pg(min_secs, max_secs)
+            removed_history = _pg_removed
+            _used_pg = True
+            _cached_duration_history_pg.clear()
         except Exception:
+            pass
+
+    if not _used_pg:
+        kept_history: list[dict] = []
+        for entry in load_duration_history():
             sec_val = None
+            try:
+                sec_val = int(entry.get("seconds"))
+            except Exception:
+                sec_val = None
 
-        if sec_val is not None and (sec_val < min_secs or sec_val > max_secs):
-            removed_history += 1
-            continue
-        kept_history.append(entry)
+            if sec_val is not None and (sec_val < min_secs or sec_val > max_secs):
+                removed_history += 1
+                continue
+            kept_history.append(entry)
 
-    try:
-        with open(_durations_path(), "w", encoding="utf-8") as f:
-            json.dump(kept_history, f, ensure_ascii=False, indent=2)
-        _invalidate_load_duration_history_cache()
-    except Exception:
-        pass
+        try:
+            with open(_durations_path(), "w", encoding="utf-8") as f:
+                json.dump(kept_history, f, ensure_ascii=False, indent=2)
+            _invalidate_load_duration_history_cache()
+        except Exception:
+            pass
 
     removed_trucks: set[int] = set()
     removed_live_entries = 0
@@ -6430,6 +6461,20 @@ def _deserialize_state_payload(data: dict) -> dict:
 
 
 def load_state() -> dict:
+    if _pg_is_live():
+        try:
+            from db.state import load_state_pg
+            run_date_key = _current_run_date_key() or date.today().isoformat()
+            data = load_state_pg(run_date_key)
+            if data:
+                data = _deserialize_state_payload(data)
+                if "unfinished_set" not in data:
+                    data["unfinished_set"] = set()
+                if "prev_day_used_trucks" not in data:
+                    data["prev_day_used_trucks"] = set()
+                return data
+        except Exception:
+            pass
     path = _state_path()
     if not os.path.exists(path):
         logging.warning(f"State file not found: {path}")
@@ -6518,6 +6563,16 @@ def save_state():
     if bool(st.session_state.get("archive_view_mode")):
         logging.debug("save_state() skipped: archive view mode is read-only")
         return
+    if _pg_is_live():
+        try:
+            from db.state import save_state_pg
+            run_date_key = _current_run_date_key() or date.today().isoformat()
+            save_state_pg(run_date_key, _serialize_state())
+            save_off_schedule_defaults(st.session_state.get("off_schedule") or {})
+            logging.debug("save_state() called (PostgreSQL)")
+            return
+        except Exception:
+            pass
     path = _state_path()
     _write_state_file(path, _serialize_state())
     try:
@@ -6615,361 +6670,10 @@ def _apply_soft_auto_refresh(screen: str):
 
 
 def _inject_blank_page_watchdog(max_reloads: int = BLANK_PAGE_WATCHDOG_MAX_RELOADS):
-    max_reload_count = max(1, int(max_reloads or BLANK_PAGE_WATCHDOG_MAX_RELOADS))
-    is_mobile_client = _is_mobile_client()
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            try {{
-                const hostWin = window.parent || window;
-                const root = hostWin.document;
-                if (!hostWin || !root || hostWin.__truckBlankWatchdogBound) return;
-                hostWin.__truckBlankWatchdogBound = true;
+    """Thin shim — delegates to utils.ui_inject.inject_blank_page_watchdog."""
+    _inject_blank_page_watchdog_base(max_reloads, _is_mobile_client())
 
-                const MAX_RELOADS = {int(max_reload_count)};
-                const CHECK_MS = 1200;
-                const STALL_MS = 8500;
-                const TRANSIENT_MAX_MS = 12000;
-                const USER_ACTION_GRACE_MS = 9000;
-                const FAST_RESUME_HIDDEN_MS = 2 * 60 * 1000;
-                const IS_MOBILE_CLIENT = {str(bool(is_mobile_client)).lower()};
-                const WINDOW_MS = 15 * 60 * 1000;
-                const KEY_TS = "truckappBlankWatchdogTs";
-                const KEY_COUNT = "truckappBlankWatchdogCount";
 
-                const nowMs = () => Date.now();
-                const toFiniteNumber = (value) => {{
-                    const parsed = Number(value);
-                    return Number.isFinite(parsed) ? parsed : 0;
-                }};
-
-                const readReloadState = () => {{
-                    try {{
-                        const stamp = toFiniteNumber(hostWin.sessionStorage.getItem(KEY_TS));
-                        const count = toFiniteNumber(hostWin.sessionStorage.getItem(KEY_COUNT));
-                        if (!stamp || (nowMs() - stamp) > WINDOW_MS) {{
-                            return {{ stamp: 0, count: 0 }};
-                        }}
-                        return {{ stamp, count }};
-                    }} catch (e) {{
-                        return {{ stamp: 0, count: 0 }};
-                    }}
-                }};
-
-                const writeReloadState = (count) => {{
-                    try {{
-                        hostWin.sessionStorage.setItem(KEY_TS, String(nowMs()));
-                        hostWin.sessionStorage.setItem(KEY_COUNT, String(Math.max(0, count)));
-                    }} catch (e) {{}}
-                }};
-
-                const buildRecoveryUrl = (reason, count, stallMs, visibilityState, hiddenMs = null) => {{
-                    try {{
-                        const nextUrl = new hostWin.URL(hostWin.location.href);
-                        nextUrl.searchParams.set("diag_event", "blank_watchdog_reload");
-                        nextUrl.searchParams.set("diag_reason", String(reason || "unknown").slice(0, 48));
-                        nextUrl.searchParams.set("diag_count", String(Math.max(0, Number(count || 0))));
-                        if (Number.isFinite(stallMs)) {{
-                            nextUrl.searchParams.set("diag_stall_ms", String(Math.max(0, Math.round(stallMs))));
-                        }}
-                        if (Number.isFinite(hiddenMs)) {{
-                            nextUrl.searchParams.set("diag_hidden_ms", String(Math.max(0, Math.round(hiddenMs))));
-                        }}
-                        if (visibilityState) {{
-                            nextUrl.searchParams.set("diag_vis", String(visibilityState).slice(0, 16));
-                        }}
-                        return nextUrl.toString();
-                    }} catch (e) {{
-                        return null;
-                    }}
-                }};
-
-                const removeOverlayHost = () => {{
-                    try {{
-                        const overlayHost = root.getElementById('shop-notice-overlay-host');
-                        if (overlayHost) overlayHost.remove();
-                    }} catch (e) {{}}
-                }};
-
-                const isVisibleNode = (node, minWidth = 16, minHeight = 10) => {{
-                    try {{
-                        if (!node || typeof node.getBoundingClientRect !== "function") return false;
-                        const style = hostWin.getComputedStyle ? hostWin.getComputedStyle(node) : null;
-                        if (style) {{
-                            const opacity = Number(style.opacity);
-                            if (style.display === "none" || style.visibility === "hidden" || (!Number.isNaN(opacity) && opacity <= 0.02)) {{
-                                return false;
-                            }}
-                        }}
-                        const rect = node.getBoundingClientRect();
-                        return rect.width >= minWidth && rect.height >= minHeight;
-                    }} catch (e) {{
-                        return false;
-                    }}
-                }};
-
-                const hasVisibleMainContent = (container) => {{
-                    if (!container) return false;
-                    const selectors = [
-                        '[data-testid="stButton"]',
-                        '[data-testid="stSelectbox"]',
-                        '[data-testid="stMultiSelect"]',
-                        '[data-testid="stTextInput"]',
-                        '[data-testid="stNumberInput"]',
-                        '[data-testid="stTextArea"]',
-                        '[data-testid="stTable"]',
-                        '[data-testid="stDataFrame"]',
-                        '[data-testid="stAlert"]',
-                        '[data-testid="stHeading"]',
-                        '[data-testid="stMarkdownContainer"]',
-                        'button',
-                        'input',
-                        'textarea',
-                        'table'
-                    ].join(', ');
-                    const nodes = Array.from(container.querySelectorAll(selectors));
-                    for (const node of nodes) {{
-                        if (isVisibleNode(node)) return true;
-                    }}
-                    return false;
-                }};
-
-                let blankSinceMs = 0;
-                let transientSinceMs = 0;
-                let lastUserActionMs = nowMs();
-                let hiddenSinceMs = 0;
-                let pendingResumeHiddenMs = 0;
-                let resumeReloadQueued = false;
-
-                const resetRecoveryTimers = () => {{
-                    blankSinceMs = 0;
-                    transientSinceMs = 0;
-                }};
-
-                const markUserAction = () => {{
-                    lastUserActionMs = nowMs();
-                    resetRecoveryTimers();
-                }};
-
-                const hasTransientUi = () => Boolean(
-                    root.querySelector('[role="dialog"], [data-testid="stSpinner"], [data-testid="stStatusWidget"], [data-testid="stSkeleton"]')
-                );
-
-                const isRenderHealthy = () => {{
-                    const appRoot =
-                        root.querySelector('[data-testid="stAppViewContainer"]') ||
-                        root.querySelector('.stApp');
-                    if (!appRoot) return true;
-
-                    const style = hostWin.getComputedStyle ? hostWin.getComputedStyle(appRoot) : null;
-                    if (style && (style.display === "none" || style.visibility === "hidden")) {{
-                        return false;
-                    }}
-
-                    // Ignore transient Streamlit states briefly while the next render mounts.
-                    if (hasTransientUi()) {{
-                        if (!transientSinceMs) transientSinceMs = nowMs();
-                        if ((nowMs() - transientSinceMs) <= TRANSIENT_MAX_MS) {{
-                            return true;
-                        }}
-                    }} else {{
-                        transientSinceMs = 0;
-                    }}
-
-                    const mainContainer =
-                        root.querySelector('[data-testid="stMainBlockContainer"]') ||
-                        root.querySelector('[data-testid="stMain"]') ||
-                        root.querySelector('section.main');
-                    if (!mainContainer) return true;
-
-                    const rect =
-                        typeof mainContainer.getBoundingClientRect === "function"
-                            ? mainContainer.getBoundingClientRect()
-                            : {{ width: 0, height: 0 }};
-                    const hasArea = rect.width > 80 && rect.height > 60;
-                    const hasMeaningfulContent = hasVisibleMainContent(mainContainer);
-
-                    if (!hasArea) return false;
-                    if (!hasMeaningfulContent) return false;
-                    return true;
-                }};
-
-                const showManualRecoveryHint = (reason) => {{
-                    try {{
-                        if (root.getElementById("truckapp-blank-watchdog-hint")) return;
-                        const hint = root.createElement("div");
-                        hint.id = "truckapp-blank-watchdog-hint";
-                        const suffix = reason ? " (" + String(reason).slice(0, 28) + ")" : "";
-                        hint.textContent = "Render stalled after auto-retries" + suffix + ". Press Ctrl+F5 to hard refresh.";
-                        hint.style.position = "fixed";
-                        hint.style.right = "10px";
-                        hint.style.bottom = "10px";
-                        hint.style.zIndex = "2147483647";
-                        hint.style.background = "rgba(17,24,39,0.94)";
-                        hint.style.color = "#e5e7eb";
-                        hint.style.border = "1px solid rgba(148,163,184,0.55)";
-                        hint.style.borderRadius = "8px";
-                        hint.style.padding = "8px 10px";
-                        hint.style.fontSize = "12px";
-                        hint.style.fontWeight = "700";
-                        hint.style.boxShadow = "0 10px 25px rgba(0,0,0,0.35)";
-                        hint.style.pointerEvents = "none";
-                        root.body.appendChild(hint);
-                    }} catch (e) {{}}
-                }};
-
-                const recoverWithReload = (reason, stallMs, hiddenMs = null) => {{
-                    const state = readReloadState();
-                    if (state.count >= MAX_RELOADS) {{
-                        showManualRecoveryHint(reason);
-                        return;
-                    }}
-
-                    const nextCount = state.count + 1;
-                    writeReloadState(nextCount);
-                    removeOverlayHost();
-
-                    const target = buildRecoveryUrl(
-                        reason,
-                        nextCount,
-                        stallMs,
-                        root.visibilityState || "visible",
-                        hiddenMs,
-                    );
-                    try {{
-                        if (target) hostWin.location.replace(target);
-                        else hostWin.location.reload();
-                    }} catch (e) {{
-                        try {{ hostWin.location.reload(); }} catch (e2) {{}}
-                    }}
-                }};
-
-                const maybeRecover = (reason = "interval") => {{
-                    if (root.visibilityState === "hidden") return;
-
-                    if ((nowMs() - lastUserActionMs) < USER_ACTION_GRACE_MS) return;
-
-                    if (isRenderHealthy()) {{
-                        blankSinceMs = 0;
-                        return;
-                    }}
-
-                    // Wait for connectivity to return before forcing reload loops.
-                    if (hostWin.navigator && hostWin.navigator.onLine === false) {{
-                        if (!blankSinceMs) blankSinceMs = nowMs();
-                        return;
-                    }}
-
-                    removeOverlayHost();
-
-                    if (!blankSinceMs) {{
-                        blankSinceMs = nowMs();
-                        return;
-                    }}
-
-                    const stalledMs = nowMs() - blankSinceMs;
-                    if (stalledMs < STALL_MS) return;
-
-                    recoverWithReload(reason, stalledMs);
-                }};
-
-                const queueFastResumeReload = (reason, hiddenDurationMs, delayMs = 220) => {{
-                    if (!IS_MOBILE_CLIENT || hiddenDurationMs < FAST_RESUME_HIDDEN_MS) return false;
-                    pendingResumeHiddenMs = hiddenDurationMs;
-                    if (resumeReloadQueued) return true;
-                    if (hostWin.navigator && hostWin.navigator.onLine === false) return true;
-
-                    resumeReloadQueued = true;
-                    try {{
-                        hostWin.setTimeout(() => {{
-                            resumeReloadQueued = false;
-                            if ((root.visibilityState || "visible") === "hidden") return;
-                            if (hostWin.navigator && hostWin.navigator.onLine === false) return;
-
-                            const hiddenMsToReport = pendingResumeHiddenMs || hiddenDurationMs;
-                            pendingResumeHiddenMs = 0;
-                            recoverWithReload(
-                                `resume_${{String(reason || "visible").slice(0, 18)}}`,
-                                null,
-                                hiddenMsToReport,
-                            );
-                        }}, Math.max(60, Number(delayMs) || 0));
-                    }} catch (e) {{
-                        resumeReloadQueued = false;
-                    }}
-                    return true;
-                }};
-
-                const scheduleRecoveryCheck = (reason, delayMs = 160) => {{
-                    try {{
-                        hostWin.setTimeout(() => maybeRecover(reason), delayMs);
-                    }} catch (e) {{}}
-                }};
-
-                const handleResumeSignal = (reason, delayMs = 160) => {{
-                    const hiddenDurationMs = hiddenSinceMs ? Math.max(0, nowMs() - hiddenSinceMs) : 0;
-                    hiddenSinceMs = 0;
-                    resetRecoveryTimers();
-
-                    if (!queueFastResumeReload(reason, hiddenDurationMs, delayMs + 60)) {{
-                        pendingResumeHiddenMs = 0;
-                        scheduleRecoveryCheck(reason, delayMs);
-                    }}
-                }};
-
-                if (hostWin.__truckBlankWatchdogTimer) {{
-                    try {{ hostWin.clearInterval(hostWin.__truckBlankWatchdogTimer); }} catch (e) {{}}
-                }}
-                hostWin.__truckBlankWatchdogTimer = hostWin.setInterval(() => maybeRecover("interval"), CHECK_MS);
-
-                hostWin.addEventListener("pageshow", () => {{
-                    handleResumeSignal("pageshow", 180);
-                }}, {{ passive: true }});
-
-                hostWin.addEventListener("focus", () => {{
-                    handleResumeSignal("focus", 140);
-                }}, {{ passive: true }});
-
-                hostWin.addEventListener("online", () => {{
-                    if (pendingResumeHiddenMs >= FAST_RESUME_HIDDEN_MS) {{
-                        queueFastResumeReload("online", pendingResumeHiddenMs, 180);
-                        return;
-                    }}
-                    handleResumeSignal("online", 220);
-                }}, {{ passive: true }});
-
-                hostWin.addEventListener("pagehide", () => {{
-                    hiddenSinceMs = nowMs();
-                }}, {{ passive: true }});
-
-                root.addEventListener("visibilitychange", () => {{
-                    if ((root.visibilityState || "visible") === "hidden") {{
-                        hiddenSinceMs = nowMs();
-                        return;
-                    }}
-
-                    handleResumeSignal("visible", 200);
-                }}, {{ passive: true }});
-
-                root.addEventListener("pointerdown", markUserAction, true);
-                root.addEventListener("keydown", markUserAction, true);
-                root.addEventListener("touchstart", markUserAction, {{ passive: true, capture: true }});
-
-                root.addEventListener("readystatechange", () => {{
-                    if (root.readyState === "complete") {{
-                        scheduleRecoveryCheck("ready", 120);
-                    }}
-                }}, {{ passive: true }});
-
-                scheduleRecoveryCheck("boot", 260);
-            }} catch (e) {{}}
-        }})();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
 
 
 def _render_persistent_bottom_toast(
@@ -7011,7 +6715,7 @@ def _render_persistent_bottom_toast(
     background_color_json = json.dumps(background_color)
     border_color_json = json.dumps(border_color)
     text_color_json = json.dumps(text_color)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -7082,45 +6786,12 @@ def _render_persistent_bottom_toast(
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _show_login_failure_toast(message: str) -> None:
     st.session_state["auth_login_portal_error_message"] = str(message or "").strip()
-
-
-def _inject_inprogress_visibility_guard():
-    components.html(
-        """
-        <script>
-        (function() {
-            try {
-                const root = window.parent.document;
-                if (!root) return;
-
-                const appRoot =
-                    root.querySelector('[data-testid="stAppViewContainer"]') ||
-                    root.querySelector('.stApp');
-                const mainContainer =
-                    root.querySelector('[data-testid="stMainBlockContainer"]') ||
-                    root.querySelector('[data-testid="stMain"]') ||
-                    root.querySelector('section.main');
-
-                [appRoot, mainContainer].forEach((node) => {
-                    if (!node || !node.style) return;
-                    node.style.removeProperty('display');
-                    node.style.setProperty('visibility', 'visible', 'important');
-                    node.style.setProperty('opacity', '1', 'important');
-                });
-            } catch (e) {}
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
 
 
 def _auth_enabled() -> bool:
@@ -7129,7 +6800,7 @@ def _auth_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Server-side session store helpers (Option 1 — survives server restarts)
+# Server-side session store helpers (Option 1 ? survives server restarts)
 # ---------------------------------------------------------------------------
 
 def _sessions_file_path() -> str:
@@ -7162,6 +6833,12 @@ def _prune_sessions(sessions: dict, now_ts: float) -> dict:
 
 def _write_auth_session(username: str, role: str) -> str | None:
     """Persist a server-side session entry and return its ID (or None on failure)."""
+    if _pg_is_live():
+        try:
+            from db.auth import write_auth_session_pg
+            return write_auth_session_pg(str(username), str(role))
+        except Exception:
+            pass
     try:
         import secrets
         session_id = secrets.token_hex(32)
@@ -7189,11 +6866,20 @@ def _restore_from_session_store(meta: dict) -> bool:
         session_id = str(raw_cookies.get(AUTH_SESSION_COOKIE_NAME) or "").strip()
         if not session_id:
             return False
-        now_ts = time.time()
-        entry = _load_sessions().get(session_id)
-        if not entry:
-            return False
-        if float(entry.get("expires_at") or 0) <= now_ts:
+        # Resolve the session: try DB first, fall back to JSON file store.
+        entry: dict | None = None
+        if _pg_is_live():
+            try:
+                from db.auth import resolve_session_pg
+                entry = resolve_session_pg(session_id)
+            except Exception:
+                pass
+        if entry is None:
+            now_ts = time.time()
+            json_entry = _load_sessions().get(session_id)
+            if json_entry and float(json_entry.get("expires_at") or 0) > now_ts:
+                entry = {"username": str(json_entry.get("username") or ""), "role": str(json_entry.get("role") or "")}
+        if entry is None:
             return False
         username = str(entry.get("username") or "").strip()
         role = str(entry.get("role") or "").strip()
@@ -7213,22 +6899,6 @@ def _restore_from_session_store(meta: dict) -> bool:
         return True
     except Exception:
         return False
-
-
-def _normalize_auth_cookie_key(raw_key: str) -> str:
-    key = str(raw_key or "").strip()
-    if not key:
-        key = "truckapp_cookie_key_change_me_please_override_in_env"
-    try:
-        if len(key.encode("utf-8")) >= 32:
-            return key
-    except Exception:
-        if len(key) >= 32:
-            return key
-    try:
-        return hashlib.sha256(key.encode("utf-8")).hexdigest()
-    except Exception:
-        return "truckapp_cookie_key_fallback_value_please_set_env_var"
 
 
 def _build_authenticator():
@@ -7738,10 +7408,9 @@ def _apply_auth_gate():
             _auth_sid = _write_auth_session(st.session_state.auth_username, st.session_state.auth_role)
             if _auth_sid:
                 _sid_max_age = AUTH_SESSION_EXPIRY_DAYS * 86400
-                components.html(
+                st.html(
                     f'<script>document.cookie="{AUTH_SESSION_COOKIE_NAME}={_auth_sid};path=/;max-age={_sid_max_age};SameSite=Lax";</script>',
-                    height=0,
-                    scrolling=False,
+                    unsafe_allow_javascript=True,
                 )
             st.session_state.auth_session_injected = True
     else:
@@ -8280,7 +7949,7 @@ def _render_user_management_dropdown():
                             _save_auth_requests(updated_requests)
                             _queue_management_confirmation(
                                 f"Rejected account request for {pending_pick}.",
-                                icon="⚠️",
+                                icon="??",
                             )
                             st.rerun()
 
@@ -8407,15 +8076,40 @@ def _build_state_history_payload(run_date_key: str | None, source_state: dict | 
 def archive_current_state(run_date_key: str | None):
     if not run_date_key:
         return
-    path = _history_state_path(run_date_key)
     payload = _build_state_history_payload(run_date_key)
-
+    if _pg_is_live():
+        try:
+            from db.state import archive_state_pg
+            archive_state_pg(run_date_key, payload)
+        except Exception:
+            pass
+    # Also write to file as a local backup.
+    path = _history_state_path(run_date_key)
     _write_state_file(path, payload)
 
 
 def _load_archived_state_for_run_date(run_date_key: str | None) -> dict | None:
     if not run_date_key:
         return None
+
+    if _pg_is_live():
+        try:
+            from db.state import load_archived_state_pg
+            payload = load_archived_state_pg(run_date_key)
+            if payload:
+                loaded = _deserialize_state_payload(payload)
+                if isinstance(loaded, dict) and loaded:
+                    loaded["run_date_key"] = str(run_date_key)
+                    if not isinstance(loaded.get("run_date"), date):
+                        try:
+                            loaded["run_date"] = date.fromisoformat(str(run_date_key))
+                        except Exception:
+                            loaded["run_date"] = None
+                    loaded["setup_done"] = True
+                    loaded["last_setup_date"] = date.today()
+                    return loaded
+        except Exception:
+            pass
 
     path = _history_state_path(run_date_key)
     if not os.path.exists(path):
@@ -8443,6 +8137,19 @@ def _load_archived_state_for_run_date(run_date_key: str | None) -> dict | None:
 
 
 def _available_state_history_run_dates() -> list[date]:
+    if _pg_is_live():
+        try:
+            from db.state import list_archived_run_dates_pg
+            pg_dates: list[date] = []
+            for s in list_archived_run_dates_pg():
+                try:
+                    pg_dates.append(date.fromisoformat(s))
+                except Exception:
+                    pass
+            if pg_dates:
+                return sorted(set(pg_dates))
+        except Exception:
+            pass
     history_dir = _history_dir_path()
     if not os.path.isdir(history_dir):
         return []
@@ -9824,7 +9531,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-components.html(
+st.html(
     r"""
     <script>
     (function() {
@@ -10096,8 +9803,7 @@ components.html(
     })();
     </script>
     """,
-    height=0,
-    width=0,
+    unsafe_allow_javascript=True,
 )
 
 # ==========================================================
@@ -10209,8 +9915,8 @@ def _consume_startup_render_timing_query_params(qp: dict):
     app_key = _startup_progress_app_key()
     rendered_seconds = render_ms / 1000.0
     payload_sig = f"{app_key}|{rendered_seconds:.3f}"
-    if os.environ.get("TRUCKAPP_STARTUP_RENDER_LOGGED") != payload_sig:
-        os.environ["TRUCKAPP_STARTUP_RENDER_LOGGED"] = payload_sig
+    if st.session_state.get("_startup_render_logged") != payload_sig:
+        st.session_state["_startup_render_logged"] = payload_sig
         detail_parts = [f"render={rendered_seconds:.3f}s"]
         if backend_raw:
             detail_parts.append(f"backend={backend_raw}s")
@@ -10728,7 +10434,7 @@ def _get_original_truck_for_route(route_num: int | None) -> int | None:
 
 # ==========================================================
 # SPARE ASSIGNMENT HISTORY (AI suggestion)
-# Schema: {str(route): {str(day_num): [truck, truck, truck]}} — newest first, max 3
+# Schema: {str(route): {str(day_num): [truck, truck, truck]}} ? newest first, max 3
 # ==========================================================
 
 def _spare_history_path() -> str:
@@ -10787,7 +10493,7 @@ def _suggest_spare_for_route(
 
     candidate_set = set(spare_candidates)
 
-    # Phase 1: same load day — most common truck used for this route on this day
+    # Phase 1: same load day ? most common truck used for this route on this day
     if day_num is not None:
         day_key = str(int(day_num))
         day_list: list = route_history.get(day_key) or []
@@ -10800,7 +10506,7 @@ def _suggest_spare_for_route(
             label = f"Used {freq}/{total}x on Day {day_num} for this route"
             return int(best), label
 
-    # Phase 2: fallback — most recently used truck for this route on any day
+    # Phase 2: fallback ? most recently used truck for this route on any day
     if route_history:
         for dk in sorted(route_history.keys(), key=lambda x: int(x) if x.isdigit() else 0, reverse=True):
             for t in (route_history.get(dk) or []):
@@ -11154,25 +10860,28 @@ def push_shop_notice(message: str, kind: str = "shop", notice_type: str | None =
     st.session_state.hide_shop_notice = False
 
 
-def _queue_management_confirmation(message: str, icon: str = "ℹ️") -> None:
+def _queue_management_confirmation(message: str, icon: str = "??") -> None:
     text = str(message or "").strip()
     if not text:
         return
     st.session_state["management_confirmation_message"] = text
-    st.session_state["management_confirmation_icon"] = str(icon or "ℹ️").strip() or "ℹ️"
+    st.session_state["management_confirmation_icon"] = str(icon or "??").strip() or "??"
 
 
 def _render_management_confirmation_if_any() -> None:
     text = str(st.session_state.pop("management_confirmation_message", "") or "").strip()
     if not text:
         return
-    icon = str(st.session_state.pop("management_confirmation_icon", "ℹ️") or "ℹ️").strip() or "ℹ️"
+    icon = str(st.session_state.pop("management_confirmation_icon", "??") or "??").strip() or "??"
     try:
         st.toast(text, icon=icon)
     except Exception:
-        st.toast(text, icon="ℹ️")
+        st.toast(text, icon="??")
 
-def render_shop_notice():
+def render_notification_center():
+    """Hybrid notification center: bell button (bottom-right) with slide-in panel.
+    Notice data comes from shop_notice_log (Python). Read/dismiss state lives in localStorage.
+    """
     shop_trucks = sorted(st.session_state.shop_set)
     log = list(st.session_state.get("shop_notice_log") or [])
 
@@ -11190,98 +10899,6 @@ def render_shop_notice():
         except Exception:
             continue
 
-    overlay_enabled_for_screen = SHOP_NOTICE_OVERLAY_ENABLED
-    if not overlay_enabled_for_screen and not filtered_log and not shop_trucks:
-        components.html(
-            """
-            <script>
-            (function(){
-                try {
-                    const root = window.parent.document;
-                    const host = root.getElementById('shop-notice-overlay-host');
-                    if (host) host.remove();
-                } catch (e) {}
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
-        return
-
-    if not overlay_enabled_for_screen:
-        # Ensure any previously mounted overlay host is cleaned up when overlay mode is disabled.
-        components.html(
-            """
-            <script>
-            (function(){
-                try {
-                    const root = window.parent.document;
-                    const host = root.getElementById('shop-notice-overlay-host');
-                    if (host) host.remove();
-                } catch (e) {}
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
-
-        if not filtered_log and shop_trucks:
-            safe_items = ", ".join(f"#{t}" for t in shop_trucks)
-            push_shop_notice(f"Sent to shop: {safe_items}", kind="shop")
-            log = list(st.session_state.get("shop_notice_log") or [])
-            filtered_log = []
-            for entry in log:
-                try:
-                    entry_ts = float(entry.get("ts", time.time()))
-                    entry_dt = datetime.fromtimestamp(entry_ts, tz=tzinfo) if tzinfo else datetime.fromtimestamp(entry_ts)
-                    if entry_dt.date() >= notice_cutoff_day:
-                        filtered_log.append(entry)
-                except Exception:
-                    continue
-            save_state()
-
-        recent = filtered_log[-10:]
-        with st.expander("Notices", expanded=False):
-            if not recent:
-                st.caption("No notices.")
-                return
-
-            last_day_key = None
-            for entry in reversed(recent):
-                try:
-                    tzinfo = _get_tzinfo()
-                    ts_dt = (
-                        datetime.fromtimestamp(entry.get("ts", time.time()), tz=tzinfo)
-                        if tzinfo
-                        else datetime.fromtimestamp(entry.get("ts", time.time()))
-                    )
-                except Exception:
-                    ts_dt = datetime.fromtimestamp(entry.get("ts", time.time()))
-
-                day_key = ts_dt.date().isoformat()
-                if day_key != last_day_key:
-                    st.caption(ts_dt.strftime("%a %m/%d"))
-                    last_day_key = day_key
-
-                stamp = ts_dt.strftime("%I:%M %p")
-                raw_msg = str(entry.get("msg", ""))
-                msg = html.escape(raw_msg)
-                kind = str(entry.get("kind") or "shop")
-                notice_type = str(entry.get("type") or "").strip().lower()
-                is_sent_to_shop = raw_msg.strip().lower().startswith("sent to shop")
-                is_ran_special = notice_type == "ran_special" or raw_msg.strip().lower().startswith("ran special:")
-                if kind == "return":
-                    st.markdown(f"<div style='color:#22c55e; font-weight:700;'>{html.escape(stamp)} {msg}</div>", unsafe_allow_html=True)
-                elif is_sent_to_shop:
-                    st.markdown(f"<div style='color:#ef4444; font-weight:700;'>{html.escape(stamp)} {msg}</div>", unsafe_allow_html=True)
-                elif is_ran_special:
-                    st.markdown(f"<div style='color:#f472b6; font-weight:700;'>{html.escape(stamp)} {msg}</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div>{html.escape(stamp)} {msg}</div>", unsafe_allow_html=True)
-        return
-
     if not filtered_log and shop_trucks:
         safe_items = ", ".join(f"#{t}" for t in shop_trucks)
         push_shop_notice(f"Sent to shop: {safe_items}", kind="shop")
@@ -11297,344 +10914,265 @@ def render_shop_notice():
                 continue
         save_state()
 
-    recent = filtered_log[-10:]
-    lines: list[str] = []
-    last_day_key = None
-    for entry in reversed(recent):
-        try:
-            tzinfo = _get_tzinfo()
-            ts_dt = datetime.fromtimestamp(entry.get("ts", time.time()), tz=tzinfo) if tzinfo else datetime.fromtimestamp(entry.get("ts", time.time()))
-        except Exception:
-            ts_dt = datetime.fromtimestamp(entry.get("ts", time.time()))
-
-        day_key = ts_dt.date().isoformat()
-        if day_key != last_day_key:
-            header = ts_dt.strftime("%a %m/%d")
-            lines.append(
-                f"<div class='notice-day-header'>{header}</div>"
-            )
-            last_day_key = day_key
-
-        stamp = ts_dt.strftime("%I:%M %p")
-        raw_msg = str(entry.get("msg", ""))
-        msg = html.escape(raw_msg)
-        kind = entry.get("kind") or "shop"
+    # Build notices JSON for JS (newest first, all recent)
+    notices_for_js: list[dict] = []
+    for entry in reversed(filtered_log):
+        ts_val = float(entry.get("ts", 0))
+        kind = str(entry.get("kind") or "shop")
         notice_type = str(entry.get("type") or "").strip().lower()
-        is_sent_to_shop = raw_msg.strip().lower().startswith("sent to shop")
-        is_ran_special = notice_type == "ran_special" or raw_msg.strip().lower().startswith("ran special:")
-        if kind == "return":
-            body_style = " style='color:#22c55e; font-weight:700;'"
-        elif is_sent_to_shop:
-            body_style = " style='color:#ef4444; font-weight:700;'"
-        elif is_ran_special:
-            body_style = " style='color:#f472b6; font-weight:700;'"
-        else:
-            body_style = ""
-        lines.append(
-            "<div class='notice-item'>"
-            f"  <span class='timestamp'>{stamp}</span>"
-            f"  <span class='body'{body_style}>{msg}</span>"
-            "</div>"
-        )
+        msg = str(entry.get("msg") or "")
+        truck_val = entry.get("truck")
+        notices_for_js.append({
+            "ts": ts_val,
+            "kind": kind,
+            "type": notice_type,
+            "msg": msg,
+            "truck": int(truck_val) if truck_val is not None else None,
+        })
 
-    notice_id = str(filtered_log[-1].get("ts", time.time())) if filtered_log else ""
-    if not lines:
-        lines.append(
-            "<div class='notice-item'>"
-            "  <span class='timestamp'>--:--</span>"
-            "  <span class='body' style='opacity:0.75;'>No notices.</span>"
-            "</div>"
-        )
-    active_screen = str(st.session_state.get("active_screen") or "").strip().upper()
-    wrap_class = "shop-notice-wrap"
-    if active_screen == "COMMUNICATIONS":
-        wrap_class += " shop-notice-wrap-communications-quarter"
+    notices_json = json.dumps(notices_for_js)
 
-    overlay_markup = (
-        f"<div class='{wrap_class}'>"
-        f"  <div class='shop-notice' data-notice-id='{notice_id}'>"
-        "    <div class='notice-bar'>"
-        "      <span class='notice-bar-title'>Notices</span>"
-        "      <span class='notice-bar-toggle'>Collapse</span>"
-        "    </div>"
-        "    <div class='notice-body'>"
-        f"      {''.join(lines)}"
-        "    </div>"
-        "  </div>"
-        "</div>"
+    _NC_SCRIPT = """(function() {
+  try {
+    var pw = window.parent, doc = pw.document;
+    var NOTICES = pw.__ncNotices || [];
+
+    // localStorage helpers
+    var ls = (function(){ try { return pw.localStorage; } catch(e){ return null; } })();
+    var lsG = function(k,d){ try{ var v=ls&&ls.getItem(k); return v==null?d:v; }catch(e){return d;} };
+    var lsS = function(k,v){ try{ if(ls) ls.setItem(k,v); }catch(e){} };
+
+    var getDis = function(){ var r=lsG('nc_dis',''),o={}; if(r) r.split(',').forEach(function(s){if(s)o[s]=1;}); return o; };
+    var addDis = function(ts){ var d=getDis(); d[String(ts)]=1; lsS('nc_dis',Object.keys(d).join(',')); };
+    var disAll = function(){ lsS('nc_dis',NOTICES.map(function(n){return String(n.ts);}).join(',')); };
+    var getLS  = function(){ return parseFloat(lsG('nc_ls','0'))||0; };
+    var setLS  = function(){ lsS('nc_ls',String(Date.now()/1000)); };
+    var isOpen = function(){ return lsG('nc_open','0')==='1'; };
+    var setOpen= function(v){ lsS('nc_open',v?'1':'0'); };
+    var getTab = function(){ return lsG('nc_tab','all'); };
+    var setTab = function(t){ lsS('nc_tab',t); };
+
+    var getMeta = function(n){
+      if(n.kind==='return') return {i:'\u21a9',c:'#22c55e',b:'rgba(34,197,94,.14)'};
+      if(n.type==='shop_send') return {i:'\u2716',c:'#ef4444',b:'rgba(239,68,68,.14)'};
+      if(n.type==='ran_special') return {i:'\u2605',c:'#f472b6',b:'rgba(244,114,182,.14)'};
+      if(n.type==='oos_load_on'||n.type==='shop_load_on') return {i:'\u21c4',c:'#60a5fa',b:'rgba(96,165,250,.14)'};
+      return {i:'\u2022',c:'#93c5fd',b:'rgba(147,197,253,.12)'};
+    };
+
+    var esc=function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+    var rel=function(ts){
+      var d=Math.round(Date.now()/1000-ts);
+      if(d<5) return 'just now';
+      if(d<60) return d+'s ago';
+      if(d<3600) return Math.floor(d/60)+'m ago';
+      if(d<86400) return Math.floor(d/3600)+'h ago';
+      return Math.floor(d/86400)+'d ago';
+    };
+
+    var filt=function(tab){
+      var dis=getDis(), ls2=getLS();
+      return NOTICES.filter(function(n){
+        if(dis[String(n.ts)]) return false;
+        if(tab==='unread') return n.ts>ls2;
+        if(tab==='shop')   return n.kind==='shop';
+        if(tab==='return') return n.kind==='return';
+        return true;
+      });
+    };
+    var badge=function(){
+      var dis=getDis(),ls2=getLS();
+      return NOTICES.filter(function(n){return !dis[String(n.ts)]&&n.ts>ls2;}).length;
+    };
+
+    var renderList=function(tab){
+      var items=filt(tab), ls2=getLS();
+      if(!items.length) return '<div class="nc-empty"><div class="nc-ei">&#x1F514;</div><div class="nc-et">No notifications</div><div class="nc-es">You\u2019re all caught up. New notifications will appear here.</div></div>';
+      return items.map(function(n){
+        var m=getMeta(n), unr=n.ts>ls2, ts=String(n.ts);
+        return '<div class="nc-item'+(unr?' nc-unr':'')+'" data-ts="'+esc(ts)+'">'
+          +'<div class="nc-ico" style="background:'+m.b+';color:'+m.c+'">'+m.i+'</div>'
+          +'<div class="nc-ib"><div class="nc-im">'+esc(n.msg)+'</div>'
+          +'<div class="nc-ix"><span class="nc-it">'+esc(rel(n.ts))+'</span>'
+          +' &middot; <span class="nc-act" data-action="dismiss" data-ts="'+esc(ts)+'">Dismiss</span>'
+          +'</div></div>'+(unr?'<div class="nc-dot"></div>':'')+'</div>';
+      }).join('');
+    };
+
+    var injectCSS=function(){
+      if(doc.getElementById('nc-styles')) return;
+      var s=doc.createElement('style'); s.id='nc-styles';
+      s.textContent=[
+        '#nc-bell{position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;',
+        'background:#4f46e5;box-shadow:0 4px 18px rgba(79,70,229,.5);display:flex;',
+        'align-items:center;justify-content:center;cursor:pointer;z-index:1800;',
+        'transition:background .15s,box-shadow .15s;user-select:none;pointer-events:auto;}',
+        '#nc-bell:hover{background:#4338ca;box-shadow:0 6px 22px rgba(79,70,229,.65);}',
+        '#nc-bi{font-size:26px;line-height:1;}',
+        '#nc-bdg{position:absolute;top:-5px;right:-5px;min-width:22px;height:22px;border-radius:11px;',
+        'background:#ef4444;color:#fff;font-size:12px;font-weight:900;display:flex;',
+        'align-items:center;justify-content:center;padding:0 5px;pointer-events:none;',
+        'box-shadow:0 1px 5px rgba(0,0,0,.35);transition:opacity .2s,transform .2s;}',
+        '#nc-bdg.nc-hide{opacity:0;transform:scale(.5);}',
+        '#nc-panel{position:fixed;bottom:96px;right:20px;width:400px;max-width:calc(100vw - 32px);',
+        'max-height:82vh;background:rgba(15,23,42,.97);border:1px solid rgba(148,163,184,.22);',
+        'border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.5);z-index:1799;',
+        'display:flex;flex-direction:column;overflow:hidden;pointer-events:none;',
+        'transform:scale(.92) translateY(12px);opacity:0;',
+        'transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .18s;}',
+        '#nc-panel.nc-open{transform:scale(1) translateY(0);opacity:1;pointer-events:auto;}',
+        '.nc-hdr{display:flex;align-items:center;padding:15px 16px 12px;border-bottom:1px solid rgba(148,163,184,.15);flex-shrink:0;}',
+        '.nc-hdr-t{flex:1;font-weight:800;color:#f8fafc;font-size:1.1rem;letter-spacing:.025em;}',
+        '.nc-hbtn{background:none;border:none;cursor:pointer;font-size:.85rem;font-weight:600;',
+        'padding:5px 10px;border-radius:6px;margin-left:5px;transition:background .12s;white-space:nowrap;}',
+        '.nc-hbtn-mr{color:#60a5fa;}.nc-hbtn-mr:hover{background:rgba(96,165,250,.12);}',
+        '.nc-hbtn-ca{color:#ef4444;}.nc-hbtn-ca:hover{background:rgba(239,68,68,.12);}',
+        '.nc-hbtn-cl{color:#94a3b8;font-size:1.2rem;}.nc-hbtn-cl:hover{background:rgba(148,163,184,.15);}',
+        '.nc-tabs{display:flex;padding:8px 12px 0;gap:3px;flex-shrink:0;border-bottom:1px solid rgba(148,163,184,.12);}',
+        '.nc-tab{background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;',
+        'padding:6px 11px;border-radius:7px 7px 0 0;font-size:.92rem;font-weight:600;color:#94a3b8;',
+        'display:flex;align-items:center;gap:4px;transition:color .12s,background .12s;margin-bottom:-1px;}',
+        '.nc-tab:hover{color:#e2e8f0;background:rgba(148,163,184,.07);}',
+        '.nc-tab.nc-ta{color:#60a5fa;border-bottom-color:#60a5fa;}',
+        '.nc-tbdg{background:rgba(148,163,184,.16);color:#94a3b8;font-size:.8rem;font-weight:800;',
+        'padding:1px 5px;border-radius:7px;min-width:16px;text-align:center;}',
+        '.nc-tab.nc-ta .nc-tbdg{background:rgba(96,165,250,.18);color:#93c5fd;}',
+        '.nc-list{overflow-y:auto;flex:1;padding:2px 0;}',
+        '.nc-item{display:flex;align-items:flex-start;gap:11px;padding:11px 15px;',
+        'border-bottom:1px solid rgba(148,163,184,.09);position:relative;transition:background .1s;}',
+        '.nc-item:last-child{border-bottom:none;}',
+        '.nc-item:hover{background:rgba(148,163,184,.05);}',
+        '.nc-item.nc-unr{background:rgba(96,165,250,.04);}',
+        '.nc-ico{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;',
+        'justify-content:center;font-size:1.05rem;flex-shrink:0;margin-top:2px;}',
+        '.nc-ib{flex:1;min-width:0;}',
+        '.nc-im{font-size:.96rem;color:#e2e8f0;line-height:1.3;word-break:break-word;}',
+        '.nc-item.nc-unr .nc-im{font-weight:600;}',
+        '.nc-ix{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:.84rem;color:#64748b;}',
+        '.nc-act{cursor:pointer;color:#64748b;transition:color .12s;}',
+        '.nc-act:hover{color:#ef4444;text-decoration:underline;}',
+        '.nc-dot{width:8px;height:8px;border-radius:50%;background:#3b82f6;flex-shrink:0;margin-top:8px;}',
+        '.nc-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;',
+        'padding:36px 18px;color:#64748b;text-align:center;}',
+        '.nc-ei{font-size:2.6rem;margin-bottom:8px;opacity:.45;}',
+        '.nc-et{font-weight:700;font-size:1.05rem;color:#94a3b8;margin-bottom:3px;}',
+        '.nc-es{font-size:.92rem;line-height:1.4;}', 
+        '@keyframes nc-ring{0%,100%{transform:rotate(0)}20%{transform:rotate(-14deg)}',
+        '40%{transform:rotate(11deg)}60%{transform:rotate(-7deg)}80%{transform:rotate(4deg)}}',
+        '#nc-bell.nc-new #nc-bi{animation:nc-ring .65s ease-in-out;}',
+        '@media(max-width:600px){#nc-panel{right:8px;left:8px;width:auto;bottom:88px;}#nc-bell{bottom:16px;right:14px;}}'
+      ].join('');
+      doc.head.appendChild(s);
+    };
+
+    var doTabs=function(at){
+      var tb=doc.getElementById('nc-tabs-bar'); if(!tb) return;
+      var defs=[{k:'all',l:'All'},{k:'unread',l:'Unread'},{k:'shop',l:'Shop'},{k:'return',l:'Return'}];
+      tb.innerHTML=defs.map(function(d){
+        var cnt=filt(d.k).length;
+        return '<button class="nc-tab'+(d.k===at?' nc-ta':'')+'" data-tab="'+d.k+'">'+d.l+'<span class="nc-tbdg">'+cnt+'</span></button>';
+      }).join('');
+    };
+    var doList=function(at){ var el=doc.getElementById('nc-list'); if(el) el.innerHTML=renderList(at); };
+    var doBadge=function(){
+      var b=doc.getElementById('nc-bdg'); if(!b) return;
+      var cnt=badge();
+      b.textContent=cnt>99?'99+':String(cnt);
+      b.classList.toggle('nc-hide',cnt===0);
+      var bell=doc.getElementById('nc-bell'); if(bell) bell.classList.toggle('nc-new',cnt>0);
+    };
+    var refresh=function(){ var at=getTab(); doTabs(at); doList(at); doBadge(); };
+
+    injectCSS();
+
+    var host=doc.getElementById('nc-host');
+    if(!host){
+      host=doc.createElement('div'); host.id='nc-host';
+      host.style.cssText='position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;z-index:1799;overflow:visible;';
+      doc.body.appendChild(host);
+    }
+
+    var bell=doc.getElementById('nc-bell');
+    if(!bell){
+      bell=doc.createElement('div'); bell.id='nc-bell';
+      bell.innerHTML='<span id="nc-bi">&#x1F514;</span><span id="nc-bdg" class="nc-hide">0</span>';
+      host.appendChild(bell);
+    }
+
+    var panel=doc.getElementById('nc-panel');
+    if(!panel){
+      panel=doc.createElement('div'); panel.id='nc-panel';
+      panel.innerHTML='<div class="nc-hdr">'
+        +'<span class="nc-hdr-t">Notification Center</span>'
+        +'<button class="nc-hbtn nc-hbtn-mr" id="nc-mr">Mark all read</button>'
+        +'<button class="nc-hbtn nc-hbtn-ca" id="nc-ca">Clear all</button>'
+        +'<button class="nc-hbtn nc-hbtn-cl" id="nc-cl">&#x2715;</button>'
+        +'</div>'
+        +'<div class="nc-tabs" id="nc-tabs-bar"></div>'
+        +'<div class="nc-list" id="nc-list"></div>';
+      host.appendChild(panel);
+
+      panel.addEventListener('click',function(ev){
+        var t=ev.target;
+        var tl=t.closest?t.closest('.nc-tab'):null;
+        if(tl&&tl.dataset.tab){ setTab(tl.dataset.tab); refresh(); return; }
+        if(t.dataset&&t.dataset.action==='dismiss'){ addDis(t.dataset.ts); refresh(); return; }
+        if(t.id==='nc-mr'){ setLS(); refresh(); return; }
+        if(t.id==='nc-ca'){ disAll(); refresh(); return; }
+        if(t.id==='nc-cl'){ setOpen(false); panel.classList.remove('nc-open'); doBadge(); }
+      });
+    }
+
+    if(isOpen()) panel.classList.add('nc-open');
+
+    if(!bell.__ncb){
+      bell.__ncb=true;
+      bell.addEventListener('click',function(){
+        var open=panel.classList.toggle('nc-open');
+        setOpen(open); refresh();
+      });
+      doc.addEventListener('click',function(ev){
+        var p=doc.getElementById('nc-panel');
+        if(!p||!p.classList.contains('nc-open')) return;
+        var b=doc.getElementById('nc-bell');
+        if(b&&b.contains(ev.target)) return;
+        if(p.contains(ev.target)) return;
+        setOpen(false); p.classList.remove('nc-open');
+      },true);
+    }
+
+    // Animate bell when new notices arrive
+    var prev=pw.__ncPrev||0, cur=NOTICES.length;
+    if(cur>prev&&prev>0){
+      var nb=doc.getElementById('nc-bell');
+      if(nb){ nb.classList.remove('nc-new'); void nb.offsetWidth; nb.classList.add('nc-new'); }
+    }
+    pw.__ncPrev=cur;
+
+    pw.__ncRefresh = refresh;
+    refresh();
+  } catch(e) {}
+})();"""
+    import base64 as _b64
+    _nc_b64 = _b64.b64encode(_NC_SCRIPT.encode('utf-8')).decode('ascii')
+    _notices_b64 = _b64.b64encode(notices_json.encode('utf-8')).decode('ascii')
+    # Use TextDecoder for UTF-8 safe base64 decode (atob alone breaks on non-ASCII chars)
+    # Note: avoid < in textContent to prevent DOMPurify SAFE_FOR_XML stripping
+    _loader = (
+        "<script>(function(){"
+        "function _utf8b64(b){var by=atob(b),n=by.length,arr=new Uint8Array(n);"
+        "for(var i=0;n>i;i++)arr[i]=by.charCodeAt(i);"
+        "return new TextDecoder().decode(arr);}"
+        "var pw=window.parent,doc=pw.document;"
+        "pw.__ncNotices=JSON.parse(_utf8b64('" + _notices_b64 + "'));"
+        "if(pw.__ncLoaded){pw.__ncRefresh&&pw.__ncRefresh();return;}"
+        "pw.__ncLoaded=1;var s=doc.createElement('script');"
+        "s.textContent=_utf8b64('" + _nc_b64 + "');"
+        "doc.head.appendChild(s);})();</script>"
     )
-    overlay_markup_json = json.dumps(overlay_markup)
+    st.html(_loader, unsafe_allow_javascript=True)
 
-    notice_overlay_script = """
-        <script>
-        (function() {
-            try {
-                const parentWin = window.parent;
-                const root = parentWin.document;
 
-                const overlayHostId = 'shop-notice-overlay-host';
-                let overlayHost = root.getElementById(overlayHostId);
-                if (!overlayHost) {
-                    overlayHost = root.createElement('div');
-                    overlayHost.id = overlayHostId;
-                    overlayHost.style.setProperty('position', 'fixed', 'important');
-                    overlayHost.style.setProperty('top', '0', 'important');
-                    overlayHost.style.setProperty('left', '0', 'important');
-                    overlayHost.style.setProperty('width', '0', 'important');
-                    overlayHost.style.setProperty('height', '0', 'important');
-                    overlayHost.style.setProperty('pointer-events', 'none', 'important');
-                    overlayHost.style.setProperty('z-index', '1700', 'important');
-                    root.body.appendChild(overlayHost);
-                }
-                overlayHost.innerHTML = __OVERLAY_MARKUP__;
-
-                const notice = overlayHost.querySelector('.shop-notice');
-                const bar = notice ? notice.querySelector('.notice-bar') : null;
-                const toggle = notice ? notice.querySelector('.notice-bar-toggle') : null;
-                if (!notice || !bar || !toggle) return;
-
-                const storage = (() => {
-                    try { return parentWin.localStorage; } catch (e) { return null; }
-                })();
-                const getStored = (key, fallback) => {
-                    try {
-                        if (!storage) return fallback;
-                        const val = storage.getItem(key);
-                        return val == null ? fallback : val;
-                    } catch (e) {
-                        return fallback;
-                    }
-                };
-                const setStored = (key, value) => {
-                    try {
-                        if (storage) storage.setItem(key, value);
-                    } catch (e) {}
-                };
-
-                const positionNotice = () => {
-                    try {
-                        const viewportW = Math.max(0, parentWin.innerWidth || root.documentElement.clientWidth || 0);
-                        const viewportH = Math.max(0, parentWin.innerHeight || root.documentElement.clientHeight || 0);
-                        const header = root.querySelector('header[data-testid="stHeader"]');
-                        const communicationsRailMode = !!notice.closest('.shop-notice-wrap-communications-quarter');
-
-                        let headerBottom = 0;
-                        if (header) {
-                            const hrect = header.getBoundingClientRect();
-                            if (hrect && Number.isFinite(hrect.bottom) && hrect.height > 6 && hrect.bottom <= 72) {
-                                headerBottom = Math.max(0, Math.round(hrect.bottom));
-                            }
-                        }
-
-                        const main =
-                            root.querySelector('[data-testid="stMainBlockContainer"]') ||
-                            root.querySelector('section.main > div.block-container') ||
-                            root.querySelector('.main .block-container');
-
-                        const edgePad = viewportW <= 980 ? 8 : 14;
-                        let leftPx = Math.round(viewportW / 2);
-                        let widthPx = Math.max(280, Math.min(1080, viewportW - 20));
-                        let topPx = headerBottom + (viewportW <= 980 ? 4 : 6);
-
-                        if (communicationsRailMode && viewportW > 980) {
-                            const sidebar = root.querySelector('section[data-testid="stSidebar"]');
-                            let sidebarRightPx = 0;
-                            if (sidebar) {
-                                const srect = sidebar.getBoundingClientRect();
-                                const expanded = String(sidebar.getAttribute('aria-expanded') || '').toLowerCase() !== 'false';
-                                if (expanded && srect && srect.width > 40 && srect.right > 0) {
-                                    sidebarRightPx = Math.max(0, Math.round(srect.right));
-                                }
-                            }
-
-                            let mainLeftPx = Math.round(viewportW - 12);
-                            if (main) {
-                                const mrect = main.getBoundingClientRect();
-                                if (mrect && Number.isFinite(mrect.left) && mrect.left > 0) {
-                                    mainLeftPx = Math.round(mrect.left);
-                                }
-                            }
-
-                            const railGap = 10;
-                            const railLeft = Math.max(8, sidebarRightPx + railGap);
-                            const railRight = Math.max(railLeft + 220, mainLeftPx - railGap);
-                            leftPx = railLeft;
-                            widthPx = Math.max(220, Math.min(420, railRight - railLeft));
-                            topPx = headerBottom + 88;
-                        } else if (main) {
-                            const mrect = main.getBoundingClientRect();
-                            if (mrect && mrect.width > 240) {
-                                leftPx = Math.round(mrect.left + (mrect.width / 2));
-                                widthPx = Math.max(280, Math.min(1080, Math.round(mrect.width - 8)));
-                            }
-                        }
-
-                        notice.style.setProperty('position', 'fixed', 'important');
-                        notice.style.setProperty('left', String(leftPx) + 'px', 'important');
-                        notice.style.setProperty('top', String(topPx) + 'px', 'important');
-                        notice.style.setProperty('width', String(widthPx) + 'px', 'important');
-                        notice.style.setProperty('max-width', 'calc(100vw - ' + String(edgePad * 2) + 'px)', 'important');
-                        notice.style.setProperty('transform', communicationsRailMode && viewportW > 980 ? 'none' : 'translateX(-50%)', 'important');
-                        notice.style.setProperty('z-index', '1705', 'important');
-                        notice.style.setProperty('pointer-events', 'auto', 'important');
-                        notice.style.setProperty('visibility', 'visible', 'important');
-
-                        const body = notice.querySelector('.notice-body');
-                        if (body) {
-                            const maxBodyPx = viewportW <= 980
-                                ? Math.max(120, Math.round(viewportH * 0.34))
-                                : Math.max(160, Math.round(viewportH * 0.48));
-                            body.style.setProperty('max-height', String(maxBodyPx) + 'px', 'important');
-                        }
-                    } catch (e) {}
-                };
-
-                const id = notice.getAttribute('data-notice-id') || '';
-                const applyState = () => {
-                    const collapsed = getStored('shopNoticeCollapsed', '1') === '1';
-                    if (collapsed) {
-                        notice.classList.add('collapsed');
-                        toggle.textContent = 'Expand';
-                    } else {
-                        notice.classList.remove('collapsed');
-                        toggle.textContent = 'Collapse';
-                    }
-                };
-
-                const applyFlashState = () => {
-                    const collapsed = getStored('shopNoticeCollapsed', '1') === '1';
-                    const ackId = getStored('shopNoticeAckId', '');
-                    const hasUnacknowledged = !!id && ackId !== id;
-                    notice.classList.remove('flash');
-                    notice.classList.remove('flash-collapsed');
-                    if (!hasUnacknowledged) return;
-                    if (collapsed) notice.classList.add('flash-collapsed');
-                    else notice.classList.add('flash');
-                };
-
-                const acknowledgeNotice = () => {
-                    if (!id) return;
-                    setStored('shopNoticeAckId', id);
-                    notice.classList.remove('flash');
-                    notice.classList.remove('flash-collapsed');
-                };
-
-                const ackId = getStored('shopNoticeAckId', '');
-                const hasUnacknowledged = !!id && ackId !== id;
-                if (hasUnacknowledged) {
-                    setStored('shopNoticeCollapsed', '0');
-                }
-
-                applyState();
-                applyFlashState();
-                positionNotice();
-                setTimeout(positionNotice, 80);
-                setTimeout(positionNotice, 260);
-                setTimeout(positionNotice, 640);
-
-                bar.onclick = function() {
-                    acknowledgeNotice();
-                    const collapsed = notice.classList.contains('collapsed');
-                    setStored('shopNoticeCollapsed', collapsed ? '0' : '1');
-                    applyState();
-                    positionNotice();
-                };
-
-                parentWin.__positionShopNoticeOverlay = positionNotice;
-                if (!parentWin.__shopNoticeOverlayResizeBound) {
-                    const raf = parentWin.requestAnimationFrame
-                        ? parentWin.requestAnimationFrame.bind(parentWin)
-                        : ((fn) => parentWin.setTimeout(fn, 16));
-                    parentWin.addEventListener('resize', () => {
-                        try {
-                            if (parentWin.__shopNoticeOverlayResizeRaf) return;
-                            parentWin.__shopNoticeOverlayResizeRaf = raf(() => {
-                                parentWin.__shopNoticeOverlayResizeRaf = null;
-                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
-                                    parentWin.__positionShopNoticeOverlay();
-                                }
-                            });
-                        } catch (e) {}
-                    }, { passive: true });
-                    parentWin.__shopNoticeOverlayResizeBound = true;
-                }
-
-                if (!parentWin.__shopNoticeOverlaySidebarTrackBound) {
-                    const sidebar = root.querySelector('section[data-testid="stSidebar"]');
-                    const syncNow = () => {
-                        try {
-                            if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
-                                parentWin.__positionShopNoticeOverlay();
-                            }
-                        } catch (e) {}
-                    };
-                    const scheduleSync = () => {
-                        try {
-                            const raf = parentWin.requestAnimationFrame
-                                ? parentWin.requestAnimationFrame.bind(parentWin)
-                                : ((fn) => parentWin.setTimeout(fn, 16));
-                            if (parentWin.__shopNoticeOverlaySidebarTrackRaf) return;
-                            parentWin.__shopNoticeOverlaySidebarTrackRaf = raf(() => {
-                                parentWin.__shopNoticeOverlaySidebarTrackRaf = null;
-                                syncNow();
-                            });
-                        } catch (e) {}
-                    };
-
-                    if (sidebar) {
-                        try {
-                            const observer = new MutationObserver(() => scheduleSync());
-                            observer.observe(sidebar, {
-                                attributes: true,
-                                attributeFilter: ['style', 'class', 'aria-expanded'],
-                            });
-                            parentWin.__shopNoticeOverlaySidebarObserver = observer;
-                        } catch (e) {}
-
-                        try {
-                            sidebar.addEventListener('transitionrun', scheduleSync, true);
-                            sidebar.addEventListener('transitionstart', scheduleSync, true);
-                            sidebar.addEventListener('transitionend', scheduleSync, true);
-                        } catch (e) {}
-
-                        let sidebarPointerDown = false;
-                        try {
-                            sidebar.addEventListener('pointerdown', () => { sidebarPointerDown = true; }, true);
-                            parentWin.addEventListener('pointerup', () => { sidebarPointerDown = false; scheduleSync(); }, true);
-                            parentWin.addEventListener('pointercancel', () => { sidebarPointerDown = false; scheduleSync(); }, true);
-                            parentWin.addEventListener('pointermove', () => {
-                                if (sidebarPointerDown) scheduleSync();
-                            }, { passive: true, capture: true });
-                        } catch (e) {}
-                    }
-
-                    parentWin.__shopNoticeOverlaySidebarTrackBound = true;
-                }
-
-                if (!parentWin.__shopNoticeOverlayInteractionBound) {
-                    const schedulePositionSync = () => {
-                        try {
-                            parentWin.setTimeout(() => {
-                                if (typeof parentWin.__positionShopNoticeOverlay === 'function') {
-                                    parentWin.__positionShopNoticeOverlay();
-                                }
-                            }, 28);
-                        } catch (e) {}
-                    };
-                    root.addEventListener('pointerdown', schedulePositionSync, true);
-                    root.addEventListener('click', schedulePositionSync, true);
-                    root.addEventListener('keydown', schedulePositionSync, true);
-                    parentWin.__shopNoticeOverlayInteractionBound = true;
-                }
-            } catch (e) {}
-        })();
-        </script>
-        """
-    components.html(
-        notice_overlay_script.replace("__OVERLAY_MARKUP__", overlay_markup_json),
-        height=0,
-        width=0,
-    )
 
 def _get_client_user_agent() -> str:
     try:
@@ -11757,7 +11295,7 @@ def _inject_mobile_query_hint() -> None:
 
     # Browser-side detection backfills ?mobile=1 when server headers are missing
     # (common behind reverse proxies and some Android browsers/webviews).
-    components.html(
+    st.html(
         """
         <script>
         (function(){
@@ -11798,7 +11336,7 @@ def _inject_mobile_query_hint() -> None:
         })();
         </script>
         """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -11807,7 +11345,7 @@ _inject_mobile_query_hint()
 
 def _enable_mobile_numeric_keypad() -> None:
         # Mobile-only: improve keypad choice for numeric inputs and number-like text fields.
-        components.html(
+        st.html(
                 """
                 <script>
                 (function () {
@@ -11888,8 +11426,7 @@ def _enable_mobile_numeric_keypad() -> None:
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
         )
 
 
@@ -11898,7 +11435,7 @@ _enable_mobile_numeric_keypad()
 
 def _suppress_mobile_dropdown_keyboard() -> None:
     """Prevent the virtual keyboard from appearing when tapping selectbox/dropdown inputs on mobile."""
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -11940,8 +11477,7 @@ def _suppress_mobile_dropdown_keyboard() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -11990,7 +11526,7 @@ def _force_mobile_button_grid(
     gap_css_json = json.dumps(gap_css)
     min_button_height_css_json = json.dumps(f"{min_button_height}px" if min_button_height > 0 else "")
 
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -12180,8 +11716,7 @@ def _force_mobile_button_grid(
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -12189,7 +11724,7 @@ def _apply_loaded_locked_dropdown_guard():
     if not DROPDOWN_LOCK_GUARD_ENABLED:
         return
 
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -12301,8 +11836,7 @@ def _apply_loaded_locked_dropdown_guard():
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -12391,7 +11925,7 @@ def _apply_primary_button_color_for_labels(expected_labels: list[str], bg_hex: s
     border_json = json.dumps(_normalize_hex_color(border_hex, "#1e293b"))
     text_json = json.dumps(_normalize_hex_color(text_hex, "#ffffff"))
 
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -12442,8 +11976,7 @@ def _apply_primary_button_color_for_labels(expected_labels: list[str], bg_hex: s
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -12469,7 +12002,7 @@ def _apply_primary_button_color_map_for_labels(label_color_map: dict[str, dict[s
     active_screen_key = str(st.session_state.get("active_screen") or "").upper()
     active_screen_key_json = json.dumps(active_screen_key)
 
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -12565,8 +12098,7 @@ def _apply_primary_button_color_map_for_labels(label_color_map: dict[str, dict[s
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -12772,7 +12304,7 @@ def render_numeric_truck_buttons(
         button_decoration_js_enabled = False
 
     if color_button_js_enabled and (not live_button_styling):
-        components.html(
+        st.html(
             """
             <script>
             (function() {
@@ -12829,8 +12361,7 @@ def render_numeric_truck_buttons(
             })();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     status_color_map = _get_status_badge_colors()
@@ -12932,7 +12463,7 @@ def render_numeric_truck_buttons(
 
     if color_button_js_enabled and live_button_styling and (color_map or trailing_buttons):
         color_map_json = json.dumps(color_map)
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13158,8 +12689,7 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if bool(TRUCK_BUTTON_DECORATIONS_ENABLED) and outlined_trucks is not None:
@@ -13214,14 +12744,13 @@ def render_numeric_truck_buttons(
             """
         outlined_script = outlined_script.replace("__OUTLINED_LABELS__", outlined_labels_json)
         outlined_script = outlined_script.replace("__OUTLINE_RETRY_DELAYS__", outline_retry_delays_json)
-        components.html(
+        st.html(
             outlined_script,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if bool(TRUCK_BUTTON_DECORATIONS_ENABLED) and ordered:
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13301,13 +12830,12 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if button_decoration_js_enabled and flash_trucks is not None:
         flash_labels_json = json.dumps(sorted({str(int(t)) for t in (flash_trucks or set())}))
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13374,13 +12902,12 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if badge_map_for_render:
         badge_map_json = json.dumps(badge_map_for_render)
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13562,7 +13089,7 @@ def render_numeric_truck_buttons(
                             }} else if (badgeTextUpper === 'SPECIAL') {{
                                 badge.classList.add('truck-route-badge-special');
                                 applyBadgeFg('#f3e8ff');
-                            }} else if (badgeLabel === '👕') {{
+                            }} else if (badgeLabel === '??') {{
                                 badge.classList.add('truck-route-badge-garments');
                                 badge.style.setProperty('background', 'rgba(29,78,216,0.92)', 'important');
                                 badge.style.setProperty('border', '1px solid rgba(147,197,253,0.5)', 'important');
@@ -13593,14 +13120,13 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if button_decoration_js_enabled and corner_badge_map:
         corner_badge_map_json = json.dumps(corner_badge_map)
         corner_badge_tooltip_map_json = json.dumps(corner_badge_tooltip_map)
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13724,8 +13250,7 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     button_entries: list[tuple[str, int | str, bool]] = [(str(int(t)), int(t), True) for t in ordered]
@@ -13770,7 +13295,7 @@ def render_numeric_truck_buttons(
         )
     if active_screen_key != "AUDIT_FLEET":
         expected_labels_json = json.dumps([label for (label, _, _) in button_entries if str(label).strip()])
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -13834,8 +13359,7 @@ def render_numeric_truck_buttons(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
     return None
 
@@ -14332,7 +13856,7 @@ def _render_fleet_left_rail_actions():
             st.rerun()
 
         if not _is_mobile_client():
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -14373,8 +13897,7 @@ def _render_fleet_left_rail_actions():
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
 
 
@@ -15400,7 +14923,7 @@ def render_fleet_management():
     elif action == "Batch":
         st.write("### Batch assignment")
         w = st.number_input("Wearers", min_value=0, step=1, value=int(st.session_state.get("wearers", {}).get(sel, 0)), key="sup_manage_wearers")
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -15434,8 +14957,7 @@ def render_fleet_management():
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
         allowed = batch_allowed_ids(w)
         if not allowed:
@@ -16407,7 +15929,7 @@ def _assign_truck_to_oos_route(route_num: int, selected_truck: int) -> tuple[boo
             st.session_state.cleaned_set.discard(prev)
             st.session_state.spare_set.add(prev)
 
-    _ensure_cover_truck_ready_for_loading(int(chosen_truck))
+    _ensure_cover_truck_ready_for_loading(int(chosen_truck), force_unloaded=False)
 
     st.session_state.cleaned_set.discard(int(route))
     assignments[int(route)] = int(chosen_truck)
@@ -17257,7 +16779,7 @@ def _render_route_card(
     def _render_route_card_collapsible_panel():
         _render_route_assign_trigger_buttons()
         st.markdown(route_card_wrap_html, unsafe_allow_html=True)
-        components.html(
+        st.html(
             f"""
             <script>
             (function() {{
@@ -17405,8 +16927,7 @@ def _render_route_card(
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if _is_mobile_client() or not dock_left:
@@ -17468,7 +16989,10 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
 
         if "shop_dirty" in categories:
             chips.append(
-                f"<span style='{_chip_style('rgba(124,58,237,0.34)', 'rgba(167,139,250,0.62)', '#ddd6fe')}'>Shop Dirty</span>"
+                f"<span style='{_chip_style('rgba(116,0,255,0.34)', 'rgba(167,139,250,0.72)', '#ddd6fe')}'>Shop</span>"
+            )
+            chips.append(
+                f"<span style='{_chip_style('rgba(220,38,38,0.34)', 'rgba(248,113,113,0.62)', '#fecaca')}'>Dirty</span>"
             )
             note_text = "Dirty truck was sent to Shop."
 
@@ -17580,7 +17104,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
 
     _render_unload_special_trigger_buttons()
     st.markdown(card_wrap_html, unsafe_allow_html=True)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -17711,8 +17235,7 @@ def _render_unload_watch_card(*, always_show: bool = False, expanded: bool = Tru
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -19136,7 +18659,7 @@ def render_shorts_button_flow(
             _force_mobile_button_grid([label for _, label in cat_entries], mobile_cols=2)
 
         if not inprog_safe_mode and st.session_state.get("active_screen") == "IN_PROGRESS":
-            components.html(
+            st.html(
                 """
                 <script>
                 (function(){
@@ -19167,8 +18690,7 @@ def render_shorts_button_flow(
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
         return
 
@@ -19448,7 +18970,7 @@ def _compress_mobile_notice_to_heading_gap(heading_slug: str) -> None:
     if not safe_slug:
         return
 
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -19596,8 +19118,7 @@ def _compress_mobile_notice_to_heading_gap(heading_slug: str) -> None:
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -19744,15 +19265,14 @@ def _compress_mobile_heading_to_content_gap(heading_slug: str) -> None:
         </script>
     """.replace("__SLUG__", safe_slug)
 
-    components.html(
+    st.html(
         script,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _compress_status_shop_mobile_header_gap() -> None:
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -19865,13 +19385,12 @@ def _compress_status_shop_mobile_header_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _compress_mobile_notice_to_communications_head_gap() -> None:
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -19954,13 +19473,12 @@ def _compress_mobile_notice_to_communications_head_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _compress_mobile_notice_to_inprogress_current_truck_gap() -> None:
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -20044,13 +19562,12 @@ def _compress_mobile_notice_to_inprogress_current_truck_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _compress_load_heading_to_actions_gap() -> None:
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -20277,13 +19794,12 @@ def _compress_load_heading_to_actions_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _compress_fleet_heading_to_grid_gap() -> None:
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -20407,8 +19923,7 @@ def _compress_fleet_heading_to_grid_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -20427,7 +19942,7 @@ def _normalize_management_header_gap(
     desired_gap_json = json.dumps(int(desired_gap_px))
     desktop_only_json = "true" if desktop_only else "false"
 
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -20505,15 +20020,14 @@ def _normalize_management_header_gap(
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
 def _fix_page_top_gap() -> None:
     """Permanently zero section.main padding-top on each page navigation.
     Uses a safe targeted MutationObserver so it survives Streamlit reruns."""
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -20601,8 +20115,7 @@ def _fix_page_top_gap() -> None:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -20803,10 +20316,9 @@ def _compress_mobile_fleet_like_status_heading_gap(heading_slug: str) -> None:
         </script>
     """.replace("__SLUG__", safe_slug).replace("__KEY_FRAGMENT__", key_fragment)
 
-    components.html(
+    st.html(
         script,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -20884,10 +20396,9 @@ def _compress_mobile_auditing_heading_to_buttons_gap() -> None:
         })();
         </script>
     """
-    components.html(
+    st.html(
         script,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -20981,7 +20492,7 @@ def _normalize_status_unloaded_spacing() -> None:
         })();
         </script>
     """
-    components.html(script, height=0, width=0)
+    st.html(script, unsafe_allow_javascript=True)
 
 
 def badge_label(label: str) -> str:
@@ -21057,7 +20568,7 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
         return
 
     dot_map_json = json.dumps(normalized_map)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -21147,8 +20658,7 @@ def _apply_sidebar_badge_dots(dot_map: dict[str, str]):
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -21181,7 +20691,7 @@ def _apply_sidebar_corner_badges(badge_map: dict[str, int | str]):
         normalized_map[label_text] = badge_text
 
     badge_map_json = json.dumps(normalized_map)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -21308,8 +20818,7 @@ def _apply_sidebar_corner_badges(badge_map: dict[str, int | str]):
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -21326,7 +20835,7 @@ def _apply_sidebar_nav_outline(
     labels_json = json.dumps(labels)
     flashing = sorted({str(label).strip() for label in (flash_labels or []) if str(label).strip()})
     flash_json = json.dumps(flashing)
-    components.html(
+    st.html(
         f"""
         <script>
         (function() {{
@@ -21456,8 +20965,7 @@ def _apply_sidebar_nav_outline(
         }})();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 def render_truck_bubbles(
@@ -21517,7 +21025,7 @@ def render_truck_bubbles(
                 and not _spare_needs_route_assignment_before_loading(int(t))
                 and not _holiday_start_day_suggestions()
             ):
-                # Common case: normal unloaded truck — start immediately, skip confirmation
+                # Common case: normal unloaded truck ? start immediately, skip confirmation
                 _start_loading_from_status_unloaded(int(t))
                 _mark_and_save()
                 st.rerun()
@@ -21577,7 +21085,7 @@ def _start_batch_flow_for_dirty_truck(truck: int, *, set_unload_url_when_disable
 
 def _render_batching_information_panel(*, include_info_text: bool = False) -> None:
     if bool(include_info_text):
-        components.html(
+        st.html(
             """<script>
             (function() {
                 try {
@@ -21592,7 +21100,7 @@ def _render_batching_information_panel(*, include_info_text: bool = False) -> No
                 } catch(e) {}
             })();
             </script>""",
-            height=0,
+            unsafe_allow_javascript=True,
         )
 
     st.divider()
@@ -22981,7 +22489,7 @@ if (
 
 # Guard against Fleet UI state lingering after a status-badge click.
 # If URL explicitly targets a STATUS_* page, always honor it.
-# Requires url_nav_triggered so stale URLs after button-based STATUS→STATUS
+# Requires url_nav_triggered so stale URLs after button-based STATUS?STATUS
 # navigation don't snap the page back before the URL update propagates.
 if (
     url_nav_triggered
@@ -23036,7 +22544,7 @@ else:
 
 # Keep browser history in sync with app navigation so Back/Forward and
 # Backspace (outside inputs) work consistently.
-components.html(
+st.html(
     """
     <script>
     (function(){
@@ -23114,7 +22622,7 @@ components.html(
                 const prevParts = root.__truckNavLastKey.split('|');
                 const currParts = navKey.split('|');
                 // page=index 0, nav=index 1. If only sub-params (truck, fleet, etc.)
-                // changed while page+nav are the same, this is an in-page selection —
+                // changed while page+nav are the same, this is an in-page selection ?
                 // replace the current history entry to prevent a double-back entry.
                 const isSamePageNav = prevParts[0] === currParts[0] && prevParts[1] === currParts[1] && currParts[0] !== '';
                 if (isSamePageNav) {
@@ -23152,13 +22660,12 @@ components.html(
     })();
     </script>
     """,
-    height=0,
-    width=0,
+    unsafe_allow_javascript=True,
 )
 
 # Force a full refresh on browser Back/Forward so the page updates with the URL.
 if FORCE_POPSTATE_RELOAD_ENABLED:
-    components.html(
+    st.html(
         """
         <script>
         (function(){
@@ -23172,8 +22679,7 @@ if FORCE_POPSTATE_RELOAD_ENABLED:
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 if BLANK_PAGE_WATCHDOG_ENABLED:
@@ -23209,7 +22715,7 @@ _render_pending_auth_portals(authenticator)
 # ==========================================================
 st.sidebar.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
 if MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and (_is_mobile_client() or _is_tablet_client()):
-        components.html(
+        st.html(
                 """
                 <script>
                 (function(){
@@ -23417,10 +22923,10 @@ if MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and (_is_mobile_client() or _is_tablet_cl
                 })();
                 </script>
                 """,
-                height=0,
+                unsafe_allow_javascript=True,
         )
 elif _is_mobile_client() or _is_tablet_client():
-        components.html(
+        st.html(
                 """
                 <script>
                 (function(){
@@ -23463,7 +22969,7 @@ elif _is_mobile_client() or _is_tablet_client():
                 })();
                 </script>
                 """,
-                height=0,
+                unsafe_allow_javascript=True,
         )
 if st.session_state.setup_done:
     current_run_day_key = str(_current_run_date_key() or "").strip()
@@ -23585,7 +23091,6 @@ with st.sidebar:
             "</body></html>"
         ),
         height=38,
-        scrolling=False,
     )
 
 
@@ -23797,7 +23302,7 @@ if (
     str(st.session_state.get("active_screen") or "").upper() == "FLEET"
     and bool(st.session_state.get("sup_manage_multi_mode"))
 ):
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -23856,8 +23361,7 @@ if (
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
 if st.session_state.setup_done:
@@ -23990,9 +23494,9 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-# Sidebar bouncer toggle button � injected once into the parent document,
+# Sidebar bouncer toggle button ? injected once into the parent document,
 # persists across Streamlit reruns via a parent-window guard flag.
-components.html(
+st.html(
     """
     <script>
     (function() {
@@ -24241,7 +23745,7 @@ components.html(
             };
 
             var syncState = function() {
-                if (syncTimer) return; // already queued � let it coalesce
+                if (syncTimer) return; // already queued ? let it coalesce
                 syncTimer = setTimeout(function() {
                     syncTimer = null;
                     _doSync();
@@ -24276,7 +23780,7 @@ components.html(
             });
 
             // -- MutationObserver: watch aria-expanded and class only.
-            //    Intentionally NOT watching 'style' � that fires on every
+            //    Intentionally NOT watching 'style' ? that fires on every
             //    animation frame and causes the button to jitter. -------------
             var activeObs = null;
             var watchedSb = null;
@@ -24325,11 +23829,11 @@ components.html(
     })();
     </script>
     """,
-    height=0,
+    unsafe_allow_javascript=True,
 )
 
 if False and MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and _is_mobile_client():
-    components.html(
+    st.html(
         """
         <script>
         (function(){
@@ -24481,10 +23985,10 @@ if False and MOBILE_SIDEBAR_ENHANCEMENTS_ENABLED and _is_mobile_client():
         })();
         </script>
         """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 elif _is_mobile_client():
-    components.html(
+    st.html(
         """
         <script>
         (function(){
@@ -24525,10 +24029,10 @@ elif _is_mobile_client():
         })();
         </script>
         """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 else:
-    components.html(
+    st.html(
         """
         <script>
         (function(){
@@ -24549,7 +24053,7 @@ else:
         })();
         </script>
         """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 nav_active_labels = set()
@@ -24565,9 +24069,9 @@ st.session_state[prev_screen_key] = current_screen
 
 # Remove the bottom-hint pill immediately when navigating away from pages that own it.
 if current_screen not in {"UNLOAD", "BATCH"}:
-    components.html(
+    st.html(
         "<script>(function(){try{var e=window.parent.document.getElementById('truckapp-bottom-hint');if(e)e.remove();}catch(ex){}})();</script>",
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 if current_screen in {"UNLOAD", "BATCH"}:
@@ -24608,8 +24112,8 @@ if communications_nav_flash_active:
 _apply_sidebar_nav_outline(nav_active_labels, nav_flash_labels)
 _render_route_card_assign_dialog_if_needed()
 
-# Global notice for management Shop assignments
-render_shop_notice()
+# Global notification center (bell + panel, bottom-right)
+render_notification_center()
 
 if bool(st.session_state.get("archive_view_mode")):
     archive_view_key = str(st.session_state.get("archive_view_date_key") or _current_run_date_key() or "").strip()
@@ -26557,7 +26061,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             )
 
     def _set_inprog_next_up_attention_flash(enabled: bool):
-        components.html(
+        st.html(
             fr"""
             <script>
             (function() {{
@@ -26622,8 +26126,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
 
     if not is_mobile_inprog:
@@ -27373,7 +26876,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                             f"Truck {int(inprog_truck)} marked Loaded."
                         )
 
-                components.html(
+                st.html(
                     """
                     <script>
                     (function() {
@@ -27456,8 +26959,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
                     })();
                     </script>
                     """,
-                    height=0,
-                    width=0,
+                    unsafe_allow_javascript=True,
                 )
 
                 if is_mobile_inprog and not inprog_layout_is_original:
@@ -27533,7 +27035,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
 
             # Timer runs in the component iframe above.
 
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -27592,8 +27094,7 @@ elif st.session_state.active_screen == "IN_PROGRESS":
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
     if inprog_truck:
@@ -30058,9 +29559,9 @@ elif st.session_state.active_screen == "SUPERVISOR":
             _render_manage_fleet_schedule_editor()
 
         elif fleet_manage_mode == "Edit truck types":
-            st.caption("Override the type label for any truck. Defaults: 80�95 (excl. 91) = Dust, 10�17 = Spare, all others = Uniform.")
+            st.caption("Override the type label for any truck. Defaults: 80?95 (excl. 91) = Dust, 10?17 = Spare, all others = Uniform.")
             if not FLEET:
-                st.info("Fleet is empty � no trucks to edit.")
+                st.info("Fleet is empty ? no trucks to edit.")
             else:
                 type_truck_key = "mgmt_fleet_type_truck_pick"
                 type_pick_key = "mgmt_fleet_type_value_pick"
@@ -30147,7 +29648,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         if st.button("Confirm remove", width='stretch', key="mgmt_fleet_confirm_remove"):
                             ok, msg = _remove_truck_from_fleet(int(remove_pick))
                             st.session_state["mgmt_fleet_pending_remove"] = None
-                            _queue_management_confirmation(msg, icon="✅" if ok else "⚠️")
+                            _queue_management_confirmation(msg, icon="?" if ok else "??")
                             st.rerun()
                     with c2:
                         if st.button("Cancel", width='stretch', key="mgmt_fleet_cancel_remove"):
@@ -30622,7 +30123,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if has_changes:
                         _queue_management_confirmation("Manual pace settings saved.")
                     else:
-                        _queue_management_confirmation("No manual pace changes to save.", icon="ℹ️")
+                        _queue_management_confirmation("No manual pace changes to save.", icon="??")
                     st.rerun()
 
             with st.expander("Loader scaling", expanded=False):
@@ -30687,7 +30188,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     if has_changes:
                         _queue_management_confirmation("Loader scaling saved.")
                     else:
-                        _queue_management_confirmation("No loader scaling changes to save.", icon="ℹ️")
+                        _queue_management_confirmation("No loader scaling changes to save.", icon="??")
                     st.rerun()
 
             with st.expander("Conservative buffer", expanded=False):
@@ -30782,7 +30283,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                         if has_changes:
                             _queue_management_confirmation("Conservative buffer saved.")
                         else:
-                            _queue_management_confirmation("No conservative buffer changes to save.", icon="ℹ️")
+                            _queue_management_confirmation("No conservative buffer changes to save.", icon="??")
                         st.rerun()
 
         with st.expander("3) Export and import", expanded=False):
@@ -32022,6 +31523,188 @@ elif st.session_state.active_screen == "SUPERVISOR":
 
             _render_mgmt_dev_direct_import_dialog()
 
+    with st.expander("Database", expanded=False):
+        import os as _db_os
+        _pg_host    = _db_os.environ.get("TRUCKAPP_PG_HOST", "")
+        _pg_port    = _db_os.environ.get("TRUCKAPP_PG_PORT", "5432")
+        _pg_dbname  = _db_os.environ.get("TRUCKAPP_PG_DBNAME", "")
+        _pg_user    = _db_os.environ.get("TRUCKAPP_PG_USER", "")
+        _pg_sslmode = _db_os.environ.get("TRUCKAPP_PG_SSLMODE", "prefer")
+        _pg_minconn = _db_os.environ.get("TRUCKAPP_PG_MINCONN", "2")
+        _pg_maxconn = _db_os.environ.get("TRUCKAPP_PG_MAXCONN", "10")
+        _pg_configured = bool(_pg_dbname and _pg_user)
+
+        if _pg_configured:
+            st.caption(
+                f"**Host:** {_pg_host}:{_pg_port}  |  **DB:** {_pg_dbname}  |  "
+                f"**User:** {_pg_user}  |  **SSL:** {_pg_sslmode}  |  "
+                f"**Pool:** {_pg_minconn}–{_pg_maxconn} conns"
+            )
+        else:
+            st.caption(
+                "PostgreSQL is not configured. Fill in the fields below and click **Save** to enable."
+            )
+
+        _db_test_result_key = "mgmt_db_test_result"
+        _db_toast_key = "mgmt_db_test_toast"
+        _db_test_result = st.session_state.get(_db_test_result_key)
+
+        # Fire toast once after a test/save (flag set on previous run, consumed here)
+        _db_toast = st.session_state.pop(_db_toast_key, None)
+        if _db_toast == "ok":
+            st.toast("Success", icon="✅")
+        elif _db_toast == "fail":
+            st.toast("Failed", icon="❌")
+        elif _db_toast == "saved":
+            st.toast("Saved", icon="💾")
+
+        _db_btn_cols = st.columns([2, 3])
+        with _db_btn_cols[0]:
+            if st.button(
+                "Test Connection",
+                key="mgmt_db_test_conn_btn",
+                width="stretch",
+                disabled=not _pg_configured,
+            ):
+                try:
+                    from db.connection import get_conn as _get_pg_conn
+                    with _get_pg_conn() as _test_conn:
+                        with _test_conn.cursor() as _cur:
+                            _cur.execute("SELECT version(), current_database(), current_user")
+                            _row = _cur.fetchone()
+                            _cur.execute(
+                                "SELECT COUNT(*) FROM information_schema.tables "
+                                "WHERE table_schema = 'public'"
+                            )
+                            _table_count = int(_cur.fetchone()[0])
+                    _pg_ver_short = str(_row[0]).split(" on ")[0]
+                    st.session_state[_db_test_result_key] = {
+                        "ok": True,
+                        "db": str(_row[1]),
+                        "user": str(_row[2]),
+                        "version": _pg_ver_short,
+                        "tables": _table_count,
+                    }
+                    st.session_state[_db_toast_key] = "ok"
+                except Exception as _db_err:
+                    st.session_state[_db_test_result_key] = {
+                        "ok": False,
+                        "error": str(_db_err),
+                    }
+                    st.session_state[_db_toast_key] = "fail"
+                st.rerun()
+
+        with _db_btn_cols[1]:
+            if _db_test_result is not None:
+                if _db_test_result.get("ok"):
+                    st.success(
+                        f"Connected — **{_db_test_result['db']}** as **{_db_test_result['user']}** · "
+                        f"{_db_test_result['tables']} tables · {_db_test_result['version']}"
+                    )
+                else:
+                    st.error(f"Failed — {_db_test_result.get('error', 'unknown error')}")
+
+        st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+
+        with st.expander("Edit Connection Settings", expanded=False):
+            with st.form("mgmt_db_edit_form"):
+                _f_col1, _f_col2 = st.columns([3, 1])
+                with _f_col1:
+                    _f_host = st.text_input("Host", value=_pg_host, key="mgmt_db_f_host")
+                with _f_col2:
+                    _f_port = st.text_input("Port", value=_pg_port, key="mgmt_db_f_port")
+
+                _f_col3, _f_col4 = st.columns(2)
+                with _f_col3:
+                    _f_dbname = st.text_input("Database Name", value=_pg_dbname, key="mgmt_db_f_dbname")
+                with _f_col4:
+                    _f_user = st.text_input("User", value=_pg_user, key="mgmt_db_f_user")
+
+                _f_password = st.text_input(
+                    "Password",
+                    value=_db_os.environ.get("TRUCKAPP_PG_PASSWORD", ""),
+                    type="password",
+                    key="mgmt_db_f_password",
+                )
+
+                _f_col5, _f_col6, _f_col7 = st.columns(3)
+                with _f_col5:
+                    _f_sslmode = st.selectbox(
+                        "SSL Mode",
+                        options=["prefer", "require", "disable", "allow", "verify-ca", "verify-full"],
+                        index=["prefer", "require", "disable", "allow", "verify-ca", "verify-full"].index(
+                            _pg_sslmode if _pg_sslmode in ["prefer", "require", "disable", "allow", "verify-ca", "verify-full"] else "prefer"
+                        ),
+                        key="mgmt_db_f_sslmode",
+                    )
+                with _f_col6:
+                    _f_minconn = st.number_input("Pool Min", min_value=1, max_value=20, value=int(_pg_minconn or 2), key="mgmt_db_f_minconn")
+                with _f_col7:
+                    _f_maxconn = st.number_input("Pool Max", min_value=1, max_value=50, value=int(_pg_maxconn or 10), key="mgmt_db_f_maxconn")
+
+                _f_submitted = st.form_submit_button("Save", width="stretch")
+
+            if _f_submitted:
+                _new_pg = {
+                    "TRUCKAPP_PG_HOST":    _f_host.strip(),
+                    "TRUCKAPP_PG_PORT":    _f_port.strip(),
+                    "TRUCKAPP_PG_DBNAME":  _f_dbname.strip(),
+                    "TRUCKAPP_PG_USER":    _f_user.strip(),
+                    "TRUCKAPP_PG_PASSWORD": _f_password,
+                    "TRUCKAPP_PG_SSLMODE": _f_sslmode,
+                    "TRUCKAPP_PG_MINCONN": str(int(_f_minconn)),
+                    "TRUCKAPP_PG_MAXCONN": str(int(_f_maxconn)),
+                }
+                # 1) Update current process environment
+                for _k, _v in _new_pg.items():
+                    _db_os.environ[_k] = _v
+
+                # 2) Persist to .env file (update only TRUCKAPP_PG_* lines)
+                _env_path = _db_os.path.join(_db_os.path.dirname(_db_os.path.abspath(__file__)), ".env")
+                try:
+                    _env_lines = []
+                    if _db_os.path.exists(_env_path):
+                        with open(_env_path, "r", encoding="utf-8") as _ef:
+                            _env_lines = _ef.readlines()
+                    # Replace or collect existing PG keys
+                    _pg_written = set()
+                    _new_lines = []
+                    for _line in _env_lines:
+                        _stripped = _line.strip()
+                        _matched_key = next(
+                            (k for k in _new_pg if _stripped.startswith(k + "=") or _stripped == k),
+                            None,
+                        )
+                        if _matched_key:
+                            _new_lines.append(f"{_matched_key}={_new_pg[_matched_key]}\n")
+                            _pg_written.add(_matched_key)
+                        else:
+                            _new_lines.append(_line)
+                    # Append any PG keys not already in the file
+                    _missing = [k for k in _new_pg if k not in _pg_written]
+                    if _missing:
+                        if _new_lines and not _new_lines[-1].endswith("\n"):
+                            _new_lines.append("\n")
+                        _new_lines.append("\n# PostgreSQL\n")
+                        for _k in _missing:
+                            _new_lines.append(f"{_k}={_new_pg[_k]}\n")
+                    with open(_env_path, "w", encoding="utf-8") as _ef:
+                        _ef.writelines(_new_lines)
+                except Exception:
+                    pass  # .env write failure is non-fatal
+
+                # 3) Reset the connection pool so next use picks up new creds
+                try:
+                    from db.connection import close_pool as _close_pg_pool
+                    _close_pg_pool()
+                    st.cache_resource.clear()
+                except Exception:
+                    pass
+
+                st.session_state[_db_test_result_key] = None
+                st.session_state[_db_toast_key] = "saved"
+                st.rerun()
+
     st.markdown(
         "<div style='height:0; border-top:1px solid rgba(148,163,184,0.24); margin:4px 0 5px 0;'></div>",
         unsafe_allow_html=True,
@@ -32356,6 +32039,7 @@ elif st.session_state.active_screen == "SUPERVISOR":
                     json.dump({}, f)
             except Exception:
                 pass
+            load_quick_amounts.clear()
             QUICK_AMOUNTS_MAP = load_quick_amounts()
             _queue_management_confirmation("Quick amounts reset to defaults.")
             st.rerun()
@@ -33130,7 +32814,7 @@ elif st.session_state.active_screen == "UNLOAD":
                 )
                 st.markdown(matrix_html, unsafe_allow_html=True)
 
-                components.html(
+                st.html(
                     """
                     <script>
                     (function(){
@@ -33185,8 +32869,7 @@ elif st.session_state.active_screen == "UNLOAD":
                     })();
                     </script>
                     """,
-                    height=0,
-                    width=0,
+                    unsafe_allow_javascript=True,
                 )
             else:
                 st.caption("No Dirty trucks available.")
@@ -33237,7 +32920,7 @@ elif st.session_state.active_screen == "UNLOAD":
                     st.session_state.pop("unload_mobile_undo_state", None)
                     st.rerun()
 
-        components.html(
+        st.html(
             "<script>"
             "(function() {"
             "  try {"
@@ -33252,7 +32935,7 @@ elif st.session_state.active_screen == "UNLOAD":
             "  } catch(e) {}"
             "})();"
             "</script>",
-            height=0,
+            unsafe_allow_javascript=True,
         )
 
         # Restore visually awesome batch cards at the bottom
@@ -33552,7 +33235,7 @@ elif st.session_state.active_screen == "BATCH":
                 key=wearers_input_key,
                 on_change=_on_batch_dialog_wearers_change,
             )
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -33616,8 +33299,7 @@ elif st.session_state.active_screen == "BATCH":
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
             wearers_text = str(wearers_raw).strip()
             typed_digits = "".join(ch for ch in wearers_text if ch.isdigit())
@@ -33663,68 +33345,71 @@ elif st.session_state.active_screen == "BATCH":
                     key=f"batch_dialog_assign_select_{truck_num}",
                 )
 
-            skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-            with c1:
-                if st.button("Assign to batch", width='stretch', key=f"batch_dialog_assign_{truck_num}"):
-                    if not allowed:
-                        fullest_batch = max(
-                            range(1, BATCH_COUNT + 1),
-                            key=lambda batch_id: int(st.session_state.batches[batch_id]["total"]),
-                        )
+            st.markdown(
+                f"""<style>
+                [class*="st-key-batch_dialog_assign_{truck_num}"] .stButton > button {{
+                    background: #16a34a !important;
+                    border-color: #15803d !important;
+                    color: #fff !important;
+                }}
+                [class*="st-key-batch_dialog_assign_{truck_num}"] .stButton > button:hover {{
+                    background: #15803d !important;
+                }}
+                [class*="st-key-batch_dialog_cancel_{truck_num}"] .stButton > button {{
+                    background: #dc2626 !important;
+                    border-color: #b91c1c !important;
+                    color: #fff !important;
+                }}
+                [class*="st-key-batch_dialog_cancel_{truck_num}"] .stButton > button:hover {{
+                    background: #b91c1c !important;
+                }}
+                </style>""",
+                unsafe_allow_html=True,
+            )
+            if st.button("Assign to batch", width='stretch', key=f"batch_dialog_assign_{truck_num}"):
+                if not allowed:
+                    fullest_batch = max(
+                        range(1, BATCH_COUNT + 1),
+                        key=lambda batch_id: int(st.session_state.batches[batch_id]["total"]),
+                    )
+                    _queue_batch_capacity_warning(
+                        batch_id=int(fullest_batch),
+                        current_total=int(st.session_state.batches[int(fullest_batch)]["total"]),
+                        incoming_wearers=int(w),
+                    )
+                    _request_batch_dialog_internal_rerun()
+                elif w <= 0:
+                    st.warning("Enter at least 1 wearer before assigning.")
+                else:
+                    exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
+                    if exceeds_cap:
                         _queue_batch_capacity_warning(
-                            batch_id=int(fullest_batch),
-                            current_total=int(st.session_state.batches[int(fullest_batch)]["total"]),
+                            batch_id=int(batch),
+                            current_total=int(current_total),
                             incoming_wearers=int(w),
                         )
                         _request_batch_dialog_internal_rerun()
-                    elif w <= 0:
-                        st.warning("Enter at least 1 wearer before assigning.")
-                    else:
-                        exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
-                        if exceeds_cap:
-                            _queue_batch_capacity_warning(
-                                batch_id=int(batch),
-                                current_total=int(current_total),
-                                incoming_wearers=int(w),
-                            )
-                            _request_batch_dialog_internal_rerun()
-                        assigned_ok = batch_assign(truck_num, w, batch)
-                        if not assigned_ok:
-                            _request_batch_dialog_internal_rerun()
-                        st.session_state.wearers[truck_num] = int(w)
-                        post_unload_status = _mark_truck_unloaded_after_batch(truck_num)
-                        _exit_batch_to_unload()
-                        if post_unload_status == "Spare":
-                            st.success(f"Truck {truck_num} assigned to Batch {batch} and returned to Spare.")
-                        else:
-                            st.success(f"Truck {truck_num} assigned to Batch {batch} and marked Unloaded.")
-                        st.rerun()
-            with c2:
-                if st.button("Cancel", width='stretch', key=f"batch_dialog_cancel_{truck_num}"):
-                    st.session_state["batch_capacity_warning_inline_payload"] = None
-                    _exit_batch_to_unload()
-                    st.rerun()
-            with c3:
-                if st.button("Unfinished", width='stretch', key=f"batch_dialog_unfinished_{truck_num}"):
-                    st.session_state["batch_capacity_warning_inline_payload"] = None
-                    _mark_truck_unfinished_after_batch(truck_num)
-                    _exit_batch_to_unload()
-                    st.success(f"Truck {truck_num} marked Unfinished.")
-                    st.rerun()
-            with c4:
-                if st.button(
-                    "Skip batching",
-                    width='stretch',
-                    key=f"batch_dialog_skip_{truck_num}",
-                    disabled=skip_batching_disabled_now,
-                ):
-                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    assigned_ok = batch_assign(truck_num, w, batch)
+                    if not assigned_ok:
+                        _request_batch_dialog_internal_rerun()
+                    st.session_state.wearers[truck_num] = int(w)
                     post_unload_status = _mark_truck_unloaded_after_batch(truck_num)
                     _exit_batch_to_unload()
                     if post_unload_status == "Spare":
-                        st.success(f"Truck {truck_num} returned to Spare.")
+                        st.success(f"Truck {truck_num} assigned to Batch {batch} and returned to Spare.")
+                    else:
+                        st.success(f"Truck {truck_num} assigned to Batch {batch} and marked Unloaded.")
                     st.rerun()
+            if st.button("Unfinished", width='stretch', key=f"batch_dialog_unfinished_{truck_num}"):
+                st.session_state["batch_capacity_warning_inline_payload"] = None
+                _mark_truck_unfinished_after_batch(truck_num)
+                _exit_batch_to_unload()
+                st.success(f"Truck {truck_num} marked Unfinished.")
+                st.rerun()
+            if st.button("Cancel", width='stretch', key=f"batch_dialog_cancel_{truck_num}"):
+                st.session_state["batch_capacity_warning_inline_payload"] = None
+                _exit_batch_to_unload()
+                st.rerun()
 
         _render_batch_assignment_dialog()
         st.stop()
@@ -33766,7 +33451,7 @@ elif st.session_state.active_screen == "BATCH":
         )
         _render_batch_capacity_warning_inline_if_needed(key_suffix=f"fallback_{int(t)}")
         st.markdown("<div id='batch-wearers'></div>", unsafe_allow_html=True)
-        components.html("<script>const el=document.getElementById('batch-wearers'); if(el) el.scrollIntoView({behavior:'smooth'});</script>", height=0)
+        st.html("<script>const el=document.getElementById('batch-wearers'); if(el) el.scrollIntoView({behavior:'smooth'});</script>", unsafe_allow_javascript=True)
         wearers_default = st.session_state.get("unload_inprog_wearers", 0)
         try:
             wearers_default = int(wearers_default or 0)
@@ -33785,7 +33470,7 @@ elif st.session_state.active_screen == "BATCH":
             key=wearers_input_key,
             on_change=_on_batch_fallback_wearers_change,
         )
-        components.html(
+        st.html(
             f"""
             <script>
             (function(){{
@@ -33862,8 +33547,7 @@ elif st.session_state.active_screen == "BATCH":
             }})();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
         wearers_text = str(wearers_raw).strip()
         typed_digits = "".join(ch for ch in wearers_text if ch.isdigit())
@@ -33875,22 +33559,6 @@ elif st.session_state.active_screen == "BATCH":
             w = int(typed_digits) if typed_digits else 0
             st.warning("Wearers must be a whole number.")
         st.session_state.unload_inprog_wearers = int(w)
-        skip_batching_disabled_now = bool(st.session_state.get("skip_batching_disabled"))
-        if st.button("Skip batching", width='stretch', disabled=skip_batching_disabled_now):
-            st.session_state["batch_capacity_warning_inline_payload"] = None
-            post_unload_status = _mark_truck_unloaded_after_batch(int(t))
-            st.session_state.unload_inprog_truck = None
-            st.session_state.unload_inprog_start_time = None
-            st.session_state.unload_inprog_wearers = 0
-            try:
-                st.session_state["unload_truck_select"] = None
-            except Exception:
-                pass
-            st.session_state.active_screen = "UNLOAD"
-            _mark_and_save()
-            if post_unload_status == "Spare":
-                st.success(f"Truck {int(t)} returned to Spare.")
-            st.rerun()
         preview_w = w if w > 0 else 0
         allowed = batch_allowed_ids(preview_w)
         if wearers_text != "" and w > 0:
@@ -33923,68 +33591,85 @@ elif st.session_state.active_screen == "BATCH":
                 format_func=lambda i: f"Batch {i} (current {st.session_state.batches[i]['total']}/{BATCH_CAP})",
                 key="batch_assign_select",
             )
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c1:
-                if st.button("Assign to batch", width='stretch'):
-                    if w <= 0:
-                        st.warning("Enter at least 1 wearer before assigning.")
-                    else:
-                        exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
-                        if exceeds_cap:
-                            _queue_batch_capacity_warning(
-                                batch_id=int(batch),
-                                current_total=int(current_total),
-                                incoming_wearers=int(w),
-                            )
-                            st.rerun()
-                        assigned_ok = batch_assign(t, w, batch)
-                        if not assigned_ok:
-                            st.rerun()
-                        st.session_state.wearers[int(t)] = int(w)
-                        post_unload_status = _mark_truck_unloaded_after_batch(int(t))
-                        st.session_state.unload_inprog_truck = None
-                        st.session_state.unload_inprog_start_time = None
-                        st.session_state.unload_inprog_wearers = 0
-                        _mark_and_save()
-                        if post_unload_status == "Spare":
-                            st.success(f"Truck {t} assigned to Batch {batch} and returned to Spare.")
-                        else:
-                            st.success(f"Truck {t} assigned to Batch {batch} and marked Unloaded.")
-                        # Clear any pick param/state so we don't reopen BATCH
-                        try:
-                            st.session_state["unload_truck_select"] = None
-                        except Exception:
-                            pass
-                        st.session_state["batch_capacity_warning_inline_payload"] = None
-                        st.session_state.active_screen = "UNLOAD"
+            st.markdown(
+                """<style>
+                [class*="st-key-batch_fallback_assign"] .stButton > button {
+                    background: #16a34a !important;
+                    border-color: #15803d !important;
+                    color: #fff !important;
+                }
+                [class*="st-key-batch_fallback_assign"] .stButton > button:hover {
+                    background: #15803d !important;
+                }
+                [class*="st-key-batch_fallback_cancel"] .stButton > button {
+                    background: #dc2626 !important;
+                    border-color: #b91c1c !important;
+                    color: #fff !important;
+                }
+                [class*="st-key-batch_fallback_cancel"] .stButton > button:hover {
+                    background: #b91c1c !important;
+                }
+                </style>""",
+                unsafe_allow_html=True,
+            )
+            if st.button("Assign to batch", width='stretch', key="batch_fallback_assign"):
+                if w <= 0:
+                    st.warning("Enter at least 1 wearer before assigning.")
+                else:
+                    exceeds_cap, current_total = _would_exceed_batch_cap(int(batch), int(w))
+                    if exceeds_cap:
+                        _queue_batch_capacity_warning(
+                            batch_id=int(batch),
+                            current_total=int(current_total),
+                            incoming_wearers=int(w),
+                        )
                         st.rerun()
-            with c2:
-                if st.button("Cancel", width='stretch'):
-                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    assigned_ok = batch_assign(t, w, batch)
+                    if not assigned_ok:
+                        st.rerun()
+                    st.session_state.wearers[int(t)] = int(w)
+                    post_unload_status = _mark_truck_unloaded_after_batch(int(t))
                     st.session_state.unload_inprog_truck = None
                     st.session_state.unload_inprog_start_time = None
                     st.session_state.unload_inprog_wearers = 0
-                    try:
-                        st.session_state["unload_truck_select"] = None
-                    except Exception:
-                        pass
-                    st.session_state.active_screen = "UNLOAD"
-                    st.rerun()
-            with c3:
-                if st.button("Unfinished", width='stretch'):
-                    st.session_state["batch_capacity_warning_inline_payload"] = None
-                    _mark_truck_unfinished_after_batch(int(t))
-                    st.session_state.unload_inprog_truck = None
-                    st.session_state.unload_inprog_start_time = None
-                    st.session_state.unload_inprog_wearers = 0
-                    try:
-                        st.session_state["unload_truck_select"] = None
-                    except Exception:
-                        pass
-                    st.session_state.active_screen = "UNLOAD"
                     _mark_and_save()
-                    st.success(f"Truck {int(t)} marked Unfinished.")
+                    if post_unload_status == "Spare":
+                        st.success(f"Truck {t} assigned to Batch {batch} and returned to Spare.")
+                    else:
+                        st.success(f"Truck {t} assigned to Batch {batch} and marked Unloaded.")
+                    # Clear any pick param/state so we don't reopen BATCH
+                    try:
+                        st.session_state["unload_truck_select"] = None
+                    except Exception:
+                        pass
+                    st.session_state["batch_capacity_warning_inline_payload"] = None
+                    st.session_state.active_screen = "UNLOAD"
                     st.rerun()
+            if st.button("Unfinished", width='stretch', key="batch_fallback_unfinished"):
+                st.session_state["batch_capacity_warning_inline_payload"] = None
+                _mark_truck_unfinished_after_batch(int(t))
+                st.session_state.unload_inprog_truck = None
+                st.session_state.unload_inprog_start_time = None
+                st.session_state.unload_inprog_wearers = 0
+                try:
+                    st.session_state["unload_truck_select"] = None
+                except Exception:
+                    pass
+                st.session_state.active_screen = "UNLOAD"
+                _mark_and_save()
+                st.success(f"Truck {int(t)} marked Unfinished.")
+                st.rerun()
+            if st.button("Cancel", width='stretch', key="batch_fallback_cancel"):
+                st.session_state["batch_capacity_warning_inline_payload"] = None
+                st.session_state.unload_inprog_truck = None
+                st.session_state.unload_inprog_start_time = None
+                st.session_state.unload_inprog_wearers = 0
+                try:
+                    st.session_state["unload_truck_select"] = None
+                except Exception:
+                    pass
+                st.session_state.active_screen = "UNLOAD"
+                st.rerun()
 
         st.divider()
         batch_cols = _truck_grid_columns(3)
@@ -34054,7 +33739,7 @@ elif st.session_state.active_screen == "LOAD":
         else:
             load_left_col, load_main_col, load_right_col = st.columns([0.95, 3.1, 0.95], gap="large")
 
-    # Trucks Left dialog — must be called at screen level (before columns) for modal to appear
+    # Trucks Left dialog ? must be called at screen level (before columns) for modal to appear
     _bd_dlg_key = st.session_state.get("load_bd_dialog")
     if _bd_dlg_key in ("dusts", "uniforms", "spares", "total"):
         _bd_dlg_comp = current_load_day_completion()
@@ -34102,7 +33787,7 @@ elif st.session_state.active_screen == "LOAD":
         _render_load_bd_dialog()
 
     with load_left_col:
-        components.html(
+        st.html(
             """
             <script>
             (function() {
@@ -34268,8 +33953,7 @@ elif st.session_state.active_screen == "LOAD":
             })();
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_javascript=True,
         )
         if "load_dust_clothes_dialog_open" not in st.session_state:
             st.session_state["load_dust_clothes_dialog_open"] = False
@@ -34281,7 +33965,7 @@ elif st.session_state.active_screen == "LOAD":
         dust_clothes_set_today = _dust_clothes_set_for_current_load_day()
 
         if not dust_clothes_set_today:
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -34310,11 +33994,10 @@ elif st.session_state.active_screen == "LOAD":
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
         else:
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -34326,8 +34009,7 @@ elif st.session_state.active_screen == "LOAD":
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
 
         if is_mobile_load:
@@ -34482,7 +34164,7 @@ elif st.session_state.active_screen == "LOAD":
             current_next_up_num = None
 
         if (current_next_up_num is None) and bool(true_available):
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -34511,11 +34193,10 @@ elif st.session_state.active_screen == "LOAD":
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
         else:
-            components.html(
+            st.html(
                 """
                 <script>
                 (function() {
@@ -34527,8 +34208,7 @@ elif st.session_state.active_screen == "LOAD":
                 })();
                 </script>
                 """,
-                height=0,
-                width=0,
+                unsafe_allow_javascript=True,
             )
 
         if current_next_up_num is not None:
@@ -34810,7 +34490,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
 
     # Collapse spacer elements that Streamlit injects before the heading on desktop ?
     # the mobile compress functions in render_page_heading skip desktop.
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -34855,8 +34535,7 @@ elif st.session_state.active_screen == "AUDIT_FLEET":
         })();
         </script>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_javascript=True,
     )
 
     is_mobile_audit = _is_mobile_client()

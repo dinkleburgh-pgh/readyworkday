@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## v1.7.5 build 113 - 2026-05-25
+
+1. Bumped build to **113**.
+2. **REFACTOR / MODULARIZATION**: Extracted PWA bootstrap, global CSS injection, blank-page watchdog, and in-progress visibility guard into `utils/ui_inject.py`. Extracted six pure, stateless auth utilities (`to_bool`, `is_bcrypt_hash`, `normalize_auth_cookie_key`, `normalize_auth_role`, `normalize_auth_users`, `normalize_auth_requests`) into `utils/auth_helpers.py`. Corresponding definitions removed from the main monolith; main file now imports and aliases them from the new modules.
+3. **PERF / CACHING**: Added `@st.cache_data(ttl=300)` to the outer `load_quick_amounts()` function to cache the JSON fallback path. Cache is cleared via `load_quick_amounts.clear()` before re-reading in the Quick Amounts reset handler.
+
+1. Bumped build to **112**.
+2. **FEATURE / NOTIFICATION CENTER**: Added a persistent bell button (fixed, bottom-right) with a badge showing unread count and a slide-in notification panel. Displays recent `shop_notice_log` entries (today + yesterday) grouped by All / Unread / Shop / Return tabs. Supports mark-all-read, clear-all, per-item dismiss, and persist-open state via localStorage. Uses a UTF-8-safe base64 loader injected via `st.html()` to bypass DOMPurify's SAFE_FOR_XML script-stripping.
+
+## v1.7.5 build 111 - 2026-05-25
+
+1. Bumped build to **111**.
+2. **PERF / DB CACHING**: Added nine `@st.cache_data` wrapper functions for all DB read paths (`_cached_audit_entries_pg` ttl=30s, `_cached_batch_history_pg` ttl=30s, `_cached_duration_history_pg` ttl=30s, `_cached_auth_users_pg` ttl=30s, `_cached_fleet_pg` ttl=60s, `_cached_truck_types_pg` ttl=60s, `_cached_off_schedule_defaults_pg` ttl=60s, `_cached_censor_words_pg` ttl=300s, `_cached_quick_amounts_pg` ttl=300s). All corresponding write/append/delete functions call `.clear()` on the matching cache to keep reads fresh immediately after mutations. `_load_audit_history` (called 20+ times/rerun) is the primary beneficiary.
+
+## v1.7.5 build 110 - 2026-05-25
+
+1. Bumped build to **110**.
+2. **INFRA / DB WIRING**: All JSON I/O functions (`load_state`, `save_state`, `load_fleet_file`, `save_fleet_file`, `_load_auth_users`, `_save_auth_users`, `load_duration_history`, `append_load_duration`, `_load_batch_history`, `_append_batch_history_entry`, `_load_audit_history`, `_append_audit_history_entry`, `_load_communications_messages`, `_append_communications_message`, `_delete_communications_message`, `load_off_schedule_defaults`, `save_off_schedule_defaults`, `_write_auth_session`, `_restore_from_session_store`, `archive_current_state`, `_load_archived_state_for_run_date`, `_available_state_history_run_dates`, and related helpers) now use a DB-first pattern via the `db/` package with transparent JSON fallback when the pool is not live. Added `_pg_is_live()` helper. `_load_auth_requests` / `_save_auth_requests` intentionally left JSON-only (schema gap).
+3. **FIX**: Replaced three `st.iframe(...)` calls (sidebar clock, load timer, break timer) with `components.html(...)` — `st.iframe` does not exist in Streamlit 1.x; `components.html` is the correct API.
+
+## v1.7.5 build 109 - 2026-05-25
+
+1. Bumped build to **109**.
+2. **FEATURE / MANAGEMENT**: Added a **Database** expander under Management → Advanced and Reset. Shows the PostgreSQL connection config (host, port, db, user, SSL mode, pool size) and provides a **Test Connection** button that verifies live connectivity, reporting the server version, database name, connected user, and public-schema table count.
+
 ## v1.7.5 build 105 - 2026-05-21
 
 1. Bumped build to **105**.

@@ -75,5 +75,27 @@
     "batch_id": 1,
     "wearers": 66,
     "action": "assign"
+  },
+  {
+    "entry_id": "579622fb51b71128",
+    "ts": "2026-05-25T04:14:28.445329",
+    "run_date": "2026-05-24",
+    "load_day_num": 1,
+    "truck": 55,
+    "route": 55,
+    "batch_id": 1,
+    "wearers": 1,
+    "action": "assign"
+  },
+  {
+    "entry_id": "46338af38d17a257",
+    "ts": "2026-05-25T04:14:55.537825",
+    "run_date": "2026-05-24",
+    "load_day_num": 1,
+    "truck": 56,
+    "route": 56,
+    "batch_id": 1,
+    "wearers": 1,
+    "action": "assign"
   }
 ]

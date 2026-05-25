@@ -25,6 +25,14 @@ services:
       TRUCKAPP_AUTH_REQUESTS_FILE: /app/data/auth_user_requests.json
       TRUCKAPP_COMMUNICATIONS_FILE: /app/data/communications_chat.json
       TRUCKAPP_AUDIT_HISTORY_FILE: /app/data/audit_requests.json
+      TRUCKAPP_PG_HOST: ${TRUCKAPP_PG_HOST:-}
+      TRUCKAPP_PG_PORT: ${TRUCKAPP_PG_PORT:-5432}
+      TRUCKAPP_PG_DBNAME: ${TRUCKAPP_PG_DBNAME:-}
+      TRUCKAPP_PG_USER: ${TRUCKAPP_PG_USER:-}
+      TRUCKAPP_PG_PASSWORD: ${TRUCKAPP_PG_PASSWORD:-}
+      TRUCKAPP_PG_SSLMODE: ${TRUCKAPP_PG_SSLMODE:-prefer}
+      TRUCKAPP_PG_MINCONN: ${TRUCKAPP_PG_MINCONN:-2}
+      TRUCKAPP_PG_MAXCONN: ${TRUCKAPP_PG_MAXCONN:-10}
     volumes:
       - ./:/app
       - ${TRUCKAPP_DATA_DIR:-./data}:/app/data

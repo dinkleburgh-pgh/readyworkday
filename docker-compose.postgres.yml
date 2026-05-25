@@ -1,0 +1,70 @@
+# docker-compose.postgres.yml
+#
+# Add a PostgreSQL service to TruckApp.
+# Merge with the base docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+#
+# Or set COMPOSE_FILE in your .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.postgres.yml
+#
+# Required .env values (add to your existing .env file):
+#   POSTGRES_USER=truckapp
+#   POSTGRES_PASSWORD=changeme_strong_password
+#   POSTGRES_DB=truckapp
+#   TRUCKAPP_PG_HOST=postgres          # service name below
+#   TRUCKAPP_PG_PORT=5432
+#   TRUCKAPP_PG_DBNAME=truckapp
+#   TRUCKAPP_PG_USER=truckapp
+#   TRUCKAPP_PG_PASSWORD=changeme_strong_password
+#   TRUCKAPP_PG_SSLMODE=disable        # inside Docker network; set 'require' for external
+#   TRUCKAPP_DATA_DIR=./data           # filesystem mount for audit photos
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: truckapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-truckapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-truckapp}
+      # Write-ahead log tuning for reliability on NAS (sync on commit).
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-apply schema on first container start:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    ports:
+      # Bind to 127.0.0.1 only; do not expose to the WAN.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-truckapp} -d ${POSTGRES_DB:-truckapp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  truckapp:
+    # Inherit everything from base compose; only add PG env vars.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TRUCKAPP_PG_HOST: ${TRUCKAPP_PG_HOST:-postgres}
+      TRUCKAPP_PG_PORT: ${TRUCKAPP_PG_PORT:-5432}
+      TRUCKAPP_PG_DBNAME: ${TRUCKAPP_PG_DBNAME:-truckapp}
+      TRUCKAPP_PG_USER: ${TRUCKAPP_PG_USER:-truckapp}
+      TRUCKAPP_PG_PASSWORD: ${TRUCKAPP_PG_PASSWORD}
+      TRUCKAPP_PG_SSLMODE: ${TRUCKAPP_PG_SSLMODE:-disable}
+      TRUCKAPP_PG_MINCONN: ${TRUCKAPP_PG_MINCONN:-2}
+      TRUCKAPP_PG_MAXCONN: ${TRUCKAPP_PG_MAXCONN:-10}
+
+volumes:
+  postgres_data:
+    driver: local
+    # On TrueNAS SCALE: point this at a dataset on your pool, e.g.:
+    # driver_opts:
+    #   type: none
+    #   device: /mnt/tank/appdata/truckapp-postgres
+    #   o: bind

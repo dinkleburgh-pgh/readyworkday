@@ -30,15 +30,15 @@
       "role": "atl",
       "enabled": true
     },
-    "krystal": {
-      "name": "Krystal",
-      "password": "$2b$12$k.n8W9QLTZYxXL8LeAHFD.lIfmu4rchuGuczu5HGpZFxySs5uZMae",
-      "role": "fleet",
-      "enabled": true
-    },
     "ryan": {
       "name": "Ryan",
       "password": "$2b$12$n4ao/7UiYv633dK8BahlZ.natS9erC8SpV3Cyq92YFAbRw1PJk66a",
+      "role": "fleet",
+      "enabled": true
+    },
+    "krystl": {
+      "name": "krystl",
+      "password": "$2b$12$k.n8W9QLTZYxXL8LeAHFD.lIfmu4rchuGuczu5HGpZFxySs5uZMae",
       "role": "fleet",
       "enabled": true
     }
